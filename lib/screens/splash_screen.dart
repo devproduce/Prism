@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:prism/screens/onboarding_screen.dart';
+import 'package:prism/screens/home_screen.dart';
 import 'package:prism/utils/theme.dart';
+import 'package:prism/providers/auth_provider.dart';
+import 'package:provider/provider.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -29,19 +32,19 @@ class _SplashScreenState extends State<SplashScreen>
     // Logo animation controller
     _logoController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 600),
     );
 
     // Text animation controller
     _textController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 800),
+      duration: const Duration(milliseconds: 400),
     );
 
     // Tagline animation controller
     _taglineController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 400),
     );
 
     // Logo animations
@@ -81,12 +84,23 @@ class _SplashScreenState extends State<SplashScreen>
     await _textController.forward();
     await _taglineController.forward();
 
-    // Navigate to onboarding screen after animations complete
-    Timer(const Duration(milliseconds: 800), () {
+    // Check login status and navigate accordingly
+    Timer(const Duration(milliseconds: 300), () async {
       if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const OnboardingScreen()),
-        );
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        await authProvider.initializeAuth();
+
+        if (mounted) {
+          if (authProvider.isAuthenticated) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (context) => const HomeScreen()),
+            );
+          } else {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (context) => const OnboardingScreen()),
+            );
+          }
+        }
       }
     });
   }

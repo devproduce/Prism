@@ -37,11 +37,16 @@ class _LoginScreenState extends State<LoginScreen> {
     );
 
     if (success && mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (context) => const HomeScreen(title: 'Home'),
-        ),
-      );
+      // Check if contacts need to be synced
+      if (!authProvider.contactsSynced) {
+        await _showContactSyncDialog(authProvider);
+      }
+
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+        );
+      }
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -49,6 +54,69 @@ class _LoginScreenState extends State<LoginScreen> {
           backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+
+  Future<void> _showContactSyncDialog(AuthProvider authProvider) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.darkDotInactive,
+        title: Text(
+          'Sync Contacts',
+          style: TextStyle(color: AppTheme.primaryText(context)),
+        ),
+        content: Text(
+          'Prism would like to access your contacts to help you find and connect with friends who are already using the app.',
+          style: TextStyle(color: AppTheme.secondaryText(context)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              'Not Now',
+              style: TextStyle(color: AppTheme.tertiaryText(context)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Allow',
+              style: TextStyle(color: Color(0xFF4A90E2)),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && mounted) {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: CircularProgressIndicator(color: AppTheme.primaryAccent),
+        ),
+      );
+
+      // Sync contacts
+      final success = await authProvider.syncContacts();
+
+      if (mounted) {
+        Navigator.pop(context); // Close loading dialog
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              success
+                  ? 'Contacts synced successfully!'
+                  : 'Failed to sync contacts. You can try again later in settings.',
+            ),
+            backgroundColor: success ? Colors.green : Colors.orange,
+          ),
+        );
+      }
     }
   }
 

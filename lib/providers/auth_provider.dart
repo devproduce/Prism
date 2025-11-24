@@ -2,20 +2,26 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:prism/api/api_client.dart';
 import 'package:prism/models/user_model.dart';
+import 'package:prism/services/database_service.dart';
+import 'package:prism/services/contact_service.dart';
 
 class AuthProvider with ChangeNotifier {
   final ApiClient _apiClient = ApiClient();
+  final DatabaseService _databaseService = DatabaseService.instance;
+  final ContactService _contactService = ContactService();
 
   UserModel? _currentUser;
   bool _isLoading = false;
   String? _error;
   bool _isAuthenticated = false;
+  bool _contactsSynced = false;
 
   // Getters
   UserModel? get currentUser => _currentUser;
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get isAuthenticated => _isAuthenticated;
+  bool get contactsSynced => _contactsSynced;
 
   // Set loading state
   void _setLoading(bool value) {
@@ -33,6 +39,24 @@ class AuthProvider with ChangeNotifier {
   void clearError() {
     _error = null;
     notifyListeners();
+  }
+
+  /// Initialize authentication state from database
+  Future<void> initializeAuth() async {
+    try {
+      final isLoggedIn = await _databaseService.isUserLoggedIn();
+      if (isLoggedIn) {
+        final user = await _databaseService.getUserSession();
+        if (user != null) {
+          _currentUser = user;
+          _isAuthenticated = true;
+          _contactsSynced = await _databaseService.hasContactsSynced();
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to initialize auth: $e');
+    }
   }
 
   /// Register a new user
@@ -59,6 +83,10 @@ class AuthProvider with ChangeNotifier {
 
       _currentUser = response.user;
       _isAuthenticated = true;
+
+      // Save user session to database
+      await _databaseService.saveUserSession(response.user);
+
       _setLoading(false);
 
       return true;
@@ -83,6 +111,13 @@ class AuthProvider with ChangeNotifier {
 
       _currentUser = response.user;
       _isAuthenticated = true;
+
+      // Save user session to database
+      await _databaseService.saveUserSession(response.user);
+
+      // Check if contacts have been synced
+      _contactsSynced = await _databaseService.hasContactsSynced();
+
       _setLoading(false);
 
       return true;
@@ -97,11 +132,40 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+  /// Sync contacts to backend
+  Future<bool> syncContacts() async {
+    if (_currentUser == null) {
+      _setError('No user logged in');
+      return false;
+    }
+
+    try {
+      final success = await _contactService.requestPermissionAndSyncContacts(
+        _currentUser!.userId,
+      );
+
+      if (success) {
+        await _databaseService.markContactsSynced();
+        _contactsSynced = true;
+        notifyListeners();
+      }
+
+      return success;
+    } catch (e) {
+      debugPrint('Error syncing contacts: $e');
+      return false;
+    }
+  }
+
   /// Logout user
   Future<void> logout() async {
     _currentUser = null;
     _isAuthenticated = false;
     _apiClient.clearAuthToken();
+
+    // Clear user session from database
+    await _databaseService.clearUserSession();
+
     notifyListeners();
   }
 
@@ -138,6 +202,10 @@ class AuthProvider with ChangeNotifier {
       );
 
       _currentUser = updatedUser;
+
+      // Update user session in database
+      await _databaseService.updateUserSession(updatedUser);
+
       _setLoading(false);
 
       return true;

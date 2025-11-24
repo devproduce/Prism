@@ -71,6 +71,15 @@ class UserModel {
     };
   }
 
+  // Helper getter for profile picture URL
+  String? get profilePictureUrl {
+    if (profilePicId == null) return null;
+    // If it's already a full URL, return it
+    if (profilePicId!.startsWith('http')) return profilePicId;
+    // Otherwise, construct the URL from base URL
+    return 'http://10.0.2.2:8001/images/$profilePicId';
+  }
+
   UserModel copyWith({
     String? userId,
     String? username,

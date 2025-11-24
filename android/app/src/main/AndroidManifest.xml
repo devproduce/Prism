@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Contact permission for syncing user contacts -->
+    <uses-permission android:name="android.permission.READ_CONTACTS"/>
+    
     <application
         android:label="prism"
         android:name="${applicationName}"

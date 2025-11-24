@@ -43,6 +43,19 @@ dependencies:
   
   # Image picker for profile photos
   image_picker: ^1.0.7
+  
+  # SQLite for local database
+  sqflite: ^2.3.0
+  path: ^1.9.0
+  
+  # Cached network images
+  cached_network_image: ^3.3.1
+  
+  # Permission handling
+  permission_handler: ^11.3.0
+  
+  # Contacts access
+  flutter_contacts: ^1.1.7
 
 dev_dependencies:
   flutter_test:

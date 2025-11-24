@@ -151,9 +151,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       }
 
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (context) => const HomeScreen(title: 'Home'),
-        ),
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
       );
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
