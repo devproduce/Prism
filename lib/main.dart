@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import 'package:provider/provider.dart';
 import 'package:prism/screens/onboarding_screen.dart';
 import 'package:prism/screens/splash_screen.dart';
 import 'package:prism/screens/settings_screen.dart';
+import 'package:prism/screens/edit_profile_screen.dart';
+import 'package:prism/screens/blocked_users_screen.dart';
+import 'package:prism/screens/keep_users_screen.dart';
+import 'package:prism/screens/help_support_screen.dart';
 import 'package:prism/theme/theme_data.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/gallery_provider.dart';
@@ -56,6 +61,10 @@ class MyApp extends StatelessWidget {
             routes: {
               '/settings': (context) => const SettingsScreen(),
               '/onboarding': (context) => const OnboardingScreen(),
+              '/profile': (context) => const EditProfileScreen(),
+              '/blocked_users': (context) => const BlockedUsersScreen(),
+              '/keep_users': (context) => const KeepUsersScreen(),
+              '/help_support': (context) => const HelpSupportScreen(),
             },
           );
         },

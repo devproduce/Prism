@@ -15,185 +15,221 @@ class SettingsScreen extends StatelessWidget {
     final authProvider = Provider.of<AuthProvider>(context);
     final themeProvider = Provider.of<ThemeProvider>(context);
     final isDark = themeProvider.isDarkMode;
-    
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: GradientBackground(
         child: SafeArea(
-            child: CustomScrollView(
-              slivers: [
-                SliverAppBar(
-                  title: Text('Settings', style: PrismTextStyles.h2),
-                  backgroundColor: Colors.transparent,
-                  elevation: 0,
-                  pinned: true,
-                  leading: IconButton(
-                    icon: Icon(Icons.arrow_back_rounded, color: isDark ? PrismColors.primaryBlue : PrismColors.deepBlue),
-                    onPressed: () => Navigator.pop(context),
+          child: CustomScrollView(
+            slivers: [
+              SliverAppBar(
+                title: Text('Settings', style: PrismTextStyles.h2),
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                pinned: true,
+                leading: IconButton(
+                  icon: Icon(
+                    Icons.arrow_back_rounded,
+                    color: isDark
+                        ? PrismColors.primaryBlue
+                        : PrismColors.deepBlue,
                   ),
+                  onPressed: () => Navigator.pop(context),
                 ),
-                SliverPadding(
-                  padding: const EdgeInsets.all(16),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate([
-                      // Appearance Section
-                      GlassCard(
-                        padding: const EdgeInsets.all(16),
-                        color: isDark ? PrismColors.glassDark : PrismColors.glassLight,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Appearance', style: PrismTextStyles.h3),
-                            const SizedBox(height: 16),
-                            // Theme Toggle
-                            Row(
-                              children: [
-                                Icon(
-                                  isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
-                                  color: isDark ? PrismColors.primaryBlue : PrismColors.deepBlue,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text('Dark Mode', style: PrismTextStyles.bodyLarge),
-                                      Text(
-                                        isDark ? 'Enabled' : 'Disabled',
-                                        style: PrismTextStyles.bodySmall.copyWith(
-                                          color: isDark ? PrismColors.textSecondaryDark.withOpacity(0.7) : PrismColors.textSecondaryLight.withOpacity(0.7),
-                                        ),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.all(16),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate([
+                    // Appearance Section
+                    GlassCard(
+                      padding: const EdgeInsets.all(16),
+                      color: isDark
+                          ? PrismColors.glassDark
+                          : PrismColors.glassLight,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Appearance', style: PrismTextStyles.h3),
+                          const SizedBox(height: 16),
+                          // Theme Toggle
+                          Row(
+                            children: [
+                              Icon(
+                                isDark
+                                    ? Icons.dark_mode_rounded
+                                    : Icons.light_mode_rounded,
+                                color: isDark
+                                    ? PrismColors.primaryBlue
+                                    : PrismColors.deepBlue,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Dark Mode',
+                                      style: PrismTextStyles.bodyLarge,
+                                    ),
+                                    Text(
+                                      isDark ? 'Enabled' : 'Disabled',
+                                      style: PrismTextStyles.bodySmall.copyWith(
+                                        color: isDark
+                                            ? PrismColors.textSecondaryDark
+                                                  .withOpacity(0.7)
+                                            : PrismColors.textSecondaryLight
+                                                  .withOpacity(0.7),
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
-                                Switch(
-                                  value: isDark,
-                                  onChanged: (_) => themeProvider.toggleTheme(),
-                                  activeColor: PrismColors.primaryBlue,
-                                  activeTrackColor: PrismColors.accentBlue.withOpacity(0.5),
-                                  inactiveThumbColor: PrismColors.deepBlue,
-                                  inactiveTrackColor: PrismColors.lightElevated,
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      
-                      // Account Section
-                      GlassCard(
-                        padding: const EdgeInsets.all(16),
-                        color: isDark ? PrismColors.glassDark : PrismColors.glassLight,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Account', style: PrismTextStyles.h3),
-                            const SizedBox(height: 16),
-                            _buildSettingsTile(
-                              context,
-                              icon: Icons.person_outline_rounded,
-                              title: 'Profile',
-                              subtitle: 'Manage your profile information',
-                              onTap: () {},
-                              isDark: isDark,
-                            ),
-                            const Divider(height: 32),
-                            _buildSettingsTile(
-                              context,
-                              icon: Icons.lock_outline_rounded,
-                              title: 'Privacy',
-                              subtitle: 'Control your privacy settings',
-                              onTap: () {},
-                              isDark: isDark,
-                            ),
-                            const Divider(height: 32),
-                            _buildSettingsTile(
-                              context,
-                              icon: Icons.notifications_outlined,
-                              title: 'Notifications',
-                              subtitle: 'Manage notification preferences',
-                              onTap: () {},
-                              isDark: isDark,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      
-                      // App Info Section
-                      GlassCard(
-                        padding: const EdgeInsets.all(16),
-                        color: isDark ? PrismColors.glassDark : PrismColors.glassLight,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('About', style: PrismTextStyles.h3),
-                            const SizedBox(height: 16),
-                            _buildSettingsTile(
-                              context,
-                              icon: Icons.info_outline_rounded,
-                              title: 'App Version',
-                              subtitle: '1.0.0',
-                              onTap: () {},
-                              isDark: isDark,
-                              showChevron: false,
-                            ),
-                            const Divider(height: 32),
-                            _buildSettingsTile(
-                              context,
-                              icon: Icons.help_outline_rounded,
-                              title: 'Help & Support',
-                              subtitle: 'Get help or contact support',
-                              onTap: () {},
-                              isDark: isDark,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      
-                      // Logout Button
-                      Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              PrismColors.errorRed.withOpacity(0.7),
-                              PrismColors.errorRed,
+                              ),
+                              Switch(
+                                value: isDark,
+                                onChanged: (_) => themeProvider.toggleTheme(),
+                                activeColor: PrismColors.primaryBlue,
+                                activeTrackColor: PrismColors.accentBlue
+                                    .withOpacity(0.5),
+                                inactiveThumbColor: PrismColors.deepBlue,
+                                inactiveTrackColor: PrismColors.lightElevated,
+                              ),
                             ],
                           ),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: () async {
-                              await authProvider.logout(context);
-                              if (context.mounted) {
-                                Navigator.of(context).pushNamedAndRemoveUntil('/onboarding', (route) => false);
-                              }
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Account Section
+                    GlassCard(
+                      padding: const EdgeInsets.all(16),
+                      color: isDark
+                          ? PrismColors.glassDark
+                          : PrismColors.glassLight,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Account', style: PrismTextStyles.h3),
+                          const SizedBox(height: 16),
+                          _buildSettingsTile(
+                            context,
+                            icon: Icons.person_outline_rounded,
+                            title: 'Profile',
+                            subtitle: 'Manage your profile information',
+                            onTap: () {
+                              Navigator.of(context).pushNamed('/profile');
                             },
-                            borderRadius: BorderRadius.circular(16),
-                            child: Container(
-                              height: 50,
-                              alignment: Alignment.center,
-                              child: Text(
-                                'Logout',
-                                style: PrismTextStyles.button.copyWith(color: Colors.white),
+                            isDark: isDark,
+                          ),
+                          const Divider(height: 32),
+                          _buildSettingsTile(
+                            context,
+                            icon: Icons.block_rounded,
+                            title: 'Blocked Users',
+                            subtitle: 'Manage blocked accounts',
+                            onTap: () {
+                              Navigator.pushNamed(context, '/blocked_users');
+                            },
+                            isDark: isDark,
+                          ),
+                          const Divider(height: 32),
+                          _buildSettingsTile(
+                            context,
+                            icon: Icons.visibility_off_rounded,
+                            title: 'Keep Users',
+                            subtitle: 'Manage kept users',
+                            onTap: () {
+                              Navigator.pushNamed(context, '/keep_users');
+                            },
+                            isDark: isDark,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // App Info Section
+                    GlassCard(
+                      padding: const EdgeInsets.all(16),
+                      color: isDark
+                          ? PrismColors.glassDark
+                          : PrismColors.glassLight,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('About', style: PrismTextStyles.h3),
+                          const SizedBox(height: 16),
+                          _buildSettingsTile(
+                            context,
+                            icon: Icons.info_outline_rounded,
+                            title: 'App Version',
+                            subtitle: '1.0.0',
+                            onTap: () {},
+                            isDark: isDark,
+                            showChevron: false,
+                          ),
+                          const Divider(height: 32),
+                          _buildSettingsTile(
+                            context,
+                            icon: Icons.help_outline_rounded,
+                            title: 'Help & Support',
+                            subtitle: 'Get help or contact support',
+                            onTap: () {
+                              Navigator.pushNamed(context, '/help_support');
+                            },
+                            isDark: isDark,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // Logout Button
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            PrismColors.errorRed.withOpacity(0.7),
+                            PrismColors.errorRed,
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () async {
+                            await authProvider.logout(context);
+                            if (context.mounted) {
+                              Navigator.of(context).pushNamedAndRemoveUntil(
+                                '/onboarding',
+                                (route) => false,
+                              );
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            height: 50,
+                            alignment: Alignment.center,
+                            child: Text(
+                              'Logout',
+                              style: PrismTextStyles.button.copyWith(
+                                color: Colors.white,
                               ),
                             ),
                           ),
                         ),
                       ),
-                      const SizedBox(height: 100),
-                    ]),
-                  ),
+                    ),
+                    const SizedBox(height: 100),
+                  ]),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
+      ),
     );
   }
 
@@ -236,7 +272,9 @@ class SettingsScreen extends StatelessWidget {
                   Text(
                     subtitle,
                     style: PrismTextStyles.bodySmall.copyWith(
-                      color: isDark ? PrismColors.textSecondaryDark.withOpacity(0.7) : PrismColors.textSecondaryLight.withOpacity(0.7),
+                      color: isDark
+                          ? PrismColors.textSecondaryDark.withOpacity(0.7)
+                          : PrismColors.textSecondaryLight.withOpacity(0.7),
                     ),
                   ),
                 ],
@@ -245,7 +283,9 @@ class SettingsScreen extends StatelessWidget {
             if (showChevron)
               Icon(
                 Icons.chevron_right_rounded,
-                color: isDark ? PrismColors.textSecondaryDark.withOpacity(0.5) : PrismColors.textSecondaryLight.withOpacity(0.5),
+                color: isDark
+                    ? PrismColors.textSecondaryDark.withOpacity(0.5)
+                    : PrismColors.textSecondaryLight.withOpacity(0.5),
               ),
           ],
         ),
