@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/profile_provider.dart';
 import 'package:prism/utils/theme.dart';
+import 'package:prism/widgets/gradient_scaffold.dart';
+import 'package:prism/widgets/glass_widgets.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
@@ -87,9 +89,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     if (userId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('User not found'),
-          backgroundColor: Colors.red,
+        SnackBar(
+          content: const Text('User not found'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
@@ -100,12 +103,32 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       context: context,
       barrierDismissible: false,
       builder: (context) => Center(
-        child: CircularProgressIndicator(color: AppTheme.primaryAccent),
+        child: CircularProgressIndicator(
+          color: Theme.of(context).colorScheme.primary,
+        ),
       ),
     );
 
     try {
-      final success = await profileProvider.updateProfile(
+      bool overallSuccess = true;
+      String? errorMessage;
+
+      // First, upload profile picture if one was selected
+      if (_selectedImage != null) {
+        final imageSuccess = await profileProvider.uploadProfilePicture(
+          userId: userId,
+          profileImage: _selectedImage!,
+        );
+
+        if (!imageSuccess) {
+          overallSuccess = false;
+          errorMessage =
+              profileProvider.error ?? 'Failed to upload profile picture';
+        }
+      }
+
+      // Then update profile information
+      final profileSuccess = await profileProvider.updateProfile(
         userId: userId,
         username: _usernameController.text.trim(),
         firstName: _firstNameController.text.trim(),
@@ -126,10 +149,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             : _countryCodeController.text.trim(),
       );
 
+      if (!profileSuccess) {
+        overallSuccess = false;
+        errorMessage = profileProvider.error ?? 'Failed to update profile';
+      }
+
       if (mounted) {
         Navigator.pop(context); // Close loading dialog
 
-        if (success) {
+        if (overallSuccess) {
           // Update auth provider as well
           await authProvider.refreshUser();
 
@@ -137,16 +165,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             const SnackBar(
               content: Text('Profile updated successfully!'),
               backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
             ),
           );
           Navigator.pop(context); // Go back to profile screen
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                profileProvider.error ?? 'Failed to update profile',
-              ),
-              backgroundColor: Colors.red,
+              content: Text(errorMessage ?? 'Failed to update profile'),
+              backgroundColor: Theme.of(context).colorScheme.error,
+              behavior: SnackBarBehavior.floating,
             ),
           );
         }
@@ -157,7 +185,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error: ${e.toString()}'),
-            backgroundColor: Colors.red,
+            backgroundColor: Theme.of(context).colorScheme.error,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -166,319 +195,244 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
+    final theme = Theme.of(context);
     final profileProvider = Provider.of<ProfileProvider>(context);
     final authProvider = Provider.of<AuthProvider>(context);
     final user = profileProvider.currentUser ?? authProvider.currentUser;
+    final isDark = theme.brightness == Brightness.dark;
 
-    return Scaffold(
-      backgroundColor: AppTheme.primaryBackground(context),
+    return GradientScaffold(
       appBar: AppBar(
-        backgroundColor: AppTheme.primaryBackground(context),
-        elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: AppTheme.primaryText(context)),
-          onPressed: () => Navigator.pop(context),
-        ),
         title: Text(
           'Edit Profile',
-          style: AppTheme.headlineStyle(
-            context,
-          ).copyWith(fontSize: size.width * 0.045),
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 22,
+            color: theme.colorScheme.onSurface,
+          ),
         ),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
         actions: [
           TextButton(
             onPressed: _saveProfile,
             child: Text(
               'Save',
               style: TextStyle(
-                color: AppTheme.primaryAccent,
-                fontSize: size.width * 0.04,
+                color: theme.colorScheme.primary,
                 fontWeight: FontWeight.w600,
               ),
             ),
           ),
         ],
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: AppTheme.horizontalPadding(context),
-              vertical: size.height * 0.02,
-            ),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // Profile Picture Section
-                  GestureDetector(
-                    onTap: _pickImage,
-                    child: Stack(
-                      children: [
-                        Container(
-                          width: size.width * 0.3,
-                          height: size.width * 0.3,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: AppTheme.primaryAccent,
-                              width: 2,
-                            ),
-                            color: AppTheme.darkDotInactive,
-                          ),
-                          child: _selectedImage != null
-                              ? ClipOval(
-                                  child: Image.file(
-                                    _selectedImage!,
-                                    fit: BoxFit.cover,
-                                  ),
-                                )
-                              : user?.profilePictureUrl != null
-                              ? ClipOval(
-                                  child: CachedNetworkImage(
-                                    imageUrl: user!.profilePictureUrl!,
-                                    fit: BoxFit.cover,
-                                    placeholder: (context, url) => Center(
-                                      child: CircularProgressIndicator(
-                                        color: AppTheme.primaryAccent,
-                                        strokeWidth: 2,
-                                      ),
-                                    ),
-                                    errorWidget: (context, url, error) => Icon(
-                                      Icons.person,
-                                      size: size.width * 0.15,
-                                      color: AppTheme.tertiaryText(context),
-                                    ),
-                                  ),
-                                )
-                              : Icon(
-                                  Icons.person,
-                                  size: size.width * 0.15,
-                                  color: AppTheme.tertiaryText(context),
-                                ),
-                        ),
-                        Positioned(
-                          right: 0,
-                          bottom: 0,
-                          child: Container(
-                            padding: EdgeInsets.all(size.width * 0.02),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Profile Picture Section
+              GlassCard(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    GestureDetector(
+                      onTap: _pickImage,
+                      child: Stack(
+                        children: [
+                          Container(
+                            width: 120,
+                            height: 120,
                             decoration: BoxDecoration(
-                              color: AppTheme.primaryAccent,
                               shape: BoxShape.circle,
+                              border: Border.all(
+                                color: theme.colorScheme.primary,
+                                width: 2,
+                              ),
                             ),
-                            child: Icon(
-                              Icons.camera_alt,
-                              color: Colors.white,
-                              size: size.width * 0.05,
+                            child: ClipOval(
+                              child: _selectedImage != null
+                                  ? Image.file(
+                                      _selectedImage!,
+                                      fit: BoxFit.cover,
+                                    )
+                                  : user?.profilePictureUrl != null
+                                  ? CachedNetworkImage(
+                                      imageUrl: user!.profilePictureUrl!,
+                                      fit: BoxFit.cover,
+                                      placeholder: (context, url) => Center(
+                                        child: CircularProgressIndicator(
+                                          color: theme.colorScheme.primary,
+                                        ),
+                                      ),
+                                      errorWidget: (context, url, error) =>
+                                          Icon(
+                                            Icons.person,
+                                            size: 60,
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
+                                    )
+                                  : Icon(
+                                      Icons.person,
+                                      size: 60,
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                            ),
+                          ),
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primary,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.camera_alt,
+                                color: theme.colorScheme.onPrimary,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 32),
+
+                    // Username Field
+                    TextFormField(
+                      controller: _usernameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Username',
+                        hintText: 'Enter your username',
+                        prefixIcon: Icon(Icons.alternate_email),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Username is required';
+                        }
+                        return null;
+                      },
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Name Fields
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _firstNameController,
+                            decoration: const InputDecoration(
+                              labelText: 'First Name',
+                              hintText: 'First name',
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Required';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _lastNameController,
+                            decoration: const InputDecoration(
+                              labelText: 'Last Name',
+                              hintText: 'Last name',
                             ),
                           ),
                         ),
                       ],
                     ),
-                  ),
 
-                  SizedBox(height: size.height * 0.03),
+                    const SizedBox(height: 16),
 
-                  // Username Field
-                  _buildTextField(
-                    controller: _usernameController,
-                    label: 'Username',
-                    hint: 'Enter your username',
-                    size: size,
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Username is required';
-                      }
-                      return null;
-                    },
-                  ),
-
-                  SizedBox(height: size.height * 0.02),
-
-                  // First Name Field
-                  _buildTextField(
-                    controller: _firstNameController,
-                    label: 'First Name',
-                    hint: 'Enter your first name',
-                    size: size,
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'First name is required';
-                      }
-                      return null;
-                    },
-                  ),
-
-                  SizedBox(height: size.height * 0.02),
-
-                  // Last Name Field
-                  _buildTextField(
-                    controller: _lastNameController,
-                    label: 'Last Name',
-                    hint: 'Enter your last name',
-                    size: size,
-                  ),
-
-                  SizedBox(height: size.height * 0.02),
-
-                  // Pronouns Field
-                  _buildTextField(
-                    controller: _pronounsController,
-                    label: 'Pronouns',
-                    hint: 'e.g., she/her, he/him, they/them',
-                    size: size,
-                  ),
-
-                  SizedBox(height: size.height * 0.02),
-
-                  // Bio Field
-                  _buildTextField(
-                    controller: _bioController,
-                    label: 'Bio',
-                    hint: 'Write something about yourself',
-                    size: size,
-                    maxLines: 3,
-                  ),
-
-                  SizedBox(height: size.height * 0.02),
-
-                  // Phone Number Section
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: _buildTextField(
-                          controller: _countryCodeController,
-                          label: 'Code',
-                          hint: '+1',
-                          size: size,
-                        ),
+                    // Pronouns Field
+                    TextFormField(
+                      controller: _pronounsController,
+                      decoration: const InputDecoration(
+                        labelText: 'Pronouns',
+                        hintText: 'e.g., she/her, he/him',
+                        prefixIcon: Icon(Icons.person_outline),
                       ),
-                      SizedBox(width: size.width * 0.03),
-                      Expanded(
-                        flex: 5,
-                        child: _buildTextField(
-                          controller: _phoneController,
-                          label: 'Phone Number',
-                          hint: 'Enter your phone number',
-                          size: size,
-                          keyboardType: TextInputType.phone,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
 
-                  SizedBox(height: size.height * 0.02),
+                    const SizedBox(height: 16),
 
-                  // Email (Read-only)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Email',
-                        style: AppTheme.headlineStyle(
-                          context,
-                        ).copyWith(fontSize: size.width * 0.035),
+                    // Bio Field
+                    TextFormField(
+                      controller: _bioController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Bio',
+                        hintText: 'Write something about yourself',
+                        alignLabelWithHint: true,
                       ),
-                      SizedBox(height: size.height * 0.01),
-                      Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: size.width * 0.04,
-                          vertical: size.height * 0.02,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.darkDotInactive.withOpacity(0.5),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: AppTheme.darkDotInactive,
-                            width: 1,
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Phone Number Section
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 100,
+                          child: TextFormField(
+                            controller: _countryCodeController,
+                            decoration: const InputDecoration(
+                              labelText: 'Code',
+                              hintText: '+1',
+                            ),
                           ),
                         ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                user?.email ?? '',
-                                style: TextStyle(
-                                  color: AppTheme.tertiaryText(context),
-                                  fontSize: size.width * 0.038,
-                                ),
-                              ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _phoneController,
+                            keyboardType: TextInputType.phone,
+                            decoration: const InputDecoration(
+                              labelText: 'Phone Number',
+                              hintText: 'Enter your phone number',
+                              prefixIcon: Icon(Icons.phone),
                             ),
-                            Icon(
-                              Icons.lock_outline,
-                              size: size.width * 0.04,
-                              color: AppTheme.tertiaryText(context),
-                            ),
-                          ],
+                          ),
                         ),
-                      ),
-                      SizedBox(height: size.height * 0.005),
-                      Text(
-                        'Email cannot be changed',
-                        style: TextStyle(
-                          color: AppTheme.tertiaryText(context),
-                          fontSize: size.width * 0.03,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
 
-                  SizedBox(height: size.height * 0.03),
-                ],
+                    const SizedBox(height: 16),
+
+                    // Email (Read-only)
+                    TextFormField(
+                      initialValue: user?.email,
+                      readOnly: true,
+                      enabled: false,
+                      decoration: const InputDecoration(
+                        labelText: 'Email',
+                        prefixIcon: Icon(Icons.email_outlined),
+                        helperText: 'Email cannot be changed',
+                      ),
+                    ),
+
+                    const SizedBox(height: 32),
+                  ],
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    required String hint,
-    required Size size,
-    String? Function(String?)? validator,
-    int maxLines = 1,
-    TextInputType? keyboardType,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: AppTheme.headlineStyle(
-            context,
-          ).copyWith(fontSize: size.width * 0.035),
-        ),
-        SizedBox(height: size.height * 0.01),
-        TextFormField(
-          controller: controller,
-          style: TextStyle(color: AppTheme.primaryText(context)),
-          maxLines: maxLines,
-          keyboardType: keyboardType,
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: TextStyle(color: AppTheme.tertiaryText(context)),
-            filled: true,
-            fillColor: AppTheme.darkDotInactive,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            contentPadding: EdgeInsets.symmetric(
-              horizontal: size.width * 0.04,
-              vertical: size.height * 0.02,
-            ),
-          ),
-          validator: validator,
-        ),
-      ],
     );
   }
 }

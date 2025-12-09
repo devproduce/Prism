@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:prism/api/api_client.dart';
 import 'package:prism/models/user_model.dart';
 import 'package:prism/services/database_service.dart';
 import 'package:prism/services/contact_service.dart';
+import 'package:prism/providers/profile_provider.dart';
 
 class AuthProvider with ChangeNotifier {
   final ApiClient _apiClient = ApiClient();
@@ -22,6 +24,7 @@ class AuthProvider with ChangeNotifier {
   String? get error => _error;
   bool get isAuthenticated => _isAuthenticated;
   bool get contactsSynced => _contactsSynced;
+  ApiClient get apiClient => _apiClient;
 
   // Set loading state
   void _setLoading(bool value) {
@@ -87,6 +90,16 @@ class AuthProvider with ChangeNotifier {
       // Save user session to database
       await _databaseService.saveUserSession(response.user);
 
+      // Fetch fresh profile from backend to ensure latest data
+      try {
+        final freshUser = await _apiClient.getCurrentUser(response.user.userId);
+        _currentUser = freshUser;
+        await _databaseService.updateUserSession(freshUser);
+      } catch (e) {
+        debugPrint('Warning: Could not fetch fresh profile: $e');
+        // Continue with registration even if profile fetch fails
+      }
+
       _setLoading(false);
 
       return true;
@@ -114,6 +127,16 @@ class AuthProvider with ChangeNotifier {
 
       // Save user session to database
       await _databaseService.saveUserSession(response.user);
+
+      // Fetch fresh profile from backend to ensure latest data
+      try {
+        final freshUser = await _apiClient.getCurrentUser(response.user.userId);
+        _currentUser = freshUser;
+        await _databaseService.updateUserSession(freshUser);
+      } catch (e) {
+        debugPrint('Warning: Could not fetch fresh profile: $e');
+        // Continue with login even if profile fetch fails
+      }
 
       // Check if contacts have been synced
       _contactsSynced = await _databaseService.hasContactsSynced();
@@ -157,22 +180,48 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+  /// Check if contacts are already synced in backend
+  Future<bool> checkBackendContacts() async {
+    if (_currentUser == null) return false;
+
+    try {
+      final hasContacts = await _contactService.hasContactsInBackend(
+        _currentUser!.userId,
+      );
+      if (hasContacts) {
+        _contactsSynced = true;
+        await _databaseService.markContactsSynced();
+        notifyListeners();
+      }
+      return hasContacts;
+    } catch (e) {
+      debugPrint('Error checking backend contacts: $e');
+      return false;
+    }
+  }
+
   /// Logout user
-  Future<void> logout() async {
+  Future<void> logout(BuildContext context) async {
     _currentUser = null;
     _isAuthenticated = false;
+    _contactsSynced = false;
     _apiClient.clearAuthToken();
 
-    // Clear user session from database
-    await _databaseService.clearUserSession();
+    // Clear all database data (user session, gallery cache, etc.)
+    await _databaseService.clearAllData();
+
+    // Clear ProfileProvider state to prevent data leakage
+    if (context.mounted) {
+      Provider.of<ProfileProvider>(context, listen: false).clear();
+    }
 
     notifyListeners();
   }
 
   /// Update user profile
   Future<bool> updateProfile({
-    String? username,
-    String? firstName,
+    required String username,
+    required String firstName,
     String? lastName,
     String? pronouns,
     String? bio,
@@ -231,6 +280,40 @@ class AuthProvider with ChangeNotifier {
     } catch (e) {
       // Silently fail on refresh
       debugPrint('Failed to refresh user: $e');
+    }
+  }
+
+  /// Upload/Update profile picture
+  Future<bool> uploadProfilePicture(File profileImage) async {
+    if (_currentUser == null) {
+      _setError('No user logged in');
+      return false;
+    }
+
+    try {
+      _setLoading(true);
+      _setError(null);
+
+      final updatedUser = await _apiClient.uploadProfilePicture(
+        userId: _currentUser!.userId,
+        profileImage: profileImage,
+      );
+
+      _currentUser = updatedUser;
+
+      // Update user session in database
+      await _databaseService.updateUserSession(updatedUser);
+
+      _setLoading(false);
+      return true;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      _setLoading(false);
+      return false;
+    } catch (e) {
+      _setError('Failed to upload profile picture: ${e.toString()}');
+      _setLoading(false);
+      return false;
     }
   }
 }

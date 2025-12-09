@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/utils/theme.dart';
+import 'package:prism/widgets/gradient_scaffold.dart';
 
 class SharedMediaScreen extends StatelessWidget {
   const SharedMediaScreen({super.key});
@@ -10,79 +11,49 @@ class SharedMediaScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final size = MediaQuery.of(context).size;
-    final isDark = theme.brightness == Brightness.dark;
+    final sharingProvider = Provider.of<SharingProvider>(context);
+    final recipients = sharingProvider.selectedRecipients;
 
-    return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      body: SafeArea(
-        child: Consumer<SharingProvider>(
-          builder: (context, sharingProvider, _) {
-            final recipients = sharingProvider.selectedRecipients;
-
-            return Column(
+    return GradientScaffold(
+      appBar: AppBar(
+        title: const Text('Shared Media'),
+        backgroundColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            sharingProvider.reset();
+            Navigator.popUntil(context, (route) => route.isFirst);
+          },
+        ),
+        actions: [
+          IconButton(
+            onPressed: () => _showInfoDialog(context),
+            icon: const Icon(Icons.info_outline),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(16),
               children: [
-                // Header
-                Padding(
-                  padding: EdgeInsets.all(size.width * 0.05),
-                  child: Row(
-                    children: [
-                      GestureDetector(
-                        onTap: () {
-                          // Reset sharing state and pop all sharing screens
-                          sharingProvider.reset();
-                          Navigator.popUntil(context, (route) => route.isFirst);
-                        },
-                        child: Icon(
-                          Icons.arrow_back,
-                          color: theme.colorScheme.onSurface,
-                        ),
-                      ),
-                      SizedBox(width: size.width * 0.04),
-                      Expanded(
-                        child: Text(
-                          'Shared Media',
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () {
-                          // Show who gets what info
-                          _showInfoDialog(context, theme, size);
-                        },
-                        icon: Icon(
-                          Icons.people,
-                          color: theme.colorScheme.onSurface,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
                 // Success banner
                 Container(
-                  margin: EdgeInsets.symmetric(
-                    horizontal: size.width * 0.05,
-                    vertical: size.height * 0.01,
-                  ),
-                  padding: EdgeInsets.all(size.width * 0.04),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Colors.green, Colors.green.withOpacity(0.7)],
-                    ),
-                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.green.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.green.withOpacity(0.3)),
                   ),
                   child: Row(
                     children: [
-                      Icon(
+                      const Icon(
                         Icons.check_circle,
-                        color: Colors.white,
-                        size: size.width * 0.08,
+                        color: Colors.green,
+                        size: 32,
                       ),
-                      SizedBox(width: size.width * 0.03),
+                      const SizedBox(width: 16),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -90,15 +61,15 @@ class SharedMediaScreen extends StatelessWidget {
                             Text(
                               'Shared Successfully!',
                               style: theme.textTheme.titleMedium?.copyWith(
-                                color: Colors.white,
+                                color: Colors.green,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            SizedBox(height: size.height * 0.003),
+                            const SizedBox(height: 4),
                             Text(
                               '${sharingProvider.sharedPhotoCount} photos shared with ${sharingProvider.sharedRecipientCount} people',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: Colors.white.withOpacity(0.9),
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurface,
                               ),
                             ),
                           ],
@@ -108,192 +79,114 @@ class SharedMediaScreen extends StatelessWidget {
                   ),
                 ),
 
+                const SizedBox(height: 24),
+
                 // Who Gets What label
-                Padding(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: size.width * 0.05,
-                    vertical: size.height * 0.02,
-                  ),
-                  child: Row(
-                    children: [
-                      Text(
-                        'WHO GETS WHAT',
-                        style: theme.textTheme.labelLarge?.copyWith(
-                          color: theme.colorScheme.onSurface.withOpacity(0.6),
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                    ],
+                Text(
+                  'WHO GETS WHAT',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
                   ),
                 ),
+
+                const SizedBox(height: 16),
 
                 // Recipients list
-                Expanded(
-                  child: recipients.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.check_circle_outline,
-                                size: size.width * 0.2,
-                                color: Colors.green,
-                              ),
-                              SizedBox(height: size.height * 0.02),
-                              Text(
-                                'Media Shared!',
-                                style: theme.textTheme.headlineSmall?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: theme.colorScheme.onSurface,
-                                ),
-                              ),
-                              SizedBox(height: size.height * 0.01),
-                              Text(
-                                'Your content has been shared',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: theme.colorScheme.onSurface
-                                      .withOpacity(0.6),
-                                ),
-                              ),
-                            ],
+                if (recipients.isEmpty)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32.0),
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline,
+                            size: 64,
+                            color: theme.colorScheme.primary,
                           ),
-                        )
-                      : ListView.builder(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: size.width * 0.05,
+                          const SizedBox(height: 16),
+                          Text(
+                            'Media Shared!',
+                            style: theme.textTheme.headlineSmall,
                           ),
-                          itemCount: recipients.length,
-                          itemBuilder: (context, index) {
-                            final recipient = recipients[index];
-                            return _buildRecipientCard(
-                              context,
-                              recipient,
-                              size,
-                              theme,
-                              isDark,
-                            );
-                          },
-                        ),
-                ),
-
-                // Done button
-                Padding(
-                  padding: EdgeInsets.all(size.width * 0.05),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        sharingProvider.reset();
-                        Navigator.popUntil(context, (route) => route.isFirst);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryAccent,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        padding: EdgeInsets.symmetric(
-                          vertical: size.height * 0.02,
-                        ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Your content has been shared',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
-                      child: Text(
-                        'Done',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: size.width * 0.04,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRecipientCard(
-    BuildContext context,
-    dynamic recipient,
-    Size size,
-    ThemeData theme,
-    bool isDark,
-  ) {
-    return Container(
-      margin: EdgeInsets.only(bottom: size.height * 0.015),
-      padding: EdgeInsets.all(size.width * 0.04),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[850] : Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          // Profile picture
-          CircleAvatar(
-            radius: size.width * 0.08,
-            backgroundColor: AppTheme.primaryAccent.withOpacity(0.2),
-            backgroundImage: recipient.profilePictureUrl.isNotEmpty
-                ? CachedNetworkImageProvider(recipient.profilePictureUrl)
-                : null,
-            child: recipient.profilePictureUrl.isEmpty
-                ? Text(
-                    recipient.username[0].toUpperCase(),
-                    style: TextStyle(
-                      color: AppTheme.primaryAccent,
-                      fontWeight: FontWeight.bold,
-                      fontSize: size.width * 0.06,
                     ),
                   )
-                : null,
-          ),
-
-          SizedBox(width: size.width * 0.04),
-
-          // User info
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  recipient.username,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
-                SizedBox(height: size.height * 0.005),
-                Text(
-                  '${recipient.count} ${recipient.count == 1 ? 'photo' : 'photos'}',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withOpacity(0.6),
-                  ),
-                ),
-                SizedBox(height: size.height * 0.003),
-                Text(
-                  'Matched movements',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: AppTheme.primaryAccent,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                else
+                  ...recipients.map((recipient) {
+                    return Card(
+                      elevation: 0,
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundImage: recipient.profilePictureUrl.isNotEmpty
+                              ? CachedNetworkImageProvider(
+                                  recipient.profilePictureUrl)
+                              : null,
+                          child: recipient.profilePictureUrl.isEmpty
+                              ? Text(recipient.username[0].toUpperCase())
+                              : null,
+                        ),
+                        title: Text(
+                          recipient.username,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${recipient.count} ${recipient.count == 1 ? 'photo' : 'photos'}',
+                            ),
+                            Text(
+                              'Matched movements',
+                              style: TextStyle(
+                                color: theme.colorScheme.primary,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                        trailing: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.check,
+                            color: Colors.green,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
               ],
             ),
           ),
 
-          // Status icon
-          Container(
-            padding: EdgeInsets.all(size.width * 0.02),
-            decoration: BoxDecoration(
-              color: Colors.green.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.check,
-              color: Colors.green,
-              size: size.width * 0.06,
+          // Done button
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () {
+                  sharingProvider.reset();
+                  Navigator.popUntil(context, (route) => route.isFirst);
+                },
+                child: const Text('Done'),
+              ),
             ),
           ),
         ],
@@ -301,30 +194,18 @@ class SharedMediaScreen extends StatelessWidget {
     );
   }
 
-  void _showInfoDialog(BuildContext context, ThemeData theme, Size size) {
+  void _showInfoDialog(BuildContext context) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(
-          'Who Gets What',
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: Text(
+        title: const Text('Who Gets What'),
+        content: const Text(
           'Prism has automatically distributed your photos to each person based on face detection. Each recipient will only see photos where they appear.',
-          style: theme.textTheme.bodyMedium,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Got it',
-              style: TextStyle(
-                color: AppTheme.primaryAccent,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            child: const Text('Got it'),
           ),
         ],
       ),

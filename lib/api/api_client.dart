@@ -156,6 +156,27 @@ class ApiClient {
     }
   }
 
+  /// Get user by ID
+  /// GET /users/{user_id}
+  Future<Map<String, dynamic>> getUserById(String userId) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/users/$userId');
+      debugPrint('GET request to: $uri');
+      debugPrint('Fetching user with ID: $userId');
+
+      final response = await _client.get(uri, headers: _getHeaders());
+      debugPrint('Response status: ${response.statusCode}');
+      debugPrint('Response body: ${response.body}');
+
+      final data = _handleResponse(response);
+      return data as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('Error in getUserById: $e');
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to get user by ID: ${e.toString()}');
+    }
+  }
+
   /// Update user profile
   /// PUT /users/me
   Future<UserModel> updateProfile({
@@ -174,6 +195,7 @@ class ApiClient {
         '${ApiConstants.baseUrl}${ApiConstants.updateProfile}',
       );
       final request = http.MultipartRequest('PUT', uri);
+      request.headers.addAll(_getHeaders(isMultipart: true));
 
       request.fields['user_id'] = userId;
       if (username != null) request.fields['username'] = username;
@@ -194,6 +216,35 @@ class ApiClient {
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to update profile: ${e.toString()}');
+    }
+  }
+
+  /// Upload/Update profile picture
+  /// PUT /users/me/profile-picture
+  Future<UserModel> uploadProfilePicture({
+    required String userId,
+    required File profileImage,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}${ApiConstants.uploadProfilePicture}',
+      );
+      final request = http.MultipartRequest('POST', uri);
+      request.headers.addAll(_getHeaders(isMultipart: true));
+
+      request.fields['user_id'] = userId;
+      request.files.add(
+        await http.MultipartFile.fromPath('image', profileImage.path),
+      );
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+      final data = _handleResponse(response);
+
+      return UserModel.fromJson(data);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to upload profile picture: ${e.toString()}');
     }
   }
 
@@ -267,6 +318,7 @@ class ApiClient {
       print('Toggle field: $field for image: $imageId');
 
       final request = http.MultipartRequest('POST', uri);
+      request.headers.addAll(_getHeaders(isMultipart: true));
       request.fields['user_id'] = userId;
 
       final streamedResponse = await request.send();
@@ -303,6 +355,42 @@ class ApiClient {
     }
   }
 
+  /// Get shared gallery with a friend
+  /// GET /images/friend/{friend_id}
+  Future<List<dynamic>> getSharedGallery({
+    required String userId,
+    required String friendId,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}${ApiConstants.getSharedGallery}$friendId',
+      ).replace(queryParameters: {'user_id': userId});
+
+      print('Shared Gallery API Request: $uri');
+      final response = await _client.get(uri, headers: _getHeaders());
+      print('Shared Gallery API Status Code: ${response.statusCode}');
+
+      if (response.body.isEmpty || response.body == '[]') {
+        print('Shared Gallery returned empty');
+        return [];
+      }
+
+      final data = _handleResponse(response);
+
+      if (data == null) return [];
+      if (data is! List) {
+        throw ApiException('Expected list but got ${data.runtimeType}');
+      }
+
+      print('Shared Gallery Data Length: ${data.length}');
+      return data;
+    } catch (e) {
+      print('Shared Gallery API Error: $e');
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to get shared gallery: ${e.toString()}');
+    }
+  }
+
   /// Update image description
   /// PATCH /images/{image_id}/description
   Future<Map<String, dynamic>> updateImageDescription({
@@ -315,6 +403,7 @@ class ApiClient {
         '${ApiConstants.baseUrl}${ApiConstants.updateImageDescription}$imageId/description',
       );
       final request = http.MultipartRequest('PATCH', uri);
+      request.headers.addAll(_getHeaders(isMultipart: true));
       request.fields['user_id'] = userId;
       request.fields['description'] = description;
 
@@ -372,6 +461,7 @@ class ApiClient {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/users/me/contacts');
       final request = http.MultipartRequest('POST', uri);
+      request.headers.addAll(_getHeaders(isMultipart: true));
       request.fields['user_id'] = userId;
       request.fields['full_name'] = fullName;
       request.fields['phone_number'] = phoneNumber;
@@ -385,6 +475,28 @@ class ApiClient {
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to add contact: ${e.toString()}');
+    }
+  }
+
+  /// Get user contacts
+  /// GET /users/me/contacts
+  Future<List<dynamic>> getContacts({required String userId}) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/users/me/contacts',
+      ).replace(queryParameters: {'user_id': userId});
+
+      final response = await _client.get(uri, headers: _getHeaders());
+      final data = _handleResponse(response);
+
+      if (data is List) {
+        return data;
+      } else {
+        return [];
+      }
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to get contacts: ${e.toString()}');
     }
   }
 
@@ -596,6 +708,109 @@ class ApiClient {
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to reject friend request: ${e.toString()}');
+    }
+  }
+
+  /// Get blocked users
+  /// GET /friends/blocked
+  Future<List<dynamic>> getBlockedUsers({required String userId}) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/friends/blocked',
+      ).replace(queryParameters: {'user_id': userId});
+
+      final response = await _client.get(uri, headers: _getHeaders());
+      final data = _handleResponse(response);
+      return data as List<dynamic>;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to get blocked users: ${e.toString()}');
+    }
+  }
+
+  /// Block a user
+  /// POST /friends/{friend_id}/block
+  Future<Map<String, dynamic>> blockUser({
+    required String friendId,
+    required String userId,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/friends/$friendId/block',
+      ).replace(queryParameters: {'user_id': userId});
+
+      final response = await _client.post(uri, headers: _getHeaders());
+
+      final data = _handleResponse(response);
+      return data as Map<String, dynamic>;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to block user: ${e.toString()}');
+    }
+  }
+
+  /// Unblock a user
+  /// POST /friends/{friend_id}/unblock
+  Future<Map<String, dynamic>> unblockUser({
+    required String friendId,
+    required String userId,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/friends/$friendId/unblock',
+      ).replace(queryParameters: {'user_id': userId});
+
+      final response = await _client.post(uri, headers: _getHeaders());
+
+      final data = _handleResponse(response);
+      return data as Map<String, dynamic>;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to unblock user: ${e.toString()}');
+    }
+  }
+
+  /// Unfriend a user
+  /// DELETE /friends/{friend_id}
+  Future<Map<String, dynamic>> unfriend({
+    required String friendId,
+    required String userId,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/friends/$friendId',
+      ).replace(queryParameters: {'user_id': userId});
+
+      final response = await _client.delete(uri, headers: _getHeaders());
+
+      final data = _handleResponse(response);
+      return data as Map<String, dynamic>;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to unfriend user: ${e.toString()}');
+    }
+  }
+
+  /// Update auto clean keep status
+  /// PUT /friends/{friend_id}/keep
+  Future<Map<String, dynamic>> updateAutoCleanKeep({
+    required String friendId,
+    required String userId,
+    required String keepStatus,
+  }) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/friends/$friendId/keep')
+          .replace(
+            queryParameters: {'user_id': userId, 'keep_status': keepStatus},
+          );
+
+      final response = await _client.put(uri, headers: _getHeaders());
+
+      final data = _handleResponse(response);
+      return data as Map<String, dynamic>;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to update keep status: ${e.toString()}');
     }
   }
 

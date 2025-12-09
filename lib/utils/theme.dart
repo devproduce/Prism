@@ -5,7 +5,7 @@ class AppTheme {
   AppTheme._();
 
   // Dark Theme Color Palette
-  static const Color darkBackground = Color(0xFF000000);
+  static const Color darkBackground = Color(0xFF151515); // Deep Charcoal/Black from image
   static const Color darkPrimaryText = Color(0xFFFFFFFF);
   static const Color darkSecondaryText = Color(0xFF9E9E9E);
   static const Color darkTertiaryText = Color(0xFF757575);
@@ -14,7 +14,7 @@ class AppTheme {
   static const Color darkDotActive = Color(0xFFFFFFFF);
 
   // Light Theme Color Palette
-  static const Color lightBackground = Color(0xFFFFFFFF);
+  static const Color lightBackground = Color(0xFFF0F2F5); // Soft Grey-White (Complementary)
   static const Color lightPrimaryText = Color(0xFF000000);
   static const Color lightSecondaryText = Color(0xFF616161);
   static const Color lightTertiaryText = Color(0xFF9E9E9E);
@@ -23,15 +23,9 @@ class AppTheme {
   static const Color lightDotActive = Color(0xFF000000);
 
   // Common Colors (same for both themes)
-  static const Color primaryAccent = Color(
-    0xFFE8F156,
-  ); // Yellow/Lime button color
-  static const Color secondaryAccent = Color(
-    0xFFD4E54E,
-  ); // Slightly darker yellow
-  static const Color buttonText = Color(
-    0xFF000000,
-  ); // Black text on yellow buttons
+  static const Color primaryAccent = Color(0xFF48CAE4); // Light Aqua Blue
+  static const Color secondaryAccent = Color(0xFF00B4D8); // Slightly darker Aqua
+  static const Color buttonText = Color(0xFF000000); // Black text on aqua buttons
 
   // Dynamic color getters based on current brightness
   static Color primaryBackground(BuildContext context) {
@@ -74,6 +68,24 @@ class AppTheme {
     return Theme.of(context).brightness == Brightness.dark
         ? darkDotActive
         : lightDotActive;
+  }
+
+  // Gradient Backgrounds
+  static LinearGradient primaryGradient(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: isDark
+          ? [
+              const Color(0xFF151515), // Deep Charcoal
+              const Color(0xFF000000), // Pure Black
+            ]
+          : [
+              const Color(0xFFFFFFFF), // Pure White
+              const Color(0xFFF0F2F5), // Soft Grey-White
+            ],
+    );
   }
 
   // Text Styles
@@ -187,9 +199,14 @@ class AppTheme {
     return size.height * factor;
   }
 
+  // Animation Constants
+  static const Duration animationDuration = Duration(milliseconds: 300);
+  static const Curve animationCurve = Curves.easeInOut;
+
   // Dark Theme
   static ThemeData get darkTheme {
     return ThemeData(
+      useMaterial3: true,
       brightness: Brightness.dark,
       scaffoldBackgroundColor: darkBackground,
       primaryColor: primaryAccent,
@@ -202,17 +219,24 @@ class AppTheme {
         onSecondary: buttonText,
         onSurface: darkPrimaryText,
         onBackground: darkPrimaryText,
+        surfaceTint: Colors.transparent, // Remove tint on surfaces
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+        scrolledUnderElevation: 0,
       ),
       textTheme: const TextTheme(
-        displayLarge: TextStyle(color: darkPrimaryText),
-        displayMedium: TextStyle(color: darkPrimaryText),
-        displaySmall: TextStyle(color: darkPrimaryText),
-        headlineLarge: TextStyle(color: darkPrimaryText),
-        headlineMedium: TextStyle(color: darkPrimaryText),
-        headlineSmall: TextStyle(color: darkPrimaryText),
-        titleLarge: TextStyle(color: darkPrimaryText),
-        titleMedium: TextStyle(color: darkPrimaryText),
-        titleSmall: TextStyle(color: darkPrimaryText),
+        displayLarge: TextStyle(color: darkPrimaryText, fontWeight: FontWeight.bold),
+        displayMedium: TextStyle(color: darkPrimaryText, fontWeight: FontWeight.bold),
+        displaySmall: TextStyle(color: darkPrimaryText, fontWeight: FontWeight.bold),
+        headlineLarge: TextStyle(color: darkPrimaryText, fontWeight: FontWeight.bold),
+        headlineMedium: TextStyle(color: darkPrimaryText, fontWeight: FontWeight.bold),
+        headlineSmall: TextStyle(color: darkPrimaryText, fontWeight: FontWeight.bold),
+        titleLarge: TextStyle(color: darkPrimaryText, fontWeight: FontWeight.w600),
+        titleMedium: TextStyle(color: darkPrimaryText, fontWeight: FontWeight.w600),
+        titleSmall: TextStyle(color: darkPrimaryText, fontWeight: FontWeight.w600),
         bodyLarge: TextStyle(color: darkSecondaryText),
         bodyMedium: TextStyle(color: darkSecondaryText),
         bodySmall: TextStyle(color: darkSecondaryText),
@@ -222,6 +246,7 @@ class AppTheme {
           backgroundColor: primaryAccent,
           foregroundColor: buttonText,
           elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(25),
           ),
@@ -231,10 +256,29 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: primaryAccent,
           side: const BorderSide(color: primaryAccent, width: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(25),
           ),
         ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: darkDotInactive,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: primaryAccent, width: 1.5),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        hintStyle: const TextStyle(color: darkTertiaryText),
       ),
     );
   }
@@ -242,6 +286,7 @@ class AppTheme {
   // Light Theme
   static ThemeData get lightTheme {
     return ThemeData(
+      useMaterial3: true,
       brightness: Brightness.light,
       scaffoldBackgroundColor: lightBackground,
       primaryColor: primaryAccent,
@@ -254,17 +299,24 @@ class AppTheme {
         onSecondary: buttonText,
         onSurface: lightPrimaryText,
         onBackground: lightPrimaryText,
+        surfaceTint: Colors.transparent,
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+        scrolledUnderElevation: 0,
       ),
       textTheme: const TextTheme(
-        displayLarge: TextStyle(color: lightPrimaryText),
-        displayMedium: TextStyle(color: lightPrimaryText),
-        displaySmall: TextStyle(color: lightPrimaryText),
-        headlineLarge: TextStyle(color: lightPrimaryText),
-        headlineMedium: TextStyle(color: lightPrimaryText),
-        headlineSmall: TextStyle(color: lightPrimaryText),
-        titleLarge: TextStyle(color: lightPrimaryText),
-        titleMedium: TextStyle(color: lightPrimaryText),
-        titleSmall: TextStyle(color: lightPrimaryText),
+        displayLarge: TextStyle(color: lightPrimaryText, fontWeight: FontWeight.bold),
+        displayMedium: TextStyle(color: lightPrimaryText, fontWeight: FontWeight.bold),
+        displaySmall: TextStyle(color: lightPrimaryText, fontWeight: FontWeight.bold),
+        headlineLarge: TextStyle(color: lightPrimaryText, fontWeight: FontWeight.bold),
+        headlineMedium: TextStyle(color: lightPrimaryText, fontWeight: FontWeight.bold),
+        headlineSmall: TextStyle(color: lightPrimaryText, fontWeight: FontWeight.bold),
+        titleLarge: TextStyle(color: lightPrimaryText, fontWeight: FontWeight.w600),
+        titleMedium: TextStyle(color: lightPrimaryText, fontWeight: FontWeight.w600),
+        titleSmall: TextStyle(color: lightPrimaryText, fontWeight: FontWeight.w600),
         bodyLarge: TextStyle(color: lightSecondaryText),
         bodyMedium: TextStyle(color: lightSecondaryText),
         bodySmall: TextStyle(color: lightSecondaryText),
@@ -274,6 +326,7 @@ class AppTheme {
           backgroundColor: primaryAccent,
           foregroundColor: buttonText,
           elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(25),
           ),
@@ -283,10 +336,29 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: primaryAccent,
           side: const BorderSide(color: primaryAccent, width: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(25),
           ),
         ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: lightDotInactive,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: primaryAccent, width: 1.5),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        hintStyle: const TextStyle(color: lightTertiaryText),
       ),
     );
   }

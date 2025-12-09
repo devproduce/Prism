@@ -283,6 +283,13 @@ class DatabaseService {
     );
   }
 
+  /// Clear all data (user session, gallery cache, etc.)
+  Future<void> clearAllData() async {
+    final db = await database;
+    await db.delete('user_session');
+    await db.delete('gallery_cache');
+  }
+
   /// Close database
   Future<void> close() async {
     final db = await database;

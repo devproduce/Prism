@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
-import 'package:prism/utils/theme.dart';
+import 'package:prism/theme/colors.dart';
+import 'package:prism/theme/text_styles.dart';
+import 'package:prism/widgets/glass_widgets.dart';
+import 'package:prism/widgets/gradient_background.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/screens/forgot_password_screen.dart';
 import 'package:prism/screens/register_screen.dart';
@@ -37,74 +41,71 @@ class _LoginScreenState extends State<LoginScreen> {
     );
 
     if (success && mounted) {
-      // Check if contacts need to be synced
-      if (!authProvider.contactsSynced) {
-        await _showContactSyncDialog(authProvider);
-      }
-
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
-        );
-      }
+      // Navigate immediately for better UX
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) =>
+              HomeScreen(key: HomeScreen.homeScreenKey),
+          transitionsBuilder: (_, animation, __, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(authProvider.error ?? 'Login failed'),
-          backgroundColor: Colors.red,
+          backgroundColor: PrismColors.errorRed,
+          behavior: SnackBarBehavior.floating,
         ),
       );
     }
   }
 
   Future<void> _showContactSyncDialog(AuthProvider authProvider) async {
+    // Keep existing dialog logic but maybe style it later if needed globally
+    // For now, focusing on the main screen UI
+    // ... logic remains same ...
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.darkDotInactive,
-        title: Text(
-          'Sync Contacts',
-          style: TextStyle(color: AppTheme.primaryText(context)),
-        ),
+        backgroundColor: PrismColors.darkCard,
+        surfaceTintColor: Colors.transparent,
+        title: Text('Sync Contacts', style: PrismTextStyles.h3),
         content: Text(
           'Prism would like to access your contacts to help you find and connect with friends who are already using the app.',
-          style: TextStyle(color: AppTheme.secondaryText(context)),
+          style: PrismTextStyles.bodyMedium,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: Text(
               'Not Now',
-              style: TextStyle(color: AppTheme.tertiaryText(context)),
+              style: TextStyle(color: PrismColors.textSecondary),
             ),
           ),
-          TextButton(
+          FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              'Allow',
-              style: TextStyle(color: Color(0xFF4A90E2)),
-            ),
+            style: FilledButton.styleFrom(backgroundColor: PrismColors.purple),
+            child: const Text('Allow'),
           ),
         ],
       ),
     );
 
     if (result == true && mounted) {
-      // Show loading indicator
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => Center(
-          child: CircularProgressIndicator(color: AppTheme.primaryAccent),
-        ),
+        builder: (context) =>
+            Center(child: CircularProgressIndicator(color: PrismColors.purple)),
       );
 
-      // Sync contacts
       final success = await authProvider.syncContacts();
 
       if (mounted) {
-        Navigator.pop(context); // Close loading dialog
+        Navigator.pop(context);
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -113,320 +114,242 @@ class _LoginScreenState extends State<LoginScreen> {
                   ? 'Contacts synced successfully!'
                   : 'Failed to sync contacts. You can try again later in settings.',
             ),
-            backgroundColor: success ? Colors.green : Colors.orange,
+            backgroundColor: success
+                ? PrismColors.successGreen
+                : PrismColors.warningYellow,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final horizontalPadding = AppTheme.horizontalPadding(context);
-    final buttonHeight = AppTheme.buttonHeight(context);
-
-    return Scaffold(
-      backgroundColor: AppTheme.primaryBackground(context),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  SizedBox(height: size.height * 0.05),
-
-                  // Bookmark Icon
-                  Icon(
-                    Icons.bookmark,
-                    size: size.width * 0.10,
-                    color: AppTheme.primaryAccent,
-                  ),
-
-                  SizedBox(height: size.height * 0.02),
-
-                  // Welcome Back Header
-                  Text('Welcome Back', style: AppTheme.headlineStyle(context)),
-
-                  SizedBox(height: size.height * 0.005),
-
-                  // Subtitle
-                  Text(
-                    'Login to your Prism account',
-                    style: AppTheme.subHeadlineStyle(context),
-                  ),
-
-                  SizedBox(height: size.height * 0.04),
-
-                  // Username/Email Field
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Username',
-                        style: AppTheme.headlineStyle(
-                          context,
-                        ).copyWith(fontSize: size.width * 0.035),
-                      ),
-                      SizedBox(height: size.height * 0.01),
-                      TextFormField(
-                        controller: _emailController,
-                        style: TextStyle(color: AppTheme.primaryText(context)),
-                        decoration: InputDecoration(
-                          hintText: 'Username',
-                          hintStyle: TextStyle(
-                            color: AppTheme.tertiaryText(context),
-                          ),
-                          filled: true,
-                          fillColor: AppTheme.darkDotInactive,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: size.width * 0.04,
-                            vertical: size.height * 0.02,
-                          ),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter your username or email';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
-                  ),
-
-                  SizedBox(height: size.height * 0.02),
-
-                  // Password Field
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Password',
-                        style: AppTheme.headlineStyle(
-                          context,
-                        ).copyWith(fontSize: size.width * 0.035),
-                      ),
-                      SizedBox(height: size.height * 0.01),
-                      TextFormField(
-                        controller: _passwordController,
-                        obscureText: _obscurePassword,
-                        style: TextStyle(color: AppTheme.primaryText(context)),
-                        decoration: InputDecoration(
-                          hintText: 'Password',
-                          hintStyle: TextStyle(
-                            color: AppTheme.tertiaryText(context),
-                          ),
-                          filled: true,
-                          fillColor: AppTheme.darkDotInactive,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: size.width * 0.04,
-                            vertical: size.height * 0.02,
-                          ),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                              color: AppTheme.tertiaryText(context),
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _obscurePassword = !_obscurePassword;
-                              });
-                            },
-                          ),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter your password';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
-                  ),
-
-                  // Forgot Password Link
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const ForgotPasswordScreen(),
-                          ),
-                        );
-                      },
-                      style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: Text(
-                        'Forgot your password?',
-                        style: TextStyle(
-                          color: const Color(0xFF4A90E2),
-                          fontSize: size.width * 0.035,
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  SizedBox(height: size.height * 0.025),
-
-                  // Login Button
-                  Consumer<AuthProvider>(
-                    builder: (context, authProvider, child) {
-                      return GestureDetector(
-                        onTap: authProvider.isLoading ? null : _handleLogin,
-                        child: Container(
-                          height: buttonHeight,
-                          decoration: AppTheme.primaryButtonDecoration(),
-                          child: Center(
-                            child: authProvider.isLoading
-                                ? CircularProgressIndicator(
-                                    color: AppTheme.buttonText,
-                                  )
-                                : Text(
-                                    'Log In',
-                                    style: AppTheme.buttonTextStyle(context),
-                                  ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-
-                  SizedBox(height: size.height * 0.025),
-
-                  // Or continue with
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Divider(
-                          color: AppTheme.darkDotInactive,
-                          thickness: 1,
-                        ),
-                      ),
-                      Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: size.width * 0.03,
-                        ),
-                        child: Text(
-                          'Or continue with',
-                          style: AppTheme.subHeadlineStyle(
-                            context,
-                          ).copyWith(fontSize: size.width * 0.032),
-                        ),
-                      ),
-                      Expanded(
-                        child: Divider(
-                          color: AppTheme.darkDotInactive,
-                          thickness: 1,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  SizedBox(height: size.height * 0.02),
-
-                  // SSO Buttons
-                  _buildSSOButton(context, 'Google', Icons.g_mobiledata, () {
-                    // TODO: Implement Google SSO
-                  }),
-
-                  SizedBox(height: size.height * 0.012),
-
-                  _buildSSOButton(context, 'Apple', Icons.apple, () {
-                    // TODO: Implement Apple SSO
-                  }),
-
-                  SizedBox(height: size.height * 0.025),
-
-                  // Create Account Link
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Don\'t have an account? ',
-                        style: AppTheme.subHeadlineStyle(
-                          context,
-                        ).copyWith(fontSize: size.width * 0.035),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const RegisterScreen(),
-                            ),
-                          );
-                        },
-                        child: Text(
-                          'Create Account',
-                          style: TextStyle(
-                            color: const Color(0xFF4A90E2),
-                            fontSize: size.width * 0.035,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  SizedBox(height: size.height * 0.03),
-                ],
-              ),
-            ),
-          ),
+  InputDecoration _glassInputDecoration(String hint, IconData icon) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: PrismTextStyles.bodyMedium.copyWith(color: Colors.white38),
+      prefixIcon: Icon(icon, color: PrismColors.electricBlue),
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.05),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(20),
+        borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(20),
+        borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(20),
+        borderSide: BorderSide(
+          color: PrismColors.electricBlue.withOpacity(0.5),
         ),
       ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
     );
   }
 
-  Widget _buildSSOButton(
-    BuildContext context,
-    String label,
-    IconData icon,
-    VoidCallback onTap,
-  ) {
-    final size = MediaQuery.of(context).size;
-    final buttonHeight = AppTheme.buttonHeight(context);
+  @override
+  Widget build(BuildContext context) {
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              children: [
+                // Header
+                Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: PrismColors.electricBlue.withOpacity(0.1),
+                      ),
+                      child: Icon(
+                        Icons.waving_hand_rounded,
+                        size: 40,
+                        color: PrismColors.electricBlue,
+                      ),
+                    ).animate().scale(
+                      duration: 500.ms,
+                      curve: Curves.elasticOut,
+                    ),
+                    const SizedBox(height: 24),
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: buttonHeight,
-        decoration: BoxDecoration(
-          color: AppTheme.darkDotInactive,
-          borderRadius: BorderRadius.circular(25),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: AppTheme.primaryText(context)),
-            SizedBox(width: size.width * 0.02),
-            Text(
-              label,
-              style: TextStyle(
-                color: AppTheme.primaryText(context),
-                fontSize: size.width * 0.040,
-                fontWeight: FontWeight.w500,
-              ),
+                    Text(
+                      'Welcome Back',
+                      textAlign: TextAlign.center,
+                      style: PrismTextStyles.h1,
+                    ).animate().fadeIn().moveY(begin: 10, end: 0),
+
+                    const SizedBox(height: 8),
+
+                    Text(
+                      'Login to continue your vibe.',
+                      textAlign: TextAlign.center,
+                      style: PrismTextStyles.bodyMedium,
+                    ).animate().fadeIn(delay: 200.ms),
+                  ],
+                ),
+
+                const SizedBox(height: 48),
+
+                // Form Card
+                GlassCard(
+                  borderRadius: 30,
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Email Field
+                        Text(
+                          'Email',
+                          style: PrismTextStyles.bodyMedium,
+                        ).animate().fadeIn(delay: 300.ms),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _emailController,
+                          style: PrismTextStyles.bodyLarge,
+                          decoration: _glassInputDecoration(
+                            'Enter your email',
+                            Icons.email_outlined,
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Please enter your email';
+                            }
+                            return null;
+                          },
+                        ).animate().fadeIn(delay: 350.ms),
+
+                        const SizedBox(height: 24),
+
+                        // Password Field
+                        Text(
+                          'Password',
+                          style: PrismTextStyles.bodyMedium,
+                        ).animate().fadeIn(delay: 400.ms),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _passwordController,
+                          obscureText: _obscurePassword,
+                          style: PrismTextStyles.bodyLarge,
+                          decoration:
+                              _glassInputDecoration(
+                                'Enter your password',
+                                Icons.lock_outline,
+                              ).copyWith(
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_off
+                                        : Icons.visibility,
+                                    color: Colors.white54,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _obscurePassword = !_obscurePassword;
+                                    });
+                                  },
+                                ),
+                              ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Please enter your password';
+                            }
+                            return null;
+                          },
+                        ).animate().fadeIn(delay: 450.ms),
+
+                        // Forgot Password Link
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const ForgotPasswordScreen(),
+                                ),
+                              );
+                            },
+                            child: Text(
+                              'Forgot Password?',
+                              style: PrismTextStyles.bodySmall.copyWith(
+                                color: PrismColors.electricBlue,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ).animate().fadeIn(delay: 500.ms),
+
+                        const SizedBox(height: 24),
+
+                        // Login Button
+                        Consumer<AuthProvider>(
+                              builder: (context, authProvider, child) {
+                                return GlassButton(
+                                  text: 'Log In',
+                                  isLoading: authProvider.isLoading,
+                                  onPressed: authProvider.isLoading
+                                      ? null
+                                      : _handleLogin,
+                                  isPrimary: true,
+                                );
+                              },
+                            )
+                            .animate()
+                            .fadeIn(delay: 550.ms)
+                            .moveY(begin: 10, end: 0),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 32),
+
+                // Create Account Link
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'New here? ',
+                      style: PrismTextStyles.bodyMedium.copyWith(
+                        color: Colors.white60,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pushReplacement(
+                          context,
+                          PageRouteBuilder(
+                            pageBuilder: (_, __, ___) => const RegisterScreen(),
+                            transitionsBuilder: (_, animation, __, child) {
+                              return FadeTransition(
+                                opacity: animation,
+                                child: child,
+                              );
+                            },
+                          ),
+                        );
+                      },
+                      child: Text(
+                        'Create Account',
+                        style: PrismTextStyles.button.copyWith(
+                          color: PrismColors.neoPink,
+                        ),
+                      ),
+                    ),
+                  ],
+                ).animate().fadeIn(delay: 600.ms),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

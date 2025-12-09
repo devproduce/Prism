@@ -61,22 +61,40 @@ class GalleryProvider with ChangeNotifier {
           try {
             final List<dynamic> jsonList = json.decode(cachedData);
             _images = [];
+            bool hasExpiredUrls = false;
+
             for (var i = 0; i < jsonList.length; i++) {
               try {
                 final galleryImage = GalleryImage.fromJson(
                   jsonList[i] as Map<String, dynamic>,
                 );
                 _images.add(galleryImage);
+
+                // Check if any URL is expired
+                if (!hasExpiredUrls && galleryImage.image.isUrlExpired) {
+                  hasExpiredUrls = true;
+                }
               } catch (e) {
                 debugPrint('Error parsing cached image at index $i: $e');
               }
             }
-            _groupImagesByMonth();
-            _isLoadingFromCache = false;
-            _setError(null);
-            notifyListeners();
-            debugPrint('Loaded ${_images.length} images from cache');
-            return;
+
+            // If we found expired URLs, clear cache and fetch fresh
+            if (hasExpiredUrls) {
+              debugPrint(
+                'Detected expired URLs in cache, fetching fresh data...',
+              );
+              await _databaseService.clearGalleryCache(userId);
+              _isLoadingFromCache = false;
+              // Fall through to fetch from API
+            } else {
+              _groupImagesByMonth();
+              _isLoadingFromCache = false;
+              _setError(null);
+              notifyListeners();
+              debugPrint('Loaded ${_images.length} images from cache');
+              return;
+            }
           } catch (e) {
             debugPrint('Error parsing cached data: $e');
             // Clear invalid cache and fetch fresh
@@ -149,6 +167,9 @@ class GalleryProvider with ChangeNotifier {
     _groupedImages.clear();
 
     for (var image in _images) {
+      // Skip images in the bin
+      if (image.galleryMeta.bin) continue;
+
       if (image.image.takenAt != null) {
         final monthYear = _getMonthYearKey(image.image.takenAt!);
         if (!_groupedImages.containsKey(monthYear)) {
@@ -215,6 +236,14 @@ class GalleryProvider with ChangeNotifier {
       final index = _images.indexWhere((img) => img.image.id == imageId);
       if (index != -1) {
         final currentMeta = _images[index].galleryMeta;
+        debugPrint(
+          '📝 Before update - $field: ${field == 'favourite'
+              ? currentMeta.favourite
+              : field == 'archive'
+              ? currentMeta.archive
+              : currentMeta.bin}',
+        );
+
         _images[index] = GalleryImage(
           image: _images[index].image,
           faces: _images[index].faces,
@@ -224,15 +253,24 @@ class GalleryProvider with ChangeNotifier {
             bin: field == 'bin' ? newValue : currentMeta.bin,
           ),
         );
-        _groupImagesByMonth();
 
-        // Update cache
-        await _databaseService.saveGalleryCache(
-          userId,
-          json.encode(_images.map((img) => img.toJson()).toList()),
+        debugPrint('✅ After update - $field: $newValue');
+        debugPrint(
+          '📊 Total images: ${_images.length}, Bin images: ${_images.where((img) => img.galleryMeta.bin).length}, Gallery images: ${_images.where((img) => !img.galleryMeta.bin).length}',
         );
 
+        _groupImagesByMonth();
+
+        // Notify listeners immediately with updated local state
+        debugPrint('🔔 Notifying listeners...');
         notifyListeners();
+
+        // Clear cache and refetch from backend to ensure long-term consistency
+        debugPrint('🔄 Clearing cache after $field toggle for image $imageId');
+        await _databaseService.clearGalleryCache(userId);
+
+        // Fetch fresh data from backend (await to ensure it completes)
+        await fetchGallery(userId: userId, forceRefresh: true);
       }
     } on ApiException catch (e) {
       _setError(e.message);
@@ -277,19 +315,36 @@ class GalleryProvider with ChangeNotifier {
           galleryMeta: _images[index].galleryMeta,
         );
 
-        // Update cache
-        await _databaseService.saveGalleryCache(
-          userId,
-          json.encode(_images.map((img) => img.toJson()).toList()),
-        );
-
+        // Notify listeners immediately with updated local state
         notifyListeners();
+
+        // Clear cache and refetch to ensure consistency
+        debugPrint(
+          '🔄 Clearing cache after description update for image $imageId',
+        );
+        await _databaseService.clearGalleryCache(userId);
+
+        // Fetch fresh data from backend (await to ensure it completes)
+        await fetchGallery(userId: userId, forceRefresh: true);
       }
     } on ApiException catch (e) {
       _setError(e.message);
       rethrow;
     } catch (e) {
       _setError('Failed to update description: ${e.toString()}');
+      rethrow;
+    }
+  }
+
+  /// Clear cache and force refresh from backend
+  Future<void> clearCacheAndRefresh(String userId) async {
+    try {
+      debugPrint('🗑️ Clearing cache and refreshing from backend...');
+      await _databaseService.clearGalleryCache(userId);
+      await fetchGallery(userId: userId, forceRefresh: true);
+      debugPrint('✅ Cache cleared and data refreshed');
+    } catch (e) {
+      debugPrint('❌ Error clearing cache: $e');
       rethrow;
     }
   }
@@ -328,13 +383,15 @@ class GalleryProvider with ChangeNotifier {
 
       _groupImagesByMonth();
 
-      // Update cache
-      await _databaseService.saveGalleryCache(
-        userId,
-        json.encode(_images.map((img) => img.toJson()).toList()),
-      );
-
+      // Notify listeners immediately with updated local state
       notifyListeners();
+
+      // Clear cache and refetch from backend to ensure consistency
+      debugPrint('🔄 Clearing cache after batch $field update');
+      await _databaseService.clearGalleryCache(userId);
+
+      // Fetch fresh data from backend (await to ensure it completes)
+      await fetchGallery(userId: userId, forceRefresh: true);
     } on ApiException catch (e) {
       _setError(e.message);
       rethrow;
@@ -372,13 +429,15 @@ class GalleryProvider with ChangeNotifier {
         );
         _groupImagesByMonth();
 
-        // Update cache
-        await _databaseService.saveGalleryCache(
-          userId,
-          json.encode(_images.map((img) => img.toJson()).toList()),
-        );
-
+        // Notify listeners immediately with updated local state
         notifyListeners();
+
+        // Clear cache and refetch to ensure consistency
+        debugPrint('🔄 Clearing cache after restoring image $imageId from bin');
+        await _databaseService.clearGalleryCache(userId);
+
+        // Fetch fresh data from backend (await to ensure it completes)
+        await fetchGallery(userId: userId, forceRefresh: true);
       }
     } on ApiException catch (e) {
       _setError(e.message);

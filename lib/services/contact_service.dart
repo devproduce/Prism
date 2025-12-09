@@ -128,4 +128,15 @@ class ContactService {
     // Sync contacts to backend
     return await syncContactsToBackend(userId);
   }
+
+  /// Check if user has contacts in backend
+  Future<bool> hasContactsInBackend(String userId) async {
+    try {
+      final contacts = await _apiClient.getContacts(userId: userId);
+      return contacts.isNotEmpty;
+    } catch (e) {
+      debugPrint('Error checking backend contacts: $e');
+      return false;
+    }
+  }
 }

@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:prism/screens/onboarding_screen.dart';
 import 'package:prism/screens/splash_screen.dart';
-import 'package:prism/utils/theme.dart';
+import 'package:prism/screens/settings_screen.dart';
+import 'package:prism/theme/theme_data.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/gallery_provider.dart';
 import 'package:prism/providers/profile_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/providers/notifications_provider.dart';
 import 'package:prism/providers/sharing_provider.dart';
+import 'package:prism/providers/theme_provider.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +36,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => GalleryProvider()),
         ChangeNotifierProvider(create: (_) => ProfileProvider()),
@@ -40,11 +44,21 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => NotificationsProvider()),
         ChangeNotifierProvider(create: (_) => SharingProvider()),
       ],
-      child: MaterialApp(
-        title: 'Prism',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.lightTheme, // Using dark theme as requested
-        home: const SplashScreen(),
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, child) {
+          return MaterialApp(
+            title: 'Prism',
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: themeProvider.themeMode,
+            home: const SplashScreen(),
+            routes: {
+              '/settings': (context) => const SettingsScreen(),
+              '/onboarding': (context) => const OnboardingScreen(),
+            },
+          );
+        },
       ),
     );
   }

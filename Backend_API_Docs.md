@@ -4,7 +4,14 @@
 
 The Main Backend is a FastAPI application that handles the core business logic, user management, and coordination with the CV microservice. It manages the database, storage, and client-facing APIs.
 
-**Base URL:** `http://localhost:8001` (Local)
+**Base URL:** `http://localhost:8001` (Local) 'https://prism-main-fastapi-backend.onrender.com' (Production)
+
+## Robustness & Error Handling
+The API implements strict error handling to prevent runtime crashes:
+- **Database Failures:** All critical database operations (creates/updates) are checked for success. If a record cannot be created, the API immediately returns a `500 Internal Server Error` rather than propagating invalid state.
+- **Type Safety:** The codebase uses strict type hinting (`Optional`, `List`, etc.) to ensure data integrity.
+- **Timezones:** All timestamps are stored and returned in UTC (`datetime.now(timezone.utc)`).
+
 
 ## Authentication (`/auth`)
 
@@ -20,6 +27,7 @@ Register a new user with a profile photo.
 *   `first_name` (str): User's first name.
 *   `last_name` (str, optional): User's last name.
 *   `image` (File): Profile photo file.
+*   `face_ids` (str, optional): JSON stringified list of face IDs from multi-view registration.
 
 **Response:**
 *   Returns the created user object with details:
@@ -34,6 +42,36 @@ Register a new user with a profile photo.
       "face_id": "uuid",
       "image_id": "uuid",
       "message": "User registered successfully"
+    }
+    ```
+
+
+
+### Multi-View Registration
+**POST** `/auth/multi-view-register`
+
+Internal endpoint called by the CV service to save face descriptors captured during the multi-view registration process.
+
+**Request (JSON):**
+```json
+{
+  "faces": [
+    {
+      "descriptor": [...], // 512-float vector
+      "pose": { "pitch": 0.0, "yaw": 0.0, "roll": 0.0 },
+      "quality": 0.95,
+      "view": "center"
+    },
+    ...
+  ]
+}
+```
+
+**Response:**
+*   Returns a list of created face IDs.
+    ```json
+    {
+      "face_ids": ["uuid1", "uuid2", ...]
     }
     ```
 
@@ -73,6 +111,37 @@ Get details of the currently authenticated user.
   ...
 }
 ```
+
+### Get User By ID
+**GET** `/users/{user_id}`
+
+Get user details by user ID.
+
+**Path Parameters:**
+*   `user_id` (str): ID of the user.
+
+**Response (JSON):**
+```json
+{
+  "id": "uuid",
+  "username": "jdoe",
+  "email": "jdoe@example.com",
+  "first_name": "John",
+  "last_name": "Doe",
+  "pronouns": "he/him",
+  "bio": "User bio text",
+  "dob": "1990-01-01",
+  "profile_pic_id": "uuid",
+  "country_code": "+1",
+  "phone_number": "1234567890",
+  "created_at": "2024-01-15T10:30:00Z",
+  "photos_count": 42,
+  "friends_count": 15
+}
+```
+
+**Error Responses:**
+*   `404 Not Found`: User with the specified ID does not exist.
 
 ### Update Profile
 **PUT** `/users/me`
@@ -498,3 +567,27 @@ Reject a friend request notification.
   "user_id": "uuid"
 }
 ```
+
+### Mark Notifications Read
+**POST** `/notifications/mark-read`
+
+Mark all notifications as read for the current user.
+
+**Request (JSON):**
+```json
+{
+  "user_id": "uuid"
+}
+```
+
+## Notification Service Logic
+
+The `NotificationService` handles the creation and retrieval of user notifications.
+
+**Key Features:**
+- **Hybrid Fetching:** `get_user_notifications` combines persisted notifications (from `notifications` table) with live pending friend requests (from `friendships` table) to provide a unified activity feed.
+- **Auto-Generation:** Notifications are automatically generated for:
+    - Friend Request Accepted (`friend_req_accepted`)
+    - Batch Shared (`batch_shared`)
+    - Batch Received (`batch_received`)
+- **Smart Filtering:** The service filters out duplicate "friend request received" notifications if a live pending request already exists, preventing clutter.

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:prism/api/api_client.dart';
 import 'package:prism/models/user_model.dart';
@@ -108,11 +109,51 @@ class ProfileProvider with ChangeNotifier {
       await _databaseService.updateUserSession(updatedUser);
 
       debugPrint('Profile updated successfully');
-      _setLoading(false);
+
+      // Refetch profile from backend to ensure we have the latest data
+      debugPrint('Refetching profile to confirm latest data');
+      await fetchUserProfile(userId);
+
       return true;
     } catch (e) {
       debugPrint('Error updating profile: $e');
       _setError('Failed to update profile: ${e.toString()}');
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// Upload profile picture
+  Future<bool> uploadProfilePicture({
+    required String userId,
+    required File profileImage,
+  }) async {
+    try {
+      _setLoading(true);
+      _setError(null);
+
+      debugPrint('Uploading profile picture for user: $userId');
+
+      final updatedUser = await _apiClient.uploadProfilePicture(
+        userId: userId,
+        profileImage: profileImage,
+      );
+
+      _currentUser = updatedUser;
+
+      // Update database cache
+      await _databaseService.updateUserSession(updatedUser);
+
+      debugPrint('Profile picture uploaded successfully');
+
+      // Refetch profile from backend to ensure we have the latest data
+      debugPrint('Refetching profile to confirm latest data');
+      await fetchUserProfile(userId);
+
+      return true;
+    } catch (e) {
+      debugPrint('Error uploading profile picture: $e');
+      _setError('Failed to upload profile picture: ${e.toString()}');
       _setLoading(false);
       return false;
     }

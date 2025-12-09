@@ -3,7 +3,11 @@ import 'package:provider/provider.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/models/friend_model.dart';
-import 'package:prism/utils/theme.dart';
+import 'package:prism/screens/user_profile_screen.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:prism/theme/colors.dart';
+import 'package:prism/theme/text_styles.dart';
+import 'package:prism/widgets/glass_widgets.dart';
 
 class FriendsScreen extends StatefulWidget {
   const FriendsScreen({super.key});
@@ -45,75 +49,61 @@ class _FriendsScreenState extends State<FriendsScreen>
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
+    // No GradientScaffold, rely on Home background
     final authProvider = Provider.of<AuthProvider>(context);
     final friendsProvider = Provider.of<FriendsProvider>(context);
 
     return Scaffold(
-      backgroundColor: AppTheme.primaryBackground(context),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Header
-            Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: AppTheme.horizontalPadding(context),
-                vertical: size.height * 0.015,
-              ),
-              child: Row(
-                children: [
-                  Text(
-                    'Friends',
-                    style: AppTheme.headlineStyle(
-                      context,
-                    ).copyWith(fontSize: size.width * 0.06),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: Icon(
-                      Icons.refresh,
-                      color: AppTheme.primaryText(context),
-                      size: size.width * 0.06,
-                    ),
-                    onPressed: () {
-                      if (authProvider.currentUser != null) {
-                        friendsProvider.refreshAll(
-                          authProvider.currentUser!.userId,
-                        );
-                      }
-                    },
-                  ),
-                ],
-              ),
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        title: Text(
+          'Friends',
+          style: PrismTextStyles.h2,
+        ),
+        backgroundColor: Colors.transparent,
+        centerTitle: false,
+        elevation: 0,
+        automaticallyImplyLeading: false, // Managed by Home tabs usually
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white70),
+            onPressed: () {
+              if (authProvider.currentUser != null) {
+                friendsProvider.refreshAll(authProvider.currentUser!.userId);
+              }
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(70),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            height: 50,
+            decoration: BoxDecoration(
+              color: PrismColors.glassDark,
+              borderRadius: BorderRadius.circular(25),
+              border: Border.all(color: Colors.white10),
             ),
-
-            // Tab Bar
-            Container(
-              margin: EdgeInsets.symmetric(
-                horizontal: AppTheme.horizontalPadding(context),
-              ),
-              decoration: BoxDecoration(
-                color: AppTheme.darkDotInactive.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(12),
-              ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(25),
               child: TabBar(
                 controller: _tabController,
-                indicator: BoxDecoration(
-                  color: AppTheme.primaryAccent,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                labelColor: Colors.white,
-                unselectedLabelColor: AppTheme.secondaryText(context),
-                labelStyle: TextStyle(
-                  fontSize: size.width * 0.032,
-                  fontWeight: FontWeight.w600,
-                ),
-                unselectedLabelStyle: TextStyle(
-                  fontSize: size.width * 0.032,
-                  fontWeight: FontWeight.normal,
-                ),
+                isScrollable: true, // Keep scrollable for safe fit
+                tabAlignment: TabAlignment.start,
+                padding: EdgeInsets.zero, // Remove default padding that might cause offsetting
+                labelPadding: const EdgeInsets.symmetric(horizontal: 20), // Consistent padding
                 indicatorSize: TabBarIndicatorSize.tab,
                 dividerColor: Colors.transparent,
+                indicator: BoxDecoration(
+                  color: PrismColors.purple.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(25),
+                  border: Border.all(color: PrismColors.purple.withOpacity(0.5)),
+                ),
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white54,
+                labelStyle: PrismTextStyles.bodyMedium.copyWith(fontWeight: FontWeight.bold),
+                unselectedLabelStyle: PrismTextStyles.bodyMedium,
                 tabs: const [
                   Tab(text: 'Friends'),
                   Tab(text: 'Add Friend'),
@@ -122,765 +112,471 @@ class _FriendsScreenState extends State<FriendsScreen>
                 ],
               ),
             ),
-
-            SizedBox(height: size.height * 0.02),
-
-            // Tab Views
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildFriendsTab(friendsProvider, authProvider, size),
-                  _buildAddFriendTab(friendsProvider, authProvider, size),
-                  _buildPendingRequestsTab(friendsProvider, authProvider, size),
-                  _buildSentRequestsTab(friendsProvider, authProvider, size),
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildFriendsTab(friendsProvider, authProvider),
+          _buildAddFriendTab(friendsProvider, authProvider),
+          _buildPendingRequestsTab(friendsProvider, authProvider),
+          _buildSentRequestsTab(friendsProvider, authProvider),
+        ],
       ),
     );
   }
 
   // Friends Tab
-  Widget _buildFriendsTab(
-    FriendsProvider provider,
-    AuthProvider authProvider,
-    Size size,
-  ) {
+  Widget _buildFriendsTab(FriendsProvider provider, AuthProvider authProvider) {
     if (provider.isLoading) {
-      return Center(
-        child: CircularProgressIndicator(color: AppTheme.primaryAccent),
-      );
+      return Center(child: CircularProgressIndicator(color: PrismColors.purple));
     }
 
     if (provider.friends.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.people_outline,
-              size: size.width * 0.2,
-              color: AppTheme.tertiaryText(context),
-            ),
-            SizedBox(height: size.height * 0.02),
-            Text(
-              'No friends yet',
-              style: TextStyle(
-                color: AppTheme.secondaryText(context),
-                fontSize: size.width * 0.04,
-              ),
-            ),
-            SizedBox(height: size.height * 0.01),
-            Text(
-              'Add friends to see them here',
-              style: TextStyle(
-                color: AppTheme.tertiaryText(context),
-                fontSize: size.width * 0.035,
-              ),
-            ),
-          ],
-        ),
-      );
+      return _buildEmptyState('No friends yet', 'Add friends to see them here', Icons.people_outline_rounded);
     }
 
-    return ListView.builder(
-      padding: EdgeInsets.symmetric(
-        horizontal: AppTheme.horizontalPadding(context),
-      ),
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       itemCount: provider.friends.length,
+      separatorBuilder: (context, index) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final friend = provider.friends[index];
-        return _buildFriendCard(friend, size);
+        return _buildFriendCard(friend);
       },
     );
   }
 
   // Add Friend Tab
-  Widget _buildAddFriendTab(
-    FriendsProvider provider,
-    AuthProvider authProvider,
-    Size size,
-  ) {
+  Widget _buildAddFriendTab(FriendsProvider provider, AuthProvider authProvider) {
     return Column(
       children: [
         // Search Bar
         Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: AppTheme.horizontalPadding(context),
-          ),
-          child: TextField(
-            controller: _searchController,
-            style: TextStyle(color: AppTheme.primaryText(context)),
-            decoration: InputDecoration(
-              hintText: 'Search by username...',
-              hintStyle: TextStyle(color: AppTheme.tertiaryText(context)),
-              filled: true,
-              fillColor: AppTheme.darkDotInactive,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
+          padding: const EdgeInsets.all(16.0),
+          child: GlassCard(
+            borderRadius: 16,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: _searchController,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Search by username...',
+                hintStyle: const TextStyle(color: Colors.white38),
+                border: InputBorder.none,
+                icon: const Icon(Icons.search_rounded, color: Colors.white54),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded, color: Colors.white54),
+                        onPressed: () {
+                          setState(() {
+                            _searchController.clear();
+                            provider.clearSearchResults();
+                          });
+                        },
+                      )
+                    : null,
               ),
-              prefixIcon: Icon(
-                Icons.search,
-                color: AppTheme.tertiaryText(context),
-              ),
-              suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
-                      icon: Icon(
-                        Icons.clear,
-                        color: AppTheme.tertiaryText(context),
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _searchController.clear();
-                          provider.clearSearchResults();
-                        });
-                      },
-                    )
-                  : null,
+              onChanged: (value) {
+                setState(() {});
+                if (authProvider.currentUser != null) {
+                  provider.searchUsers(value, authProvider.currentUser!.userId);
+                }
+              },
             ),
-            onChanged: (value) {
-              setState(() {});
-              if (authProvider.currentUser != null) {
-                provider.searchUsers(value, authProvider.currentUser!.userId);
-              }
-            },
           ),
         ),
-
-        SizedBox(height: size.height * 0.02),
 
         // Search Results
         Expanded(
           child: provider.isSearching
-              ? Center(
-                  child: CircularProgressIndicator(
-                    color: AppTheme.primaryAccent,
-                  ),
-                )
-              : provider.searchResults.isEmpty &&
-                    _searchController.text.isNotEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.search_off,
-                        size: size.width * 0.15,
-                        color: AppTheme.tertiaryText(context),
-                      ),
-                      SizedBox(height: size.height * 0.02),
-                      Text(
-                        'No users found',
-                        style: TextStyle(
-                          color: AppTheme.secondaryText(context),
-                          fontSize: size.width * 0.04,
+              ? Center(child: CircularProgressIndicator(color: PrismColors.purple))
+              : provider.searchResults.isEmpty && _searchController.text.isNotEmpty
+                  ? _buildEmptyState('No users found', 'Try a different username', Icons.search_off_rounded)
+                  : _searchController.text.isEmpty
+                      ? _buildEmptyState('Search for users', 'Find your friends on Prism', Icons.person_search_rounded)
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                          itemCount: provider.searchResults.length,
+                          separatorBuilder: (ctx, i) => const SizedBox(height: 12),
+                          itemBuilder: (context, index) {
+                            return _buildSearchResultCard(provider.searchResults[index], provider, authProvider);
+                          },
                         ),
-                      ),
-                    ],
-                  ),
-                )
-              : _searchController.text.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.person_search,
-                        size: size.width * 0.15,
-                        color: AppTheme.tertiaryText(context),
-                      ),
-                      SizedBox(height: size.height * 0.02),
-                      Text(
-                        'Search for users',
-                        style: TextStyle(
-                          color: AppTheme.secondaryText(context),
-                          fontSize: size.width * 0.04,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: AppTheme.horizontalPadding(context),
-                  ),
-                  itemCount: provider.searchResults.length,
-                  itemBuilder: (context, index) {
-                    final user = provider.searchResults[index];
-                    return _buildSearchResultCard(
-                      user,
-                      provider,
-                      authProvider,
-                      size,
-                    );
-                  },
-                ),
         ),
       ],
     );
   }
 
   // Pending Requests Tab
-  Widget _buildPendingRequestsTab(
-    FriendsProvider provider,
-    AuthProvider authProvider,
-    Size size,
-  ) {
-    if (provider.isLoading) {
-      return Center(
-        child: CircularProgressIndicator(color: AppTheme.primaryAccent),
-      );
-    }
+  Widget _buildPendingRequestsTab(FriendsProvider provider, AuthProvider authProvider) {
+    if (provider.isLoading) return Center(child: CircularProgressIndicator(color: PrismColors.purple));
+    if (provider.pendingRequests.isEmpty) return _buildEmptyState('No pending requests', '', Icons.inbox_rounded);
 
-    if (provider.pendingRequests.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.inbox_outlined,
-              size: size.width * 0.2,
-              color: AppTheme.tertiaryText(context),
-            ),
-            SizedBox(height: size.height * 0.02),
-            Text(
-              'No pending requests',
-              style: TextStyle(
-                color: AppTheme.secondaryText(context),
-                fontSize: size.width * 0.04,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: EdgeInsets.symmetric(
-        horizontal: AppTheme.horizontalPadding(context),
-      ),
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       itemCount: provider.pendingRequests.length,
+      separatorBuilder: (ctx, i) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
-        final request = provider.pendingRequests[index];
-        return _buildPendingRequestCard(request, provider, authProvider, size);
+        return _buildPendingRequestCard(provider.pendingRequests[index], provider, authProvider);
       },
     );
   }
 
   // Sent Requests Tab
-  Widget _buildSentRequestsTab(
-    FriendsProvider provider,
-    AuthProvider authProvider,
-    Size size,
-  ) {
-    if (provider.isLoading) {
-      return Center(
-        child: CircularProgressIndicator(color: AppTheme.primaryAccent),
-      );
-    }
+  Widget _buildSentRequestsTab(FriendsProvider provider, AuthProvider authProvider) {
+    if (provider.isLoading) return Center(child: CircularProgressIndicator(color: PrismColors.purple));
+    if (provider.sentRequests.isEmpty) return _buildEmptyState('No sent requests', '', Icons.send_rounded);
 
-    if (provider.sentRequests.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.send_outlined,
-              size: size.width * 0.2,
-              color: AppTheme.tertiaryText(context),
-            ),
-            SizedBox(height: size.height * 0.02),
-            Text(
-              'No sent requests',
-              style: TextStyle(
-                color: AppTheme.secondaryText(context),
-                fontSize: size.width * 0.04,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: EdgeInsets.symmetric(
-        horizontal: AppTheme.horizontalPadding(context),
-      ),
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       itemCount: provider.sentRequests.length,
+      separatorBuilder: (ctx, i) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
-        final request = provider.sentRequests[index];
-        return _buildSentRequestCard(request, size);
+        return _buildSentRequestCard(provider.sentRequests[index]);
       },
     );
   }
 
+  Widget _buildEmptyState(String title, String subtitle, IconData icon) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 64, color: Colors.white24),
+          const SizedBox(height: 16),
+          Text(title, style: PrismTextStyles.h3.copyWith(color: Colors.white54)),
+          if (subtitle.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(subtitle, style: PrismTextStyles.bodySmall.copyWith(color: Colors.white38)),
+          ],
+        ],
+      ),
+    );
+  }
+
   // Friend Card Widget
-  Widget _buildFriendCard(Friend friend, Size size) {
-    return Container(
-      margin: EdgeInsets.only(bottom: size.height * 0.015),
-      padding: EdgeInsets.all(size.width * 0.03),
-      decoration: BoxDecoration(
-        color: AppTheme.darkDotInactive.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          // Profile Picture
-          Container(
-            width: size.width * 0.13,
-            height: size.width * 0.13,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppTheme.darkDotInactive,
-              image: friend.profilePictureUrl.isNotEmpty
-                  ? DecorationImage(
-                      image: NetworkImage(friend.profilePictureUrl),
-                      fit: BoxFit.cover,
-                    )
-                  : null,
-            ),
-            child: friend.profilePictureUrl.isEmpty
-                ? Icon(
-                    Icons.person,
-                    size: size.width * 0.06,
-                    color: AppTheme.tertiaryText(context),
-                  )
-                : null,
-          ),
-          SizedBox(width: size.width * 0.03),
-          // Name and Username
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  friend.displayName,
-                  style: TextStyle(
-                    color: AppTheme.primaryText(context),
-                    fontSize: size.width * 0.04,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(height: size.height * 0.003),
-                Text(
-                  '@${friend.username}',
-                  style: TextStyle(
-                    color: AppTheme.secondaryText(context),
-                    fontSize: size.width * 0.033,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Options Button
-          IconButton(
-            icon: Icon(
-              Icons.more_vert,
-              color: AppTheme.tertiaryText(context),
-              size: size.width * 0.055,
-            ),
-            onPressed: () {
-              // TODO: Show options (view profile, unfriend, etc.)
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Search Result Card Widget
-  Widget _buildSearchResultCard(
-    Friend user,
-    FriendsProvider provider,
-    AuthProvider authProvider,
-    Size size,
-  ) {
-    // Check if already sent request
-    final hasSentRequest = provider.sentRequests.any(
-      (request) => request.username == user.username,
-    );
+  Widget _buildFriendCard(Friend friend) {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final friendsProvider = Provider.of<FriendsProvider>(context, listen: false);
+    final isKept = friend.keep != null && friend.keep!.isNotEmpty;
 
     return Container(
-      margin: EdgeInsets.only(bottom: size.height * 0.015),
-      padding: EdgeInsets.all(size.width * 0.03),
+      margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
       decoration: BoxDecoration(
-        color: AppTheme.darkDotInactive.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(12),
+        color: const Color(0xFF1E212B), // Deep solid color
+        borderRadius: BorderRadius.circular(12), // Slightly smaller radius
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
-      child: Row(
-        children: [
-          // Profile Picture
-          Container(
-            width: size.width * 0.13,
-            height: size.width * 0.13,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppTheme.darkDotInactive,
-              image: user.profilePictureUrl.isNotEmpty
-                  ? DecorationImage(
-                      image: NetworkImage(user.profilePictureUrl),
-                      fit: BoxFit.cover,
-                    )
-                  : null,
-            ),
-            child: user.profilePictureUrl.isEmpty
-                ? Icon(
-                    Icons.person,
-                    size: size.width * 0.06,
-                    color: AppTheme.tertiaryText(context),
-                  )
-                : null,
-          ),
-          SizedBox(width: size.width * 0.03),
-          // Name and Username
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  user.displayName,
-                  style: TextStyle(
-                    color: AppTheme.primaryText(context),
-                    fontSize: size.width * 0.04,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(height: size.height * 0.003),
-                Text(
-                  '@${user.username}',
-                  style: TextStyle(
-                    color: AppTheme.secondaryText(context),
-                    fontSize: size.width * 0.033,
-                  ),
-                ),
-                if (user.bio != null && user.bio!.isNotEmpty)
-                  Padding(
-                    padding: EdgeInsets.only(top: size.height * 0.005),
-                    child: Text(
-                      user.bio!,
-                      style: TextStyle(
-                        color: AppTheme.tertiaryText(context),
-                        fontSize: size.width * 0.03,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          // Add Friend Button
-          hasSentRequest
-              ? Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: size.width * 0.03,
-                    vertical: size.height * 0.008,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppTheme.darkDotInactive,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    'Pending',
-                    style: TextStyle(
-                      color: AppTheme.tertiaryText(context),
-                      fontSize: size.width * 0.032,
-                    ),
-                  ),
-                )
-              : GestureDetector(
-                  onTap: () async {
-                    if (authProvider.currentUser != null) {
-                      final success = await provider.sendFriendRequest(
-                        authProvider.currentUser!.userId,
-                        user.username,
-                      );
-
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              success
-                                  ? 'Friend request sent!'
-                                  : provider.error ?? 'Failed to send request',
-                            ),
-                            backgroundColor: success
-                                ? Colors.green
-                                : Colors.red,
-                          ),
-                        );
-                      }
-                    }
-                  },
-                  child: Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: size.width * 0.03,
-                      vertical: size.height * 0.008,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryAccent,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.person_add,
-                          size: size.width * 0.04,
-                          color: Colors.white,
-                        ),
-                        SizedBox(width: size.width * 0.01),
-                        Text(
-                          'Add',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: size.width * 0.032,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-        ],
-      ),
-    );
-  }
-
-  // Pending Request Card Widget
-  Widget _buildPendingRequestCard(
-    FriendRequest request,
-    FriendsProvider provider,
-    AuthProvider authProvider,
-    Size size,
-  ) {
-    return Container(
-      margin: EdgeInsets.only(bottom: size.height * 0.015),
-      padding: EdgeInsets.all(size.width * 0.03),
-      decoration: BoxDecoration(
-        color: AppTheme.darkDotInactive.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          // Profile Picture
-          Container(
-            width: size.width * 0.13,
-            height: size.width * 0.13,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppTheme.darkDotInactive,
-              image: request.profilePictureUrl.isNotEmpty
-                  ? DecorationImage(
-                      image: NetworkImage(request.profilePictureUrl),
-                      fit: BoxFit.cover,
-                    )
-                  : null,
-            ),
-            child: request.profilePictureUrl.isEmpty
-                ? Icon(
-                    Icons.person,
-                    size: size.width * 0.06,
-                    color: AppTheme.tertiaryText(context),
-                  )
-                : null,
-          ),
-          SizedBox(width: size.width * 0.03),
-          // Name and Username
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  request.displayName,
-                  style: TextStyle(
-                    color: AppTheme.primaryText(context),
-                    fontSize: size.width * 0.04,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(height: size.height * 0.003),
-                Text(
-                  '@${request.username}',
-                  style: TextStyle(
-                    color: AppTheme.secondaryText(context),
-                    fontSize: size.width * 0.033,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Accept Button
-          GestureDetector(
-            onTap: () async {
-              if (authProvider.currentUser != null) {
-                final success = await provider.acceptFriendRequest(
-                  request.friendshipId,
-                  authProvider.currentUser!.userId,
-                );
-
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        success
-                            ? 'Friend request accepted!'
-                            : provider.error ?? 'Failed to accept request',
-                      ),
-                      backgroundColor: success ? Colors.green : Colors.red,
-                    ),
-                  );
-                }
-              }
-            },
-            child: Container(
-              padding: EdgeInsets.all(size.width * 0.025),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), // Compact padding
+        leading: Stack(
+          children: [
+            Container(
+              width: 44, 
+              height: 44,
               decoration: BoxDecoration(
-                color: Colors.green,
                 shape: BoxShape.circle,
+                border: Border.all(color: PrismColors.primaryBlue.withOpacity(0.3), width: 1.5),
               ),
-              child: Icon(
-                Icons.check,
-                size: size.width * 0.045,
-                color: Colors.white,
+              child: CircleAvatar(
+                radius: 20,
+                backgroundColor: PrismColors.darkCard,
+                backgroundImage: friend.profilePictureUrl.isNotEmpty
+                    ? CachedNetworkImageProvider(friend.profilePictureUrl)
+                    : null,
+                child: friend.profilePictureUrl.isEmpty
+                    ? Text(friend.displayName[0].toUpperCase(), style: const TextStyle(color: Colors.white))
+                    : null,
               ),
             ),
-          ),
-          SizedBox(width: size.width * 0.02),
-          // Reject Button
-          GestureDetector(
-            onTap: () async {
-              if (authProvider.currentUser != null) {
-                final success = await provider.rejectFriendRequest(
-                  request.friendshipId,
-                  authProvider.currentUser!.userId,
-                );
-
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        success
-                            ? 'Friend request rejected'
-                            : provider.error ?? 'Failed to reject request',
-                      ),
-                      backgroundColor: success ? Colors.orange : Colors.red,
-                    ),
-                  );
-                }
-              }
-            },
-            child: Container(
-              padding: EdgeInsets.all(size.width * 0.025),
-              decoration: BoxDecoration(
-                color: Colors.red,
-                shape: BoxShape.circle,
+            if (isKept)
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: const BoxDecoration(
+                    color: PrismColors.electricBlue,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.push_pin_rounded, size: 10, color: Colors.white),
+                ),
               ),
-              child: Icon(
-                Icons.close,
-                size: size.width * 0.045,
-                color: Colors.white,
-              ),
+          ],
+        ),
+        title: Text(
+          friend.displayName, 
+          style: PrismTextStyles.bodyLarge.copyWith(fontWeight: FontWeight.w600, fontSize: 15)
+        ),
+        subtitle: Text(
+          '@${friend.username}', 
+          style: PrismTextStyles.bodySmall.copyWith(color: Colors.white54, fontSize: 13)
+        ),
+        trailing: IconButton(
+          icon: const Icon(Icons.more_vert_rounded, color: Colors.white38, size: 20),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+          onPressed: () {
+            // Show menu manually or use existing PopupMenu
+             final RenderBox box = context.findRenderObject() as RenderBox;
+             final Offset position = box.localToGlobal(Offset.zero);
+             showMenu<String>(
+              context: context,
+              position: RelativeRect.fromLTRB(position.dx + 250, position.dy, 0, 0),
+              color: PrismColors.darkCard,
+              items: [
+                PopupMenuItem(
+                  value: 'keep', 
+                  child: Row(
+                    children: [
+                       Icon(isKept ? Icons.push_pin_outlined : Icons.push_pin, color: Colors.white, size: 18),
+                       const SizedBox(width: 8),
+                       Text(isKept ? 'Unkeep' : 'Keep', style: const TextStyle(color: Colors.white)),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'block', 
+                  child: Row(
+                    children: [
+                       Icon(Icons.block, color: PrismColors.errorRed, size: 18),
+                       const SizedBox(width: 8),
+                       Text('Block', style: TextStyle(color: PrismColors.errorRed)),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'remove', 
+                  child: Row(
+                    children: [
+                       Icon(Icons.person_remove, color: Colors.white70, size: 18),
+                       const SizedBox(width: 8),
+                       Text('Remove', style: TextStyle(color: Colors.white70)),
+                    ],
+                  ),
+                ),
+              ],
+             ).then((value) async {
+                 if (authProvider.currentUser == null || value == null) return;
+                 switch (value) {
+                   case 'keep':
+                     await _handleToggleKeep(friend.userId, authProvider.currentUser!.userId, isKept, friend.displayName, friendsProvider);
+                     break;
+                   case 'block': 
+                      await _handleBlockUser(friend.userId, authProvider.currentUser!.userId, friend.displayName, friendsProvider);
+                     break;
+                   case 'remove': 
+                      await _handleRemoveFriend(friend.userId, authProvider.currentUser!.userId, friend.displayName, friendsProvider);
+                     break;
+                 }
+             });
+          },
+        ),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+               builder: (context) => UserProfileScreen(userId: friend.userId, username: friend.username),
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 
-  // Sent Request Card Widget
-  Widget _buildSentRequestCard(FriendRequest request, Size size) {
-    return Container(
-      margin: EdgeInsets.only(bottom: size.height * 0.015),
-      padding: EdgeInsets.all(size.width * 0.03),
-      decoration: BoxDecoration(
-        color: AppTheme.darkDotInactive.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(12),
+  Widget _buildSearchResultCard(Friend user, FriendsProvider provider, AuthProvider authProvider) {
+    final isFriend = provider.friends.any((f) => f.userId == user.userId);
+    final isPending = provider.sentRequests.any((r) => r.receiverId == user.userId);
+
+    return GlassCard(
+      borderRadius: 16,
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: Colors.white10,
+          backgroundImage: user.profilePictureUrl.isNotEmpty ? CachedNetworkImageProvider(user.profilePictureUrl) : null,
+          child: user.profilePictureUrl.isEmpty ? const Icon(Icons.person, color: Colors.white54) : null,
+        ),
+        title: Text(user.displayName, style: PrismTextStyles.bodyLarge),
+        subtitle: Text('@${user.username}', style: PrismTextStyles.bodySmall),
+        trailing: isFriend
+            ? const Icon(Icons.check_circle_rounded, color: PrismColors.successGreen)
+            : isPending
+                ? Text('Sent', style: PrismTextStyles.bodySmall.copyWith(color: PrismColors.electricBlue))
+                : GlassButton(
+                    text: 'Add',
+                    width: 70,
+                    height: 32,
+                    isPrimary: true,
+                    onPressed: () async {
+                       if (authProvider.currentUser != null) {
+                         await provider.sendFriendRequest(authProvider.currentUser!.userId, user.username);
+                       }
+                    },
+                  ),
+        onTap: () {
+           Navigator.push(context, MaterialPageRoute(builder: (_) => UserProfileScreen(userId: user.userId, username: user.username)));
+        },
       ),
-      child: Row(
-        children: [
-          // Profile Picture
-          Container(
-            width: size.width * 0.13,
-            height: size.width * 0.13,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppTheme.darkDotInactive,
-              image: request.profilePictureUrl.isNotEmpty
-                  ? DecorationImage(
-                      image: NetworkImage(request.profilePictureUrl),
-                      fit: BoxFit.cover,
-                    )
-                  : null,
+    );
+  }
+
+  Widget _buildPendingRequestCard(FriendRequest request, FriendsProvider provider, AuthProvider authProvider) {
+    return GlassCard(
+      borderRadius: 16,
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundImage: request.profilePictureUrl.isNotEmpty ? CachedNetworkImageProvider(request.profilePictureUrl) : null,
+           child: request.profilePictureUrl.isEmpty ? const Icon(Icons.person) : null,
+        ),
+        title: Text(request.displayName, style: PrismTextStyles.bodyLarge),
+        subtitle: Text('@${request.username}', style: PrismTextStyles.bodySmall),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.check_circle_rounded, color: PrismColors.successGreen, size: 32),
+              onPressed: () => provider.acceptFriendRequest(request.friendshipId, authProvider.currentUser!.userId),
             ),
-            child: request.profilePictureUrl.isEmpty
-                ? Icon(
-                    Icons.person,
-                    size: size.width * 0.06,
-                    color: AppTheme.tertiaryText(context),
-                  )
-                : null,
+            IconButton(
+              icon: const Icon(Icons.cancel_rounded, color: PrismColors.errorRed, size: 32),
+              onPressed: () => provider.rejectFriendRequest(request.friendshipId, authProvider.currentUser!.userId),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSentRequestCard(FriendRequest request) {
+    return GlassCard(
+      borderRadius: 16,
+      child: ListTile(
+        leading: CircleAvatar(child: const Icon(Icons.person)),
+        title: Text(request.username, style: PrismTextStyles.bodyLarge),
+        subtitle: Text('Request Sent', style: PrismTextStyles.bodySmall.copyWith(color: Colors.white54)),
+        trailing: const Icon(Icons.hourglass_empty_rounded, color: Colors.white30),
+      ),
+    );
+  }
+
+  // Handle Toggle Keep Status (Existing Logic kept)
+  Future<void> _handleToggleKeep(
+    String friendId,
+    String userId,
+    bool isCurrentlyKept,
+    String friendName,
+    FriendsProvider friendsProvider,
+  ) async {
+    final success = await friendsProvider.toggleKeepUser(
+      friendId,
+      userId,
+      isCurrentlyKept,
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? isCurrentlyKept
+                      ? '$friendName removed from keep list'
+                      : '$friendName added to keep list'
+                : friendsProvider.error ?? 'Failed to update keep status',
+            style: PrismTextStyles.bodyMedium,
           ),
-          SizedBox(width: size.width * 0.03),
-          // Name and Username
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  request.displayName,
-                  style: TextStyle(
-                    color: AppTheme.primaryText(context),
-                    fontSize: size.width * 0.04,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(height: size.height * 0.003),
-                Text(
-                  '@${request.username}',
-                  style: TextStyle(
-                    color: AppTheme.secondaryText(context),
-                    fontSize: size.width * 0.033,
-                  ),
-                ),
-              ],
-            ),
+          backgroundColor: success ? PrismColors.electricBlue : PrismColors.errorRed,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // Handle Block User
+  Future<void> _handleBlockUser(
+    String friendId,
+    String userId,
+    String friendName,
+    FriendsProvider friendsProvider,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: PrismColors.darkCard,
+        title: Text('Block User', style: PrismTextStyles.h3),
+        content: Text(
+          'Are you sure you want to block $friendName? They will be removed from your friends list.',
+          style: PrismTextStyles.bodyMedium,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+             child: Text('Cancel', style: TextStyle(color: Colors.white60)),
           ),
-          // Pending Badge
-          Container(
-            padding: EdgeInsets.symmetric(
-              horizontal: size.width * 0.03,
-              vertical: size.height * 0.008,
-            ),
-            decoration: BoxDecoration(
-              color: AppTheme.darkDotInactive,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.schedule,
-                  size: size.width * 0.035,
-                  color: AppTheme.secondaryText(context),
-                ),
-                SizedBox(width: size.width * 0.01),
-                Text(
-                  'Pending',
-                  style: TextStyle(
-                    color: AppTheme.secondaryText(context),
-                    fontSize: size.width * 0.032,
-                  ),
-                ),
-              ],
-            ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: PrismColors.errorRed),
+            child: const Text('Block'),
           ),
         ],
       ),
     );
+
+    if (confirmed != true) return;
+
+    final success = await friendsProvider.blockUser(friendId, userId);
+    // ... snackbar logic
+  }
+
+  // Handle Remove Friend
+    // ... similar logic update for remove friend
+
+  Future<void> _handleRemoveFriend(
+    String friendId,
+    String userId,
+    String friendName,
+    FriendsProvider friendsProvider,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove Friend'),
+        content: Text(
+          'Are you sure you want to remove $friendName from your friends list?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final success = await friendsProvider.unfriend(friendId, userId);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? '$friendName removed from friends'
+                : friendsProvider.error ?? 'Failed to remove friend',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 }

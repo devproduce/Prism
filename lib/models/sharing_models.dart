@@ -2,6 +2,7 @@
 
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:prism/utils/constants.dart';
 
 class BatchUploadResponse {
   final String batchId;
@@ -34,7 +35,7 @@ class DetectedRecipient {
 
   String get profilePictureUrl {
     if (profilePicId == null) return '';
-    return 'http://10.0.2.2:8001/images/$profilePicId';
+    return '${ApiConstants.baseUrl}/images/$profilePicId';
   }
 
   factory DetectedRecipient.fromJson(Map<String, dynamic> json) {
@@ -61,7 +62,7 @@ class DetectedContact {
 
   String get profilePictureUrl {
     if (profilePicId == null) return '';
-    return 'http://10.0.2.2:8001/images/$profilePicId';
+    return '${ApiConstants.baseUrl}/images/$profilePicId';
   }
 
   factory DetectedContact.fromJson(Map<String, dynamic> json) {

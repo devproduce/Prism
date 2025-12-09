@@ -1,10 +1,14 @@
+import 'dart:convert';
+import 'package:prism/utils/constants.dart';
+
 class NotificationModel {
   final String id;
-  final String type; // 'friend_request', 'image_share', etc.
-  final String message;
+  final String type; // 'friend_request', 'batch_share', 'friend_req_accepted', etc.
+  final String message; // Display message (from 'title' or 'message' field)
   final String? userId; // Related user (for friend requests)
   final String? username;
   final String? profilePicId;
+  final String? resourceId; // batch_id, friendship_id, etc.
   final Map<String, dynamic>? metadata; // Additional data
   final DateTime createdAt;
   final bool isRead;
@@ -16,6 +20,7 @@ class NotificationModel {
     this.userId,
     this.username,
     this.profilePicId,
+    this.resourceId,
     this.metadata,
     required this.createdAt,
     required this.isRead,
@@ -26,14 +31,33 @@ class NotificationModel {
     final idRaw = json['id'] ?? json['notification_id'];
     final id = idRaw?.toString() ?? '';
 
+    // Handle metadata safely
+    Map<String, dynamic>? metadata;
+    if (json['metadata'] is Map) {
+      metadata = Map<String, dynamic>.from(json['metadata']);
+    } else if (json['metadata'] is String) {
+      try {
+        final decoded = jsonDecode(json['metadata']);
+        if (decoded is Map) {
+          metadata = Map<String, dynamic>.from(decoded);
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+    }
+
+    // Backend returns 'title' field, not 'message'
+    final displayMessage = json['title'] ?? json['message'] ?? '';
+
     return NotificationModel(
       id: id,
       type: json['type'] ?? 'unknown',
-      message: json['message'] ?? '',
-      userId: json['user_id'] ?? json['related_user_id'],
+      message: displayMessage,
+      userId: json['user_id'],
       username: json['username'],
       profilePicId: json['profile_pic_id'],
-      metadata: json['metadata'] as Map<String, dynamic>?,
+      resourceId: json['resource_id'],
+      metadata: metadata,
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at']) ?? DateTime.now()
           : DateTime.now(),
@@ -57,7 +81,7 @@ class NotificationModel {
 
   String get profilePictureUrl {
     if (profilePicId != null && profilePicId!.isNotEmpty) {
-      return 'http://10.0.2.2:8001/images/$profilePicId';
+      return '${ApiConstants.baseUrl}/images/$profilePicId';
     }
     return '';
   }

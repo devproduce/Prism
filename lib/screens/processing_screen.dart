@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/screens/confirm_sharing_screen.dart';
 import 'package:prism/utils/theme.dart';
+import 'package:prism/widgets/gradient_scaffold.dart';
 
 class ProcessingScreen extends StatefulWidget {
   const ProcessingScreen({super.key});
@@ -44,60 +45,40 @@ class _ProcessingScreenState extends State<ProcessingScreen>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final size = MediaQuery.of(context).size;
-    final isDark = theme.brightness == Brightness.dark;
 
     return WillPopScope(
       onWillPop: () async {
         // Prevent back navigation during processing
         return false;
       },
-      child: Scaffold(
-        backgroundColor: theme.scaffoldBackgroundColor,
+      child: GradientScaffold(
         body: SafeArea(
           child: Consumer<SharingProvider>(
             builder: (context, sharingProvider, _) {
               // Navigate to confirm screen when processing is complete
               if (sharingProvider.batchStatus?.isCompleted == true &&
                   !_hasNavigated) {
-                debugPrint(
-                  '✅ [ProcessingScreen] Processing complete, navigating to confirm screen',
-                );
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   _navigateToConfirm();
                 });
-              }
-
-              // Show error if processing failed
-              if (sharingProvider.error != null && !_hasNavigated) {
-                debugPrint(
-                  '❌ [ProcessingScreen] Error detected: ${sharingProvider.error}',
-                );
               }
 
               return Column(
                 children: [
                   // Header
                   Padding(
-                    padding: EdgeInsets.all(size.width * 0.05),
+                    padding: const EdgeInsets.all(16.0),
                     child: Row(
                       children: [
-                        GestureDetector(
-                          onTap: () {
-                            _showCancelDialog(context, sharingProvider);
-                          },
-                          child: Icon(
-                            Icons.arrow_back,
-                            color: theme.colorScheme.onSurface,
-                          ),
+                        IconButton(
+                          onPressed: () =>
+                              _showCancelDialog(context, sharingProvider),
+                          icon: const Icon(Icons.close),
                         ),
-                        SizedBox(width: size.width * 0.04),
+                        const SizedBox(width: 8),
                         Text(
-                          'Prism',
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onSurface,
-                          ),
+                          'Processing',
+                          style: theme.textTheme.titleLarge,
                         ),
                       ],
                     ),
@@ -106,29 +87,24 @@ class _ProcessingScreenState extends State<ProcessingScreen>
                   // Error banner if present
                   if (sharingProvider.error != null)
                     Container(
-                      margin: EdgeInsets.symmetric(
-                        horizontal: size.width * 0.05,
-                        vertical: size.height * 0.01,
-                      ),
-                      padding: EdgeInsets.all(size.width * 0.04),
+                      margin: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.1),
-                        border: Border.all(color: Colors.red),
+                        color: theme.colorScheme.errorContainer,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
                         children: [
                           Icon(
                             Icons.error_outline,
-                            color: Colors.red,
-                            size: size.width * 0.06,
+                            color: theme.colorScheme.onErrorContainer,
                           ),
-                          SizedBox(width: size.width * 0.03),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: Text(
                               sharingProvider.error!,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: Colors.red,
+                              style: TextStyle(
+                                color: theme.colorScheme.onErrorContainer,
                               ),
                             ),
                           ),
@@ -143,104 +119,82 @@ class _ProcessingScreenState extends State<ProcessingScreen>
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           // Loading animation
-                          RotationTransition(
-                            turns: _animationController,
-                            child: Container(
-                              width: size.width * 0.25,
-                              height: size.width * 0.25,
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: [
-                                    AppTheme.primaryAccent,
-                                    AppTheme.primaryAccent.withOpacity(0.3),
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Center(
-                                child: Container(
-                                  width: size.width * 0.2,
-                                  height: size.width * 0.2,
-                                  decoration: BoxDecoration(
-                                    color: theme.scaffoldBackgroundColor,
-                                    shape: BoxShape.circle,
+                          SizedBox(
+                            width: 120,
+                            height: 120,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 120,
+                                  height: 120,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 8,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      theme.colorScheme.primaryContainer,
+                                    ),
                                   ),
                                 ),
-                              ),
+                                SizedBox(
+                                  width: 120,
+                                  height: 120,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 8,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      theme.colorScheme.primary,
+                                    ),
+                                    // Indeterminate for now, could be progress based
+                                  ),
+                                ),
+                                Icon(
+                                  Icons.auto_awesome,
+                                  size: 48,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ],
                             ),
                           ),
 
-                          SizedBox(height: size.height * 0.05),
+                          const SizedBox(height: 48),
 
                           // Status text
                           Text(
                             'Analyzing your content',
                             style: theme.textTheme.headlineSmall?.copyWith(
                               fontWeight: FontWeight.bold,
-                              color: theme.colorScheme.onSurface,
                             ),
                           ),
 
-                          SizedBox(height: size.height * 0.015),
+                          const SizedBox(height: 16),
 
                           Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: size.width * 0.1,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 32),
                             child: Text(
                               'Prism\'s AI is performing Triple-Filtered Relevance analysis.',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.colorScheme.onSurface.withOpacity(
-                                  0.6,
-                                ),
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
                               ),
                               textAlign: TextAlign.center,
                             ),
                           ),
 
-                          SizedBox(height: size.height * 0.06),
+                          const SizedBox(height: 48),
 
                           // Analysis steps
                           _buildAnalysisStep(
                             context,
                             'Face Recognition',
-                            sharingProvider.batchStatus?.isCompleted == true
-                                ? 'Done'
-                                : 'In Progress',
                             sharingProvider.batchStatus?.isCompleted == true,
-                            size,
-                            theme,
-                            isDark,
                           ),
-
-                          SizedBox(height: size.height * 0.02),
-
                           _buildAnalysisStep(
                             context,
                             'Object/Scene Analysis',
-                            sharingProvider.batchStatus?.isCompleted == true
-                                ? 'Done'
-                                : 'In Progress',
                             sharingProvider.batchStatus?.isCompleted == true,
-                            size,
-                            theme,
-                            isDark,
                           ),
-
-                          SizedBox(height: size.height * 0.02),
-
                           _buildAnalysisStep(
                             context,
                             'Video Content Analysis',
-                            sharingProvider.batchStatus?.isCompleted == true
-                                ? 'Done'
-                                : 'Pending',
                             sharingProvider.batchStatus?.isCompleted == true,
-                            size,
-                            theme,
-                            isDark,
                           ),
                         ],
                       ),
@@ -249,29 +203,17 @@ class _ProcessingScreenState extends State<ProcessingScreen>
 
                   // Stop button
                   Padding(
-                    padding: EdgeInsets.all(size.width * 0.05),
+                    padding: const EdgeInsets.all(24),
                     child: SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton(
+                      child: FilledButton(
                         onPressed: () =>
                             _showCancelDialog(context, sharingProvider),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: EdgeInsets.symmetric(
-                            vertical: size.height * 0.02,
-                          ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: theme.colorScheme.error,
+                          foregroundColor: theme.colorScheme.onError,
                         ),
-                        child: Text(
-                          'Stop Processing',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: size.width * 0.04,
-                          ),
-                        ),
+                        child: const Text('Stop Processing'),
                       ),
                     ),
                   ),
@@ -300,14 +242,16 @@ class _ProcessingScreenState extends State<ProcessingScreen>
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Continue Processing'),
           ),
-          TextButton(
+          FilledButton(
             onPressed: () {
-              debugPrint('⏹️ [ProcessingScreen] User cancelled processing');
               sharingProvider.cancel();
               Navigator.pop(dialogContext); // Close dialog
               Navigator.pop(context); // Close processing screen
             },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
             child: const Text('Stop'),
           ),
         ],
@@ -318,37 +262,28 @@ class _ProcessingScreenState extends State<ProcessingScreen>
   Widget _buildAnalysisStep(
     BuildContext context,
     String title,
-    String status,
     bool isCompleted,
-    Size size,
-    ThemeData theme,
-    bool isDark,
   ) {
-    return Container(
-      width: size.width * 0.8,
-      padding: EdgeInsets.all(size.width * 0.04),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[850] : Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-      ),
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 8),
       child: Row(
         children: [
-          Expanded(
-            child: Text(
-              title,
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: theme.colorScheme.onSurface,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+          Icon(
+            isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
+            color: isCompleted
+                ? theme.colorScheme.primary
+                : theme.colorScheme.onSurfaceVariant,
+            size: 20,
           ),
+          const SizedBox(width: 16),
           Text(
-            status,
-            style: theme.textTheme.bodyMedium?.copyWith(
+            title,
+            style: theme.textTheme.bodyLarge?.copyWith(
               color: isCompleted
-                  ? AppTheme.primaryAccent
-                  : theme.colorScheme.onSurface.withOpacity(0.6),
-              fontWeight: FontWeight.w600,
+                  ? theme.colorScheme.onSurface
+                  : theme.colorScheme.onSurfaceVariant,
+              fontWeight: isCompleted ? FontWeight.w600 : FontWeight.normal,
             ),
           ),
         ],

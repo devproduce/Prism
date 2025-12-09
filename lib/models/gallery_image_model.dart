@@ -2,11 +2,13 @@ class GalleryImage {
   final ImageData image;
   final List<FaceData> faces;
   final GalleryMeta galleryMeta;
+  final String? type; // 'sent' or 'received' from shared gallery API
 
   GalleryImage({
     required this.image,
     required this.faces,
     required this.galleryMeta,
+    this.type,
   });
 
   factory GalleryImage.fromJson(Map<String, dynamic> json) {
@@ -21,6 +23,7 @@ class GalleryImage {
         galleryMeta: GalleryMeta.fromJson(
           json['gallery_meta'] as Map<String, dynamic>? ?? {},
         ),
+        type: json['type']?.toString(),
       );
     } catch (e) {
       print('Error parsing GalleryImage: $e');
@@ -34,6 +37,7 @@ class GalleryImage {
       'image': image.toJson(),
       'faces': faces.map((face) => face.toJson()).toList(),
       'gallery_meta': galleryMeta.toJson(),
+      if (type != null) 'type': type,
     };
   }
 }
@@ -89,6 +93,37 @@ class ImageData {
       'height': height,
       'metadata': metadata,
     };
+  }
+
+  /// Check if the presigned URL is expired (for AWS S3/Supabase URLs)
+  bool get isUrlExpired {
+    try {
+      final uri = Uri.parse(imageUrl);
+      final dateParam = uri.queryParameters['X-Amz-Date'];
+      final expiresParam = uri.queryParameters['X-Amz-Expires'];
+
+      if (dateParam == null || expiresParam == null) {
+        // Not a signed URL, assume it's valid
+        return false;
+      }
+
+      // Parse the date (format: 20251128T081108Z)
+      final year = int.parse(dateParam.substring(0, 4));
+      final month = int.parse(dateParam.substring(4, 6));
+      final day = int.parse(dateParam.substring(6, 8));
+      final hour = int.parse(dateParam.substring(9, 11));
+      final minute = int.parse(dateParam.substring(11, 13));
+      final second = int.parse(dateParam.substring(13, 15));
+
+      final urlDate = DateTime.utc(year, month, day, hour, minute, second);
+      final expiresInSeconds = int.parse(expiresParam);
+      final expiryDate = urlDate.add(Duration(seconds: expiresInSeconds));
+
+      return DateTime.now().toUtc().isAfter(expiryDate);
+    } catch (e) {
+      // If we can't parse the URL, assume it's not expired
+      return false;
+    }
   }
 }
 

@@ -1,3 +1,5 @@
+import 'package:prism/utils/constants.dart';
+
 class UserModel {
   final String userId;
   final String username;
@@ -73,11 +75,15 @@ class UserModel {
 
   // Helper getter for profile picture URL
   String? get profilePictureUrl {
-    if (profilePicId == null) return null;
+    // Priority: imageId > profilePicId
+    final picId = imageId ?? profilePicId;
+    if (picId == null || picId.isEmpty) return null;
+    
     // If it's already a full URL, return it
-    if (profilePicId!.startsWith('http')) return profilePicId;
+    if (picId.startsWith('http')) return picId;
+    
     // Otherwise, construct the URL from base URL
-    return 'http://10.0.2.2:8001/images/$profilePicId';
+    return '${ApiConstants.baseUrl}/images/$picId';
   }
 
   UserModel copyWith({

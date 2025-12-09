@@ -9,77 +9,98 @@ class ImageInfoSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
+    final theme = Theme.of(context);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.darkBackground,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        builder: (context, scrollController) {
-          return Column(
+    return DraggableScrollableSheet(
+      initialChildSize: 0.6,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
             children: [
-              Container(
-                margin: const EdgeInsets.only(top: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.darkTertiaryText,
-                  borderRadius: BorderRadius.circular(2),
+              // Drag Handle
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 12, bottom: 8),
+                  width: 32,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
+              // Header
               Padding(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                 child: Row(
                   children: [
                     Text(
                       'Image Info',
-                      style: TextStyle(
-                        color: AppTheme.darkPrimaryText,
-                        fontSize: 20,
+                      style: theme.textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     const Spacer(),
                     IconButton(
-                      icon: Icon(Icons.close, color: AppTheme.darkPrimaryText),
+                      icon: const Icon(Icons.close),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ],
                 ),
               ),
+              const Divider(),
+              // Content
               Expanded(
                 child: ListView(
                   controller: scrollController,
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   children: [
                     _buildSection(
+                      context: context,
                       title: 'Basic Info',
                       children: [
-                        _buildInfoRow('Image ID', image.image.id),
+                        _buildInfoRow(context, 'Image ID', image.image.id),
                         if (image.image.takenAt != null)
                           _buildInfoRow(
+                            context,
                             'Date Taken',
                             _formatDateTime(image.image.takenAt!),
                           ),
-                        _buildInfoRow('Storage Path', image.image.storagePath),
+                        _buildInfoRow(
+                          context,
+                          'Storage Path',
+                          image.image.storagePath,
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
                     _buildSection(
+                      context: context,
                       title: 'Dimensions',
                       children: [
                         if (image.image.width != null)
-                          _buildInfoRow('Width', '${image.image.width} px'),
+                          _buildInfoRow(
+                            context,
+                            'Width',
+                            '${image.image.width} px',
+                          ),
                         if (image.image.height != null)
-                          _buildInfoRow('Height', '${image.image.height} px'),
+                          _buildInfoRow(
+                            context,
+                            'Height',
+                            '${image.image.height} px',
+                          ),
                         if (image.image.width != null &&
                             image.image.height != null)
                           _buildInfoRow(
+                            context,
                             'Aspect Ratio',
                             _calculateAspectRatio(
                               image.image.width!,
@@ -88,68 +109,57 @@ class ImageInfoSheet extends StatelessWidget {
                           ),
                       ],
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
                     _buildSection(
+                      context: context,
                       title: 'Faces Detected',
                       children: [
-                        _buildInfoRow('Face Count', '${image.faces.length}'),
+                        _buildInfoRow(
+                          context,
+                          'Face Count',
+                          '${image.faces.length}',
+                        ),
                         if (image.faces.isNotEmpty) ...[
                           const SizedBox(height: 12),
-                          ...image.faces
-                              .map(
-                                (face) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: Row(
-                                    children: [
-                                      CircleAvatar(
-                                        radius: 20,
-                                        backgroundColor: AppTheme.primaryAccent
-                                            .withOpacity(0.2),
-                                        child: Icon(
-                                          Icons.person,
-                                          color: AppTheme.primaryAccent,
-                                          size: 20,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              face.username ?? 'Unknown',
-                                              style: TextStyle(
-                                                color: AppTheme.darkPrimaryText,
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                            if (face.userId != null)
-                                              Text(
-                                                'ID: ${face.userId}',
-                                                style: TextStyle(
-                                                  color:
-                                                      AppTheme.darkTertiaryText,
-                                                  fontSize: 11,
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
+                          ...image.faces.map(
+                            (face) => Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: CircleAvatar(
+                                  backgroundColor: theme
+                                      .colorScheme.primaryContainer,
+                                  child: Icon(
+                                    Icons.person,
+                                    color: theme.colorScheme.onPrimaryContainer,
+                                    size: 20,
                                   ),
                                 ),
-                              )
-                              .toList(),
+                                title: Text(
+                                  face.username ?? 'Unknown',
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                subtitle: face.userId != null
+                                    ? Text(
+                                        'ID: ${face.userId}',
+                                        style: theme.textTheme.bodySmall,
+                                      )
+                                    : null,
+                              ),
+                            ),
+                          ),
                         ],
                       ],
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
                     _buildSection(
+                      context: context,
                       title: 'Status',
                       children: [
                         _buildInfoRow(
+                          context,
                           'Favourite',
                           image.galleryMeta.favourite ? 'Yes' : 'No',
                           valueColor: image.galleryMeta.favourite
@@ -157,25 +167,31 @@ class ImageInfoSheet extends StatelessWidget {
                               : null,
                         ),
                         _buildInfoRow(
+                          context,
                           'Archived',
                           image.galleryMeta.archive ? 'Yes' : 'No',
                         ),
                         _buildInfoRow(
+                          context,
                           'In Bin',
                           image.galleryMeta.bin ? 'Yes' : 'No',
-                          valueColor: image.galleryMeta.bin ? Colors.red : null,
+                          valueColor: image.galleryMeta.bin
+                              ? theme.colorScheme.error
+                              : null,
                         ),
                       ],
                     ),
                     if (image.image.metadata != null &&
                         image.image.metadata!.isNotEmpty) ...[
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 24),
                       _buildSection(
+                        context: context,
                         title: 'Metadata',
                         children: image.image.metadata!.entries
                             .where((entry) => entry.key != 'description')
                             .map(
                               (entry) => _buildInfoRow(
+                                context,
                                 _formatMetadataKey(entry.key),
                                 entry.value?.toString() ?? 'N/A',
                               ),
@@ -188,33 +204,33 @@ class ImageInfoSheet extends StatelessWidget {
                 ),
               ),
             ],
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
   Widget _buildSection({
+    required BuildContext context,
     required String title,
     required List<Widget> children,
   }) {
+    final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          style: TextStyle(
-            color: AppTheme.darkSecondaryText,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1,
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.bold,
           ),
         ),
         const SizedBox(height: 12),
         Container(
           decoration: BoxDecoration(
-            color: AppTheme.darkDotInactive.withOpacity(0.3),
-            borderRadius: BorderRadius.circular(12),
+            color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(16),
           ),
           padding: const EdgeInsets.all(16),
           child: Column(children: children),
@@ -223,7 +239,13 @@ class ImageInfoSheet extends StatelessWidget {
     );
   }
 
-  Widget _buildInfoRow(String label, String value, {Color? valueColor}) {
+  Widget _buildInfoRow(
+    BuildContext context,
+    String label,
+    String value, {
+    Color? valueColor,
+  }) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -233,16 +255,17 @@ class ImageInfoSheet extends StatelessWidget {
             flex: 2,
             child: Text(
               label,
-              style: TextStyle(color: AppTheme.darkTertiaryText, fontSize: 13),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
           Expanded(
             flex: 3,
             child: Text(
               value,
-              style: TextStyle(
-                color: valueColor ?? AppTheme.darkPrimaryText,
-                fontSize: 13,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: valueColor ?? theme.colorScheme.onSurface,
                 fontWeight: FontWeight.w500,
               ),
               textAlign: TextAlign.right,

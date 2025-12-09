@@ -3,13 +3,13 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/screens/shared_media_screen.dart';
+import 'package:prism/widgets/gradient_scaffold.dart';
 import 'package:prism/utils/theme.dart';
 
 class ConfirmSharingScreen extends StatelessWidget {
   const ConfirmSharingScreen({super.key});
 
   Future<void> _confirmShare(BuildContext context) async {
-    debugPrint('📤 [ConfirmSharingScreen] Confirming share...');
     final sharingProvider = context.read<SharingProvider>();
 
     final success = await sharingProvider.confirmShare();
@@ -17,23 +17,17 @@ class ConfirmSharingScreen extends StatelessWidget {
     if (!context.mounted) return;
 
     if (success) {
-      debugPrint(
-        '✅ [ConfirmSharingScreen] Share confirmed, navigating to success screen',
-      );
       // Navigate to shared media screen
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => const SharedMediaScreen()),
       );
     } else {
-      debugPrint(
-        '❌ [ConfirmSharingScreen] Share failed: ${sharingProvider.error}',
-      );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(sharingProvider.error ?? 'Failed to share images'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
+          backgroundColor: Theme.of(context).colorScheme.error,
+          behavior: SnackBarBehavior.floating,
         ),
       );
     }
@@ -42,74 +36,37 @@ class ConfirmSharingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final size = MediaQuery.of(context).size;
-    final isDark = theme.brightness == Brightness.dark;
+    final sharingProvider = Provider.of<SharingProvider>(context);
+    final batchStatus = sharingProvider.batchStatus;
+    final recipients = batchStatus?.recipients ?? [];
+    final selectedRecipients = sharingProvider.selectedRecipients;
 
-    return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      body: SafeArea(
-        child: Consumer<SharingProvider>(
-          builder: (context, sharingProvider, _) {
-            final batchStatus = sharingProvider.batchStatus;
-            final recipients = batchStatus?.recipients ?? [];
-            final selectedRecipients = sharingProvider.selectedRecipients;
-
-            return Column(
+    return GradientScaffold(
+      appBar: AppBar(
+        title: const Text('Confirm Sharing'),
+        backgroundColor: Colors.transparent,
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(16),
               children: [
-                // Header
-                Padding(
-                  padding: EdgeInsets.all(size.width * 0.05),
-                  child: Row(
-                    children: [
-                      GestureDetector(
-                        onTap: () {
-                          Navigator.pop(context);
-                        },
-                        child: Icon(
-                          Icons.arrow_back,
-                          color: theme.colorScheme.onSurface,
-                        ),
-                      ),
-                      SizedBox(width: size.width * 0.04),
-                      Text(
-                        'Confirm Sharing',
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: theme.colorScheme.onSurface,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
                 // Success banner
                 Container(
-                  margin: EdgeInsets.symmetric(horizontal: size.width * 0.05),
-                  padding: EdgeInsets.all(size.width * 0.04),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        AppTheme.primaryAccent,
-                        AppTheme.primaryAccent.withOpacity(0.7),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(12),
+                    color: theme.colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(16),
                   ),
                   child: Row(
                     children: [
-                      Container(
-                        padding: EdgeInsets.all(size.width * 0.02),
-                        decoration: const BoxDecoration(
-                          color: Colors.white24,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.check_circle_outline,
-                          color: Colors.white,
-                          size: size.width * 0.08,
-                        ),
+                      Icon(
+                        Icons.check_circle_outline,
+                        color: theme.colorScheme.onPrimaryContainer,
+                        size: 32,
                       ),
-                      SizedBox(width: size.width * 0.03),
+                      const SizedBox(width: 16),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -117,16 +74,15 @@ class ConfirmSharingScreen extends StatelessWidget {
                             Text(
                               'Personalized Sharing Applied!',
                               style: theme.textTheme.titleMedium?.copyWith(
-                                color: Colors.white,
+                                color: theme.colorScheme.onPrimaryContainer,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            SizedBox(height: size.height * 0.005),
+                            const SizedBox(height: 4),
                             Text(
                               'Everyone in your content will receive relevant photos and videos.',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: Colors.white.withOpacity(0.9),
-                                height: 1.3,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onPrimaryContainer,
                               ),
                             ),
                           ],
@@ -136,343 +92,207 @@ class ConfirmSharingScreen extends StatelessWidget {
                   ),
                 ),
 
-                SizedBox(height: size.height * 0.025),
+                const SizedBox(height: 24),
 
                 // Auto-Clean Toggle
-                Container(
-                  margin: EdgeInsets.symmetric(horizontal: size.width * 0.05),
-                  padding: EdgeInsets.all(size.width * 0.04),
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.grey[850] : Colors.grey[100],
-                    borderRadius: BorderRadius.circular(12),
+                SwitchListTile(
+                  value: sharingProvider.autoClean,
+                  onChanged: (_) => sharingProvider.toggleAutoClean(),
+                  title: const Text('Auto-Clean Media'),
+                  subtitle: const Text(
+                    'Automatically move media to the recipient if you or your faces aren\'t detected.',
                   ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: EdgeInsets.all(size.width * 0.02),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryAccent.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(
-                          Icons.auto_awesome,
-                          color: AppTheme.primaryAccent,
-                          size: size.width * 0.06,
-                        ),
-                      ),
-                      SizedBox(width: size.width * 0.03),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Auto-Clean Media',
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: theme.colorScheme.onSurface,
-                              ),
-                            ),
-                            SizedBox(height: size.height * 0.003),
-                            Text(
-                              'Automatically move media to the recipient if you or your faces aren\'t detected. You can change this anytime.',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurface.withOpacity(
-                                  0.6,
-                                ),
-                                height: 1.3,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Switch(
-                        value: sharingProvider.autoClean,
-                        onChanged: (_) => sharingProvider.toggleAutoClean(),
-                        activeColor: AppTheme.primaryAccent,
-                      ),
-                    ],
-                  ),
+                  secondary: const Icon(Icons.auto_awesome),
+                  contentPadding: EdgeInsets.zero,
                 ),
 
-                SizedBox(height: size.height * 0.025),
+                const SizedBox(height: 24),
 
                 // Recipients section
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: size.width * 0.05),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Recipients',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: theme.colorScheme.onSurface,
-                        ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Recipients',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
-                      Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: size.width * 0.03,
-                          vertical: size.height * 0.005,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryAccent.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          '${selectedRecipients.length} selected',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: AppTheme.primaryAccent,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                    Badge(
+                      label: Text('${selectedRecipients.length} selected'),
+                      backgroundColor: theme.colorScheme.primary,
+                    ),
+                  ],
                 ),
 
-                SizedBox(height: size.height * 0.015),
+                const SizedBox(height: 16),
 
                 // Recipients list
-                Expanded(
-                  child: recipients.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.people_outline,
-                                size: size.width * 0.15,
-                                color: theme.colorScheme.onSurface.withOpacity(
-                                  0.3,
-                                ),
-                              ),
-                              SizedBox(height: size.height * 0.02),
-                              Text(
-                                'No recipients detected',
-                                style: theme.textTheme.bodyLarge?.copyWith(
-                                  color: theme.colorScheme.onSurface
-                                      .withOpacity(0.6),
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: size.width * 0.05,
-                          ),
-                          itemCount: recipients.length,
-                          itemBuilder: (context, index) {
-                            final recipient = recipients[index];
-                            return _buildRecipientTile(
-                              context,
-                              recipient,
-                              size,
-                              theme,
-                              isDark,
-                              sharingProvider,
-                            );
-                          },
-                        ),
-                ),
-
-                // Footer info
-                Container(
-                  padding: EdgeInsets.all(size.width * 0.05),
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.grey[850] : Colors.grey[100],
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(20),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                if (recipients.isEmpty)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32.0),
+                      child: Column(
                         children: [
-                          Text(
-                            'Total Recipients',
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              color: theme.colorScheme.onSurface,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          Icon(
+                            Icons.people_outline,
+                            size: 48,
+                            color: theme.colorScheme.onSurfaceVariant,
                           ),
+                          const SizedBox(height: 16),
                           Text(
-                            '${selectedRecipients.length} People',
+                            'No recipients detected',
                             style: theme.textTheme.bodyLarge?.copyWith(
-                              color: AppTheme.primaryAccent,
-                              fontWeight: FontWeight.bold,
+                              color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
                       ),
-                      SizedBox(height: size.height * 0.01),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Total Content',
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              color: theme.colorScheme.onSurface,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          Text(
-                            '${batchStatus?.images.length ?? 0} photos, 3 videos',
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              color: theme.colorScheme.onSurface,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: size.height * 0.02),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: sharingProvider.isProcessing
-                              ? null
-                              : () => _confirmShare(context),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primaryAccent,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            padding: EdgeInsets.symmetric(
-                              vertical: size.height * 0.02,
-                            ),
-                          ),
-                          child: sharingProvider.isProcessing
-                              ? SizedBox(
-                                  height: size.width * 0.05,
-                                  width: size.width * 0.05,
-                                  child: const CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white,
-                                    ),
-                                  ),
-                                )
-                              : Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      'Prism Share',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: size.width * 0.04,
-                                      ),
-                                    ),
-                                    SizedBox(width: size.width * 0.02),
-                                    Icon(
-                                      Icons.arrow_forward,
-                                      color: Colors.white,
-                                      size: size.width * 0.05,
-                                    ),
-                                  ],
-                                ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRecipientTile(
-    BuildContext context,
-    dynamic recipient,
-    Size size,
-    ThemeData theme,
-    bool isDark,
-    SharingProvider sharingProvider,
-  ) {
-    return Container(
-      margin: EdgeInsets.only(bottom: size.height * 0.015),
-      padding: EdgeInsets.all(size.width * 0.04),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[850] : Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: recipient.isSelected
-              ? AppTheme.primaryAccent
-              : Colors.transparent,
-          width: 2,
-        ),
-      ),
-      child: Row(
-        children: [
-          // Profile picture
-          CircleAvatar(
-            radius: size.width * 0.06,
-            backgroundColor: AppTheme.primaryAccent.withOpacity(0.2),
-            backgroundImage: recipient.profilePictureUrl.isNotEmpty
-                ? CachedNetworkImageProvider(recipient.profilePictureUrl)
-                : null,
-            child: recipient.profilePictureUrl.isEmpty
-                ? Text(
-                    recipient.username[0].toUpperCase(),
-                    style: TextStyle(
-                      color: AppTheme.primaryAccent,
-                      fontWeight: FontWeight.bold,
-                      fontSize: size.width * 0.05,
                     ),
                   )
-                : null,
-          ),
-
-          SizedBox(width: size.width * 0.03),
-
-          // User info
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  recipient.username,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
-                SizedBox(height: size.height * 0.003),
-                Text(
-                  '${recipient.count} ${recipient.count == 1 ? 'video' : 'videos'}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withOpacity(0.6),
-                  ),
-                ),
+                else
+                  ...recipients.map((recipient) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0),
+                      child: CheckboxListTile(
+                        value: recipient.isSelected,
+                        onChanged: (_) =>
+                            sharingProvider.toggleRecipient(recipient.userId),
+                        title: Text(recipient.username),
+                        subtitle: Text(
+                          '${recipient.count} ${recipient.count == 1 ? 'item' : 'items'}',
+                        ),
+                        secondary: CircleAvatar(
+                          backgroundImage:
+                              recipient.profilePictureUrl.isNotEmpty
+                              ? CachedNetworkImageProvider(
+                                  recipient.profilePictureUrl,
+                                )
+                              : null,
+                          child: recipient.profilePictureUrl.isEmpty
+                              ? Text(recipient.username[0].toUpperCase())
+                              : null,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(
+                            color: theme.colorScheme.outlineVariant,
+                          ),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                      ),
+                    );
+                  }),
               ],
             ),
           ),
 
-          // Checkmark
-          GestureDetector(
-            onTap: () => sharingProvider.toggleRecipient(recipient.userId),
-            child: Container(
-              padding: EdgeInsets.all(size.width * 0.015),
-              decoration: BoxDecoration(
-                color: recipient.isSelected
-                    ? AppTheme.primaryAccent
-                    : Colors.transparent,
-                border: Border.all(
-                  color: recipient.isSelected
-                      ? AppTheme.primaryAccent
-                      : theme.colorScheme.onSurface.withOpacity(0.3),
-                  width: 2,
-                ),
-                shape: BoxShape.circle,
+          // Footer info
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
               ),
-              child: Icon(
-                Icons.check,
-                color: recipient.isSelected ? Colors.white : Colors.transparent,
-                size: size.width * 0.05,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, -5),
+                ),
+              ],
+            ),
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Total Recipients',
+                        style: theme.textTheme.bodyLarge,
+                      ),
+                      Text(
+                        '${selectedRecipients.length} People',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Total Content', style: theme.textTheme.bodyLarge),
+                      Text(
+                        '${batchStatus?.images.length ?? 0} items',
+                        style: theme.textTheme.bodyLarge,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'Unknown Faces',
+                            style: theme.textTheme.bodyLarge,
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.help_outline,
+                            size: 16,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ],
+                      ),
+                      Text(
+                        '${batchStatus?.unknowns.length ?? 0}',
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          color: (batchStatus?.unknowns.length ?? 0) > 0
+                              ? theme.colorScheme.tertiary
+                              : null,
+                          fontWeight: (batchStatus?.unknowns.length ?? 0) > 0
+                              ? FontWeight.bold
+                              : null,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: sharingProvider.isProcessing
+                          ? null
+                          : () => _confirmShare(context),
+                      icon: sharingProvider.isProcessing
+                          ? SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: theme.colorScheme.onPrimary,
+                              ),
+                            )
+                          : const Icon(Icons.arrow_forward),
+                      label: Text(
+                        sharingProvider.isProcessing
+                            ? 'Processing...'
+                            : 'Prism Share',
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

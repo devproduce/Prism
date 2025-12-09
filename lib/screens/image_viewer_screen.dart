@@ -1,23 +1,27 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:prism/models/gallery_image_model.dart';
-import 'package:prism/utils/theme.dart';
 import 'package:prism/widgets/image_info_sheet.dart';
 import 'package:prism/widgets/description_editor_dialog.dart';
 import 'package:provider/provider.dart';
 import 'package:prism/providers/gallery_provider.dart';
 import 'package:prism/providers/auth_provider.dart';
+import 'package:flutter/services.dart';
 
 class ImageViewerScreen extends StatefulWidget {
   final List<GalleryImage> images;
   final int initialIndex;
   final bool isFromBin;
+  final Function(File)? onShare;
 
   const ImageViewerScreen({
     super.key,
     required this.images,
     required this.initialIndex,
     this.isFromBin = false,
+    this.onShare,
   });
 
   @override
@@ -30,26 +34,62 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   bool _showControls = true;
   final TransformationController _transformationController =
       TransformationController();
+  late List<GalleryImage> _localImages;
+  double _rotationAngle = 0.0; // Rotation angle in radians
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
+    _localImages = List.from(widget.images); // Create mutable copy
     _pageController = PageController(initialPage: widget.initialIndex);
+    // Hide status bar for immersive experience
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   }
 
   @override
   void dispose() {
     _pageController.dispose();
     _transformationController.dispose();
+    // Restore status bar
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
     super.dispose();
   }
 
-  GalleryImage get currentImage => widget.images[_currentIndex];
+  GalleryImage get currentImage {
+    // Protect against out-of-bounds access
+    if (_currentIndex < 0 || _currentIndex >= _localImages.length) {
+      // Return a dummy image if index is invalid (should not happen in normal flow)
+      throw StateError(
+        'Invalid current index: $_currentIndex (list length: ${_localImages.length})',
+      );
+    }
+    return _localImages[_currentIndex];
+  }
+
+  void _updateCurrentImage(GalleryImage updatedImage) {
+    if (_currentIndex >= 0 && _currentIndex < _localImages.length) {
+      setState(() {
+        _localImages[_currentIndex] = updatedImage;
+      });
+    }
+  }
 
   void _toggleControls() {
     setState(() {
       _showControls = !_showControls;
+    });
+  }
+
+  void _rotateImage() {
+    setState(() {
+      _rotationAngle += 1.5708; // Rotate by 90 degrees (π/2 radians)
+      if (_rotationAngle >= 6.2832) {
+        _rotationAngle = 0; // Reset after 360 degrees
+      }
     });
   }
 
@@ -62,32 +102,48 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
     if (authProvider.currentUser != null) {
       try {
+        // Optimistically update UI immediately
+        final newValue = !currentImage.galleryMeta.favourite;
+        _updateCurrentImage(
+          GalleryImage(
+            image: currentImage.image,
+            faces: currentImage.faces,
+            galleryMeta: GalleryMeta(
+              favourite: newValue,
+              archive: currentImage.galleryMeta.archive,
+              bin: currentImage.galleryMeta.bin,
+            ),
+          ),
+        );
+
+        // Then update backend
         await galleryProvider.toggleImageStatus(
           userId: authProvider.currentUser!.userId,
           imageId: currentImage.image.id,
           field: 'favourite',
         );
-        setState(() {});
+
+        // Success - no snackbar needed
+      } catch (e) {
+        // Revert on error
+        _updateCurrentImage(
+          GalleryImage(
+            image: currentImage.image,
+            faces: currentImage.faces,
+            galleryMeta: GalleryMeta(
+              favourite: !currentImage.galleryMeta.favourite,
+              archive: currentImage.galleryMeta.archive,
+              bin: currentImage.galleryMeta.bin,
+            ),
+          ),
+        );
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                currentImage.galleryMeta.favourite
-                    ? 'Added to favourites'
-                    : 'Removed from favourites',
-              ),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 1),
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
               content: Text('Failed to toggle favourite: $e'),
-              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: Theme.of(context).colorScheme.error,
               duration: const Duration(seconds: 2),
             ),
           );
@@ -105,30 +161,48 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
     if (authProvider.currentUser != null) {
       try {
+        // Optimistically update UI immediately
+        final newValue = !currentImage.galleryMeta.archive;
+        _updateCurrentImage(
+          GalleryImage(
+            image: currentImage.image,
+            faces: currentImage.faces,
+            galleryMeta: GalleryMeta(
+              favourite: currentImage.galleryMeta.favourite,
+              archive: newValue,
+              bin: currentImage.galleryMeta.bin,
+            ),
+          ),
+        );
+
+        // Then update backend
         await galleryProvider.toggleImageStatus(
           userId: authProvider.currentUser!.userId,
           imageId: currentImage.image.id,
           field: 'archive',
         );
-        setState(() {});
+
+        // Success - no snackbar needed
+      } catch (e) {
+        // Revert on error
+        _updateCurrentImage(
+          GalleryImage(
+            image: currentImage.image,
+            faces: currentImage.faces,
+            galleryMeta: GalleryMeta(
+              favourite: currentImage.galleryMeta.favourite,
+              archive: !currentImage.galleryMeta.archive,
+              bin: currentImage.galleryMeta.bin,
+            ),
+          ),
+        );
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                currentImage.galleryMeta.archive ? 'Archived' : 'Unarchived',
-              ),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 1),
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
               content: Text('Failed to toggle archive: $e'),
-              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: Theme.of(context).colorScheme.error,
               duration: const Duration(seconds: 2),
             ),
           );
@@ -141,26 +215,22 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.darkBackground,
-        title: Text(
-          'Move to Bin?',
-          style: TextStyle(color: AppTheme.darkPrimaryText),
-        ),
-        content: Text(
+        title: const Text('Move to Bin?'),
+        content: const Text(
           'This image will be moved to the bin. You can restore it later.',
-          style: TextStyle(color: AppTheme.darkSecondaryText),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: AppTheme.darkSecondaryText),
-            ),
+            child: const Text('Cancel'),
           ),
-          TextButton(
+          FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text('Move to Bin', style: TextStyle(color: Colors.red)),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            child: const Text('Move to Bin'),
           ),
         ],
       ),
@@ -174,21 +244,33 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
       );
 
       if (authProvider.currentUser != null) {
-        await galleryProvider.toggleImageStatus(
-          userId: authProvider.currentUser!.userId,
-          imageId: currentImage.image.id,
-          field: 'bin',
-        );
+        try {
+          final imageIdToDelete = currentImage.image.id;
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Image moved to bin'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 2),
-            ),
+          // Update backend first
+          await galleryProvider.toggleImageStatus(
+            userId: authProvider.currentUser!.userId,
+            imageId: imageIdToDelete,
+            field: 'bin',
           );
-          Navigator.pop(context);
+
+          if (mounted) {
+            // Success - no snackbar needed
+
+            // Always close viewer to return to home screen
+            Navigator.pop(context);
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Failed to move to bin: $e'),
+                behavior: SnackBarBehavior.floating,
+                backgroundColor: Theme.of(context).colorScheme.error,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
         }
       }
     }
@@ -209,13 +291,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         );
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Image restored successfully'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 2),
-            ),
-          );
+          // Success - no snackbar needed
           Navigator.pop(context);
         }
       } catch (e) {
@@ -223,7 +299,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Failed to restore: $e'),
-              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: Theme.of(context).colorScheme.error,
             ),
           );
         }
@@ -245,30 +322,20 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+      showDragHandle: true,
       builder: (context) => ImageInfoSheet(image: currentImage),
     );
   }
 
-  Widget _buildBottomActionBar(Size size) {
+  Widget _buildBottomActionBar() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     // If image is in bin, only show restore option
     if (widget.isFromBin || currentImage.galleryMeta.bin) {
       return Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: size.width * 0.02,
-          vertical: size.height * 0.02,
-        ),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [
-              Colors.black.withOpacity(0.8),
-              Colors.black.withOpacity(0.6),
-              Colors.transparent,
-            ],
-          ),
-        ),
+        color: Colors.black.withOpacity(0.7),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -282,6 +349,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             _buildActionButton(
               icon: Icons.info_outline,
               label: 'Info',
+              color: Colors.white,
               onTap: _showImageInfo,
             ),
           ],
@@ -291,29 +359,35 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
     // Normal action bar for non-bin images
     return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: size.width * 0.02,
-        vertical: size.height * 0.02,
-      ),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.bottomCenter,
-          end: Alignment.topCenter,
-          colors: [
-            Colors.black.withOpacity(0.8),
-            Colors.black.withOpacity(0.6),
-            Colors.transparent,
-          ],
-        ),
-      ),
+      color: Colors.black.withOpacity(0.7),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _buildActionButton(
             icon: Icons.share_outlined,
             label: 'Share',
-            onTap: () {
-              Navigator.pushNamed(context, '/share');
+            color: Colors.white,
+            onTap: () async {
+              if (widget.onShare != null) {
+                try {
+                  final file = await DefaultCacheManager().getSingleFile(
+                    currentImage.image.imageUrl,
+                  );
+                  widget.onShare!(file);
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Failed to prepare image: $e'),
+                        backgroundColor: Theme.of(context).colorScheme.error,
+                      ),
+                    );
+                  }
+                }
+              } else {
+                Navigator.pushNamed(context, '/share');
+              }
             },
           ),
           _buildActionButton(
@@ -331,22 +405,31 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                 ? Icons.unarchive
                 : Icons.archive_outlined,
             label: 'Archive',
+            color: Colors.white,
             onTap: _toggleArchive,
+          ),
+          _buildActionButton(
+            icon: Icons.rotate_right,
+            label: 'Rotate',
+            color: Colors.white,
+            onTap: _rotateImage,
           ),
           _buildActionButton(
             icon: Icons.edit_outlined,
             label: 'Edit',
+            color: Colors.white,
             onTap: _showDescriptionEditor,
           ),
           _buildActionButton(
             icon: Icons.info_outline,
             label: 'Info',
+            color: Colors.white,
             onTap: _showImageInfo,
           ),
           _buildActionButton(
             icon: Icons.delete_outline,
             label: 'Delete',
-            color: Colors.red,
+            color: colorScheme.error,
             onTap: _moveToBin,
           ),
         ],
@@ -358,22 +441,23 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
     required IconData icon,
     required String label,
     required VoidCallback onTap,
-    Color? color,
+    required Color color,
   }) {
-    return GestureDetector(
+    return InkWell(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: color ?? Colors.white, size: 28),
+            Icon(icon, color: color, size: 24),
             const SizedBox(height: 4),
             Text(
               label,
               style: TextStyle(
-                color: color ?? Colors.white,
-                fontSize: 11,
+                color: color,
+                fontSize: 10,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -385,8 +469,6 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-
     return Scaffold(
       backgroundColor: Colors.black,
       extendBodyBehindAppBar: true,
@@ -394,20 +476,12 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
           ? AppBar(
               backgroundColor: Colors.black.withOpacity(0.5),
               elevation: 0,
-              leading: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
-              ),
+              iconTheme: const IconThemeData(color: Colors.white),
+              systemOverlayStyle: SystemUiOverlayStyle.light,
               title: Text(
                 '${_currentIndex + 1} / ${widget.images.length}',
                 style: const TextStyle(color: Colors.white),
               ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
             )
           : null,
       body: Stack(
@@ -419,6 +493,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
               setState(() {
                 _currentIndex = index;
                 _transformationController.value = Matrix4.identity();
+                _rotationAngle = 0.0; // Reset rotation when changing images
               });
             },
             itemBuilder: (context, index) {
@@ -430,23 +505,24 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                   minScale: 0.5,
                   maxScale: 4.0,
                   child: Center(
-                    child: Hero(
-                      tag: 'image_${image.image.id}',
-                      child: CachedNetworkImage(
-                        imageUrl: image.image.imageUrl,
-                        fit: BoxFit.contain,
-                        maxHeightDiskCache: 1920,
-                        maxWidthDiskCache: 1920,
-                        placeholder: (context, url) => Center(
-                          child: CircularProgressIndicator(
-                            color: AppTheme.primaryAccent,
+                    child: Transform.rotate(
+                      angle: _rotationAngle,
+                      child: Hero(
+                        tag: 'image_${image.image.id}',
+                        child: CachedNetworkImage(
+                          imageUrl: image.image.imageUrl,
+                          fit: BoxFit.contain,
+                          placeholder: (context, url) => Center(
+                            child: CircularProgressIndicator(
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
                           ),
-                        ),
-                        errorWidget: (context, url, error) => Center(
-                          child: Icon(
-                            Icons.broken_image,
-                            color: Colors.white.withOpacity(0.5),
-                            size: 64,
+                          errorWidget: (context, url, error) => const Center(
+                            child: Icon(
+                              Icons.broken_image,
+                              color: Colors.white54,
+                              size: 64,
+                            ),
                           ),
                         ),
                       ),
@@ -462,7 +538,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
               bottom: 0,
               left: 0,
               right: 0,
-              child: _buildBottomActionBar(size),
+              child: SafeArea(top: false, child: _buildBottomActionBar()),
             ),
         ],
       ),

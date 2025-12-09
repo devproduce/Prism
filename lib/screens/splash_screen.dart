@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:prism/screens/onboarding_screen.dart';
 import 'package:prism/screens/home_screen.dart';
-import 'package:prism/utils/theme.dart';
+import 'package:prism/theme/colors.dart';
+import 'package:prism/widgets/gradient_background.dart';
+import 'package:prism/theme/text_styles.dart';
 import 'package:prism/providers/auth_provider.dart';
+import 'package:prism/providers/notifications_provider.dart';
 import 'package:provider/provider.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -13,223 +16,158 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
-    with TickerProviderStateMixin {
-  late AnimationController _logoController;
-  late AnimationController _textController;
-  late AnimationController _taglineController;
-
-  late Animation<double> _logoScaleAnimation;
-  late Animation<double> _logoOpacityAnimation;
-  late Animation<double> _textOpacityAnimation;
-  late Animation<double> _taglineOpacityAnimation;
-  late Animation<Offset> _taglineSlideAnimation;
-
+class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
+    _checkAuthAndNavigate();
+  }
 
-    // Logo animation controller
-    _logoController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
+  Future<void> _checkAuthAndNavigate() async {
+    // Minimum splash duration
+    await Future.delayed(const Duration(milliseconds: 2500));
 
-    // Text animation controller
-    _textController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 400),
-    );
+    if (!mounted) return;
 
-    // Tagline animation controller
-    _taglineController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 400),
-    );
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    await authProvider.initializeAuth();
 
-    // Logo animations
-    _logoScaleAnimation = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _logoController, curve: Curves.elasticOut),
-    );
+    // Request notification permissions
+    if (mounted) {
+      // Don't await this to avoid blocking navigation too long if permission dialog is slow
+      Provider.of<NotificationsProvider>(
+        context,
+        listen: false,
+      ).requestPermissions();
+    }
 
-    _logoOpacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _logoController,
-        curve: const Interval(0.0, 0.5, curve: Curves.easeIn),
-      ),
-    );
+    if (!mounted) return;
 
-    // Text opacity animation
-    _textOpacityAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(parent: _textController, curve: Curves.easeIn));
-
-    // Tagline animations
-    _taglineOpacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _taglineController, curve: Curves.easeIn),
-    );
-
-    _taglineSlideAnimation =
-        Tween<Offset>(begin: const Offset(0, 0.5), end: Offset.zero).animate(
-          CurvedAnimation(parent: _taglineController, curve: Curves.easeOut),
+    if (authProvider.isAuthenticated && authProvider.currentUser != null) {
+      // Validate session with backend to ensure it's still valid
+      // (handles cases like app reinstall, expired tokens, etc.)
+      try {
+        await authProvider.apiClient.getCurrentUser(
+          authProvider.currentUser!.userId,
         );
 
-    // Start animations in sequence
-    _startAnimations();
-  }
-
-  void _startAnimations() async {
-    await _logoController.forward();
-    await _textController.forward();
-    await _taglineController.forward();
-
-    // Check login status and navigate accordingly
-    Timer(const Duration(milliseconds: 300), () async {
-      if (mounted) {
-        final authProvider = Provider.of<AuthProvider>(context, listen: false);
-        await authProvider.initializeAuth();
-
-        if (mounted) {
-          if (authProvider.isAuthenticated) {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
-            );
-          } else {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (context) => const OnboardingScreen()),
-            );
-          }
-        }
+        // Session is valid, navigate to home
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) =>
+                HomeScreen(key: HomeScreen.homeScreenKey),
+            transitionsBuilder: (_, animation, __, child) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+          ),
+        );
+      } catch (e) {
+        debugPrint('Session validation failed: $e');
+        // If session check fails, consider as logged out
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const OnboardingScreen(),
+            transitionsBuilder: (_, animation, __, child) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+          ),
+        );
       }
-    });
-  }
-
-  @override
-  void dispose() {
-    _logoController.dispose();
-    _textController.dispose();
-    _taglineController.dispose();
-    super.dispose();
+    } else {
+      // Not authenticated, navigate to onboarding
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) => const OnboardingScreen(),
+          transitionsBuilder: (_, animation, __, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final isSmallScreen = size.width < 360;
-    final isMediumScreen = size.width >= 360 && size.width < 600;
-
-    // Responsive sizing
-    final logoSize = isSmallScreen
-        ? size.width * 0.45
-        : isMediumScreen
-        ? size.width * 0.40
-        : size.width * 0.25;
-
-    final titleFontSize = isSmallScreen
-        ? size.width * 0.12
-        : isMediumScreen
-        ? size.width * 0.11
-        : size.width * 0.09;
-
-    final taglineFontSize = isSmallScreen
-        ? size.width * 0.035
-        : isMediumScreen
-        ? size.width * 0.032
-        : size.width * 0.028;
-
-    final logoToTextSpacing = size.height * 0.03;
-
-    return Scaffold(
-      backgroundColor: AppTheme.darkBackground,
-      body: SafeArea(
-        child: SizedBox(
-          width: size.width,
-          height: size.height,
-          child: Stack(
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Center content (Logo and Title)
-              Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // Logo with animation
-                    AnimatedBuilder(
-                      animation: _logoController,
-                      builder: (context, child) {
-                        return Transform.scale(
-                          scale: _logoScaleAnimation.value,
-                          child: Opacity(
-                            opacity: _logoOpacityAnimation.value,
-                            child: Image.asset(
-                              'assets/Images/image.png',
-                              width: logoSize,
-                              height: logoSize,
-                              fit: BoxFit.contain,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+              // Logo
+              Image.asset(
+                    'assets/Images/image.png',
+                    width: 100,
+                    height: 100,
+                    color: Colors.white,
+                  )
+                  .animate()
+                  .fade(duration: 1200.ms, curve: Curves.easeOutCubic)
+                  .moveY(
+                    begin: 30,
+                    end: 0,
+                    duration: 1200.ms,
+                    curve: Curves.easeOutCubic,
+                  ),
 
-                    SizedBox(height: logoToTextSpacing),
+              const SizedBox(height: 32),
 
-                    // Title text with animation
-                    AnimatedBuilder(
-                      animation: _textController,
-                      builder: (context, child) {
-                        return Opacity(
-                          opacity: _textOpacityAnimation.value,
-                          child: Text(
-                            'Prism',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: titleFontSize,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.2,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-
-              // Bottom tagline
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: size.height * 0.08,
-                child: AnimatedBuilder(
-                  animation: _taglineController,
-                  builder: (context, child) {
-                    return SlideTransition(
-                      position: _taglineSlideAnimation,
-                      child: FadeTransition(
-                        opacity: _taglineOpacityAnimation,
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: size.width * 0.1,
-                          ),
-                          child: Text(
-                            'Never Filter. Never Sort. Never Miss.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: taglineFontSize,
-                              letterSpacing: 0.8,
-                              height: 1.4,
-                            ),
-                          ),
+              // Title
+              Text(
+                    'Prism',
+                    style: PrismTextStyles.h1.copyWith(
+                      fontSize: 48,
+                      letterSpacing: -1,
+                      shadows: [
+                        BoxShadow(
+                          color: PrismColors.purple.withOpacity(0.5),
+                          blurRadius: 20,
+                          offset: const Offset(0, 5),
                         ),
-                      ),
-                    );
-                  },
-                ),
-              ),
+                      ],
+                    ),
+                  )
+                  .animate()
+                  .fade(
+                    delay: 300.ms,
+                    duration: 1200.ms,
+                    curve: Curves.easeOutCubic,
+                  )
+                  .moveY(
+                    begin: 30,
+                    end: 0,
+                    delay: 300.ms,
+                    duration: 1200.ms,
+                    curve: Curves.easeOutCubic,
+                  ),
+
+              const SizedBox(height: 16),
+
+              // Subtitle
+              Text(
+                    'Your Gallery, Smarter.',
+                    style: PrismTextStyles.bodyLarge.copyWith(
+                      color: Colors.white.withOpacity(0.7),
+                      letterSpacing: 2,
+                    ),
+                  )
+                  .animate()
+                  .fade(
+                    delay: 600.ms,
+                    duration: 1200.ms,
+                    curve: Curves.easeOutCubic,
+                  )
+                  .moveY(
+                    begin: 30,
+                    end: 0,
+                    delay: 600.ms,
+                    duration: 1200.ms,
+                    curve: Curves.easeOutCubic,
+                  ),
             ],
           ),
         ),

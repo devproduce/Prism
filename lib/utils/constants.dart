@@ -5,7 +5,7 @@ const kPrimaryColor = Colors.blue;
 // API Configuration
 class ApiConstants {
   // Base URL - Update this with your actual backend URL
-  static const String baseUrl = 'http://10.0.2.2:8001';
+  static const String baseUrl = 'http://43.204.227.62';
 
   // Auth endpoints
   static const String register = '/auth/register';
