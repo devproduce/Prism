@@ -200,6 +200,21 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+  /// Clear database before new registration to remove old user data
+  Future<void> clearDatabaseBeforeRegistration() async {
+    try {
+      await _databaseService.clearAllData();
+      _currentUser = null;
+      _isAuthenticated = false;
+      _contactsSynced = false;
+      _apiClient.clearAuthToken();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error clearing database: $e');
+      // Continue with registration even if clearing fails
+    }
+  }
+
   /// Logout user
   Future<void> logout(BuildContext context) async {
     _currentUser = null;

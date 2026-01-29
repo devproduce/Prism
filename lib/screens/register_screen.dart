@@ -173,7 +173,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  Future<void> _handleRegister() async {
+  /// Handle registration on Face Reveal screen (Step 6)
+  Future<void> _handleFaceRevealNext() async {
     if (_faceIdImage == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -186,6 +187,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    // Clear database before registration to remove old user data
+    await authProvider.clearDatabaseBeforeRegistration();
 
     final firstName = _firstNameController.text.trim();
     final lastName = _lastNameController.text.trim().isEmpty
@@ -221,40 +225,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         );
       }
 
-      // Upload profile picture if provided
-      if (_profilePicImage != null && mounted) {
-        final profilePicSuccess = await authProvider.uploadProfilePicture(
-          _profilePicImage!,
-        );
-        if (!profilePicSuccess && mounted) {
-          // Show warning but don't block registration completion
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                authProvider.error ?? 'Failed to upload profile picture',
-              ),
-              backgroundColor: PrismColors.warningYellow,
-              behavior: SnackBarBehavior.floating,
-              action: SnackBarAction(
-                label: 'OK',
-                textColor: Colors.white,
-                onPressed: () {},
-              ),
-            ),
-          );
-        }
-      }
-
+      // Proceed to profile picture screen
       if (mounted) {
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (_, __, ___) =>
-                HomeScreen(key: HomeScreen.homeScreenKey),
-            transitionsBuilder: (_, animation, __, child) {
-              return FadeTransition(opacity: animation, child: child);
-            },
-          ),
-        );
+        _nextPage();
       }
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -262,6 +235,48 @@ class _RegisterScreenState extends State<RegisterScreen> {
           content: Text(authProvider.error ?? 'Registration failed'),
           backgroundColor: PrismColors.errorRed,
           behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  /// Handle profile picture upload and navigation to home (Step 7)
+  Future<void> _handleProfilePictureNext() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    // Upload profile picture if provided
+    if (_profilePicImage != null && mounted) {
+      final profilePicSuccess = await authProvider.uploadProfilePicture(
+        _profilePicImage!,
+      );
+      if (!profilePicSuccess && mounted) {
+        // Show warning but don't block navigation
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              authProvider.error ?? 'Failed to upload profile picture',
+            ),
+            backgroundColor: PrismColors.warningYellow,
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(
+              label: 'OK',
+              textColor: Colors.white,
+              onPressed: () {},
+            ),
+          ),
+        );
+      }
+    }
+
+    // Navigate to home screen
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) =>
+              HomeScreen(key: HomeScreen.homeScreenKey),
+          transitionsBuilder: (_, animation, __, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
         ),
       );
     }
@@ -630,101 +645,158 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                           ),
                       ],
-                      onNext: () {
-                        if (_step6Key.currentState!.validate()) _nextPage();
-                      },
-                    ),
-                    // Step 7: Profile Picture (Optional)
-                    _buildStepTemplate(
-                      key: const ValueKey('step7'),
-                      formKey: _step7Key,
-                      title: 'Profile Picture',
-                      subtitle:
-                          'Optional - Skip to use your Face ID photo as your profile picture.',
-                      fields: [
-                        Center(
-                          child: GestureDetector(
-                            onTap: _pickProfilePicture,
-                            child:
-                                Container(
-                                  width:
-                                      MediaQuery.of(context).size.width * 0.45,
-                                  height:
-                                      MediaQuery.of(context).size.width * 0.45,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    gradient: _profilePicImage != null
-                                        ? PrismColors.prismSignature
-                                        : LinearGradient(
-                                            colors: [
-                                              PrismColors.electricBlue
-                                                  .withOpacity(0.3),
-                                              PrismColors.purple.withOpacity(
-                                                0.3,
-                                              ),
-                                            ],
-                                          ),
-                                    boxShadow: _profilePicImage != null
-                                        ? [
-                                            BoxShadow(
-                                              color: PrismColors.electricBlue
-                                                  .withOpacity(0.5),
-                                              blurRadius: 30,
-                                              offset: const Offset(0, 10),
-                                            ),
-                                          ]
-                                        : null,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: PrismColors.darkBase,
-                                      image: _profilePicImage != null
-                                          ? DecorationImage(
-                                              image: FileImage(
-                                                _profilePicImage!,
-                                              ),
-                                              fit: BoxFit.cover,
-                                            )
-                                          : null,
-                                    ),
-                                    child: _profilePicImage == null
-                                        ? const Icon(
-                                            Icons.add_photo_alternate_rounded,
-                                            size: 50,
-                                            color: Colors.white54,
-                                          )
-                                        : null,
-                                  ),
-                                ).animate().scale(
-                                  curve: Curves.elasticOut,
-                                  duration: 800.ms,
-                                ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Center(
-                          child: Text(
-                            _profilePicImage == null
-                                ? 'Tap to add a profile picture\nor skip to use Face ID photo'
-                                : 'Looking good! 🎉',
-                            textAlign: TextAlign.center,
-                            style: PrismTextStyles.bodyMedium.copyWith(
-                              color: _profilePicImage != null
-                                  ? PrismColors.successGreen
-                                  : Colors.white60,
-                            ),
-                          ).animate().fadeIn(),
-                        ),
-                      ],
                       onNext: () async {
-                        if (_step7Key.currentState!.validate()) {
-                          await _handleRegister();
+                        if (_step6Key.currentState!.validate()) {
+                          await _handleFaceRevealNext();
                         }
                       },
-                      isLastStep: true,
-                      buttonText: 'Start Exploring',
+                      buttonText: 'Register',
+                    ),
+                    // Step 7: Profile Picture (Optional)
+                    SingleChildScrollView(
+                      key: const ValueKey('step7'),
+                      padding: const EdgeInsets.all(24.0),
+                      child: GlassCard(
+                        borderRadius: 30,
+                        child: Form(
+                          key: _step7Key,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // Skip button aligned to the right
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton.icon(
+                                  onPressed: () async {
+                                    await _handleProfilePictureNext();
+                                  },
+                                  icon: const Icon(
+                                    Icons.skip_next_rounded,
+                                    color: Colors.white60,
+                                  ),
+                                  label: Text(
+                                    'Skip',
+                                    style: PrismTextStyles.bodyMedium.copyWith(
+                                      color: Colors.white60,
+                                    ),
+                                  ),
+                                ).animate().fadeIn(),
+                              ),
+
+                              Text(
+                                'Profile Picture',
+                                textAlign: TextAlign.center,
+                                style: PrismTextStyles.h2,
+                              ).animate().fadeIn().moveY(begin: 10, end: 0),
+
+                              const SizedBox(height: 8),
+
+                              Text(
+                                'Optional - Skip to use your Face ID photo as your profile picture.',
+                                textAlign: TextAlign.center,
+                                style: PrismTextStyles.bodyMedium.copyWith(
+                                  color: Colors.white60,
+                                ),
+                              ).animate().fadeIn(delay: 200.ms),
+
+                              const SizedBox(height: 32),
+                              Center(
+                                child: GestureDetector(
+                                  onTap: _pickProfilePicture,
+                                  child:
+                                      Container(
+                                        width:
+                                            MediaQuery.of(context).size.width *
+                                            0.45,
+                                        height:
+                                            MediaQuery.of(context).size.width *
+                                            0.45,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          gradient: _profilePicImage != null
+                                              ? PrismColors.prismSignature
+                                              : LinearGradient(
+                                                  colors: [
+                                                    PrismColors.electricBlue
+                                                        .withOpacity(0.3),
+                                                    PrismColors.purple
+                                                        .withOpacity(0.3),
+                                                  ],
+                                                ),
+                                          boxShadow: _profilePicImage != null
+                                              ? [
+                                                  BoxShadow(
+                                                    color: PrismColors
+                                                        .electricBlue
+                                                        .withOpacity(0.5),
+                                                    blurRadius: 30,
+                                                    offset: const Offset(0, 10),
+                                                  ),
+                                                ]
+                                              : null,
+                                        ),
+                                        padding: const EdgeInsets.all(4),
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: PrismColors.darkBase,
+                                            image: _profilePicImage != null
+                                                ? DecorationImage(
+                                                    image: FileImage(
+                                                      _profilePicImage!,
+                                                    ),
+                                                    fit: BoxFit.cover,
+                                                  )
+                                                : null,
+                                          ),
+                                          child: _profilePicImage == null
+                                              ? const Icon(
+                                                  Icons
+                                                      .add_photo_alternate_rounded,
+                                                  size: 50,
+                                                  color: Colors.white54,
+                                                )
+                                              : null,
+                                        ),
+                                      ).animate().scale(
+                                        curve: Curves.elasticOut,
+                                        duration: 800.ms,
+                                      ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              Center(
+                                child: Text(
+                                  _profilePicImage == null
+                                      ? 'Tap to add a profile picture\nor skip to use Face ID photo'
+                                      : 'Looking good! 🎉',
+                                  textAlign: TextAlign.center,
+                                  style: PrismTextStyles.bodyMedium.copyWith(
+                                    color: _profilePicImage != null
+                                        ? PrismColors.successGreen
+                                        : Colors.white60,
+                                  ),
+                                ).animate().fadeIn(),
+                              ),
+                              const SizedBox(height: 40),
+
+                              Consumer<AuthProvider>(
+                                builder: (context, authProvider, child) {
+                                  return GlassButton(
+                                    text: 'Start Exploring',
+                                    isLoading: authProvider.isLoading,
+                                    onPressed: authProvider.isLoading
+                                        ? null
+                                        : _handleProfilePictureNext,
+                                    isPrimary: true,
+                                    icon: Icons.rocket_launch_rounded,
+                                  );
+                                },
+                              ).animate().fadeIn(delay: 600.ms),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ],
                 ),
