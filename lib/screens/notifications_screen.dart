@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/notifications_provider.dart';
-import 'package:prism/models/notification_model.dart';
-
-import 'package:prism/widgets/gradient_scaffold.dart';
+import 'package:prism/theme/colors.dart';
+import 'package:prism/theme/text_styles.dart';
 import 'package:prism/widgets/notification_card.dart';
+import 'package:prism/widgets/empty_state_widget.dart';
+import 'package:prism/widgets/shimmer_placeholder.dart';
+import 'package:prism/utils/error_handler.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -35,106 +38,129 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     });
   }
 
+  Future<void> _markAllAsRead(
+    NotificationsProvider notificationsProvider,
+  ) async {
+    HapticFeedback.lightImpact();
+    try {
+      for (var notification in notificationsProvider.notifications) {
+        if (!notification.isRead) {
+          notificationsProvider.markAsRead(notification.id);
+        }
+      }
+      if (mounted) {
+        ErrorHandler.showSuccessSnackbar(
+          context,
+          message: 'All notifications marked as read',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ErrorHandler.showErrorSnackbar(
+          context,
+          message: ErrorHandler.getErrorMessage(e),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final authProvider = Provider.of<AuthProvider>(context);
     final notificationsProvider = Provider.of<NotificationsProvider>(context);
 
-    return GradientScaffold(
-      extendBodyBehindAppBar: true,
+    // Responsive padding
+    final screenWidth = MediaQuery.of(context).size.width;
+    final horizontalPadding = screenWidth < 360 ? 12.0 : 16.0;
+
+    return Scaffold(
+      backgroundColor: PrismColors.voidBlack,
       appBar: AppBar(
-        title: const Text('Notifications'),
+        title: Text('Notifications', style: PrismTextStyles.h2),
         backgroundColor: Colors.transparent,
         centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: PrismColors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         actions: [
           if (notificationsProvider.notifications.isNotEmpty)
             TextButton(
-              onPressed: () {
-                // Mark all as read
-                for (var notification in notificationsProvider.notifications) {
-                  if (!notification.isRead) {
-                    notificationsProvider.markAsRead(notification.id);
-                  }
-                }
-              },
-              child: const Text('Mark all read'),
+              onPressed: () => _markAllAsRead(notificationsProvider),
+              child: Text(
+                'Mark all read',
+                style: PrismTextStyles.bodySmall.copyWith(
+                  color: PrismColors.prismYellow,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
         ],
       ),
-      body: notificationsProvider.isLoading
-          ? Center(
-              child: CircularProgressIndicator(
-                color: theme.colorScheme.primary,
-              ),
-            )
-          : notificationsProvider.error != null
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    size: 48,
-                    color: theme.colorScheme.error,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    notificationsProvider.error!,
-                    style: theme.textTheme.bodyLarge,
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            )
-          : notificationsProvider.notifications.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.notifications_none,
-                    size: 64,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No notifications yet',
-                    style: theme.textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'We\'ll notify you when something arrives',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : RefreshIndicator(
-              onRefresh: () async {
-                if (authProvider.currentUser != null) {
-                  await notificationsProvider.refresh(
-                    authProvider.currentUser!.userId,
-                  );
-                }
-              },
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: notificationsProvider.notifications.length,
-                separatorBuilder: (context, index) =>
-                    const Divider(height: 1, indent: 72),
-                itemBuilder: (context, index) {
-                  final notification =
-                      notificationsProvider.notifications[index];
-                  return NotificationCard(
-                    notification: notification,
-                    currentUserId: authProvider.currentUser?.userId ?? '',
-                  );
-                },
-              ),
-            ),
+      body: _buildBody(authProvider, notificationsProvider, horizontalPadding),
+    );
+  }
+
+  Widget _buildBody(
+    AuthProvider authProvider,
+    NotificationsProvider notificationsProvider,
+    double horizontalPadding,
+  ) {
+    // Loading state with shimmer
+    if (notificationsProvider.isLoading) {
+      return Padding(
+        padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+        child: ShimmerLayouts.listItems(count: 6),
+      );
+    }
+
+    // Error state
+    if (notificationsProvider.error != null) {
+      return EmptyStateWidget.error(
+        message: notificationsProvider.error,
+        onRetry: () {
+          if (authProvider.currentUser != null) {
+            notificationsProvider.fetchNotifications(
+              authProvider.currentUser!.userId,
+            );
+          }
+        },
+      );
+    }
+
+    // Empty state
+    if (notificationsProvider.notifications.isEmpty) {
+      return EmptyStateWidget.noNotifications();
+    }
+
+    // Notifications list with pull-to-refresh
+    return RefreshIndicator(
+      color: PrismColors.prismYellow,
+      backgroundColor: PrismColors.surfaceGray,
+      onRefresh: () async {
+        if (authProvider.currentUser != null) {
+          await notificationsProvider.refresh(authProvider.currentUser!.userId);
+        }
+      },
+      child: ListView.separated(
+        padding: EdgeInsets.symmetric(
+          horizontal: horizontalPadding,
+          vertical: 8,
+        ),
+        itemCount: notificationsProvider.notifications.length,
+        separatorBuilder: (context, index) => Divider(
+          height: 1,
+          indent: 72,
+          color: PrismColors.white.withValues(alpha: 0.1),
+        ),
+        itemBuilder: (context, index) {
+          final notification = notificationsProvider.notifications[index];
+          return NotificationCard(
+            notification: notification,
+            currentUserId: authProvider.currentUser?.userId ?? '',
+          );
+        },
+      ),
     );
   }
 }

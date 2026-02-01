@@ -20,7 +20,7 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 5,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -44,6 +44,7 @@ class DatabaseService {
         country_code TEXT,
         phone_number TEXT,
         created_at TEXT,
+        archive_pin TEXT,
         is_user_logged_in INTEGER NOT NULL DEFAULT 1,
         contacts_synced INTEGER NOT NULL DEFAULT 0
       )
@@ -75,6 +76,20 @@ class DatabaseService {
         ALTER TABLE user_session ADD COLUMN contacts_synced INTEGER NOT NULL DEFAULT 0
       ''');
     }
+    if (oldVersion < 4) {
+      await db.execute('''
+        ALTER TABLE user_session ADD COLUMN archive_pin TEXT
+      ''');
+    }
+    if (oldVersion < 5) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS gallery_saves (
+          image_id TEXT PRIMARY KEY,
+          saved_at TEXT NOT NULL,
+          gallery_path TEXT NOT NULL
+        )
+      ''');
+    }
   }
 
   /// Save user session to database
@@ -100,6 +115,7 @@ class DatabaseService {
       'country_code': user.countryCode,
       'phone_number': user.phoneNumber,
       'created_at': user.createdAt?.toIso8601String(),
+      'archive_pin': user.archivePin,
       'is_user_logged_in': 1,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
@@ -163,6 +179,7 @@ class DatabaseService {
         'country_code': user.countryCode,
         'phone_number': user.phoneNumber,
         'created_at': user.createdAt?.toIso8601String(),
+        'archive_pin': user.archivePin,
       },
       where: 'is_user_logged_in = ?',
       whereArgs: [1],
@@ -188,6 +205,7 @@ class DatabaseService {
       createdAt: map['created_at'] != null
           ? DateTime.tryParse(map['created_at'] as String)
           : null,
+      archivePin: map['archive_pin'] as String?,
     );
   }
 
@@ -288,6 +306,120 @@ class DatabaseService {
     final db = await database;
     await db.delete('user_session');
     await db.delete('gallery_cache');
+    await db.delete('gallery_saves');
+  }
+
+  // ==================== GALLERY SAVES TRACKING ====================
+
+  /// Mark image as saved to gallery
+  Future<void> markImageAsSavedToGallery(
+    String imageId,
+    String galleryPath,
+  ) async {
+    final db = await database;
+    await db.insert('gallery_saves', {
+      'image_id': imageId,
+      'saved_at': DateTime.now().toIso8601String(),
+      'gallery_path': galleryPath,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Check if image is saved to gallery
+  Future<bool> isImageSavedToGallery(String imageId) async {
+    final db = await database;
+    final result = await db.query(
+      'gallery_saves',
+      where: 'image_id = ?',
+      whereArgs: [imageId],
+    );
+    return result.isNotEmpty;
+  }
+
+  /// Get gallery path for saved image
+  Future<String?> getGalleryPath(String imageId) async {
+    final db = await database;
+    final result = await db.query(
+      'gallery_saves',
+      where: 'image_id = ?',
+      whereArgs: [imageId],
+    );
+    if (result.isEmpty) return null;
+    return result.first['gallery_path'] as String?;
+  }
+
+  /// Remove gallery save record when image is deleted from phone
+  Future<void> removeGallerySaveRecord(String imageId) async {
+    final db = await database;
+    await db.delete(
+      'gallery_saves',
+      where: 'image_id = ?',
+      whereArgs: [imageId],
+    );
+  }
+
+  /// Get all saved image IDs from the database
+  /// Returns a Set for efficient O(1) lookup
+  Future<Set<String>> getAllSavedImageIds() async {
+    try {
+      final db = await database;
+      final result = await db.query('gallery_saves', columns: ['image_id']);
+      return result.map((row) => row['image_id'] as String).toSet();
+    } catch (e) {
+      print('Error getting all saved image IDs: $e');
+      return {};
+    }
+  }
+
+  /// Batch mark multiple images as saved to gallery
+  /// More efficient than calling markImageAsSavedToGallery multiple times
+  Future<void> batchMarkImagesAsSaved(List<Map<String, String>> images) async {
+    if (images.isEmpty) return;
+
+    try {
+      final db = await database;
+      final batch = db.batch();
+      final now = DateTime.now().toIso8601String();
+
+      for (final image in images) {
+        final imageId = image['imageId'];
+        final galleryPath = image['galleryPath'] ?? 'Pictures/Prism';
+
+        if (imageId != null && imageId.isNotEmpty) {
+          batch.insert('gallery_saves', {
+            'image_id': imageId,
+            'saved_at': now,
+            'gallery_path': galleryPath,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
+
+      await batch.commit(noResult: true);
+      print('Batch marked ${images.length} images as saved');
+    } catch (e) {
+      print('Error batch marking images as saved: $e');
+    }
+  }
+
+  /// Check if gallery_saves table is empty
+  /// Used to detect if tracking needs to be rebuilt from local files
+  Future<bool> isGallerySavesEmpty() async {
+    try {
+      final db = await database;
+      final result = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM gallery_saves',
+      );
+      final count = Sqflite.firstIntValue(result) ?? 0;
+      return count == 0;
+    } catch (e) {
+      print('Error checking if gallery_saves is empty: $e');
+      return true;
+    }
+  }
+
+  /// Clear all gallery saves
+  Future<void> clearGallerySaves() async {
+    final db = await database;
+    await db.delete('gallery_saves');
   }
 
   /// Close database

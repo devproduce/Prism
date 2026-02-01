@@ -14,7 +14,7 @@ class GlassCard extends StatelessWidget {
   final double blurAmount;
 
   const GlassCard({
-    Key? key,
+    super.key,
     required this.child,
     this.borderRadius = 24.0,
     this.padding,
@@ -22,7 +22,7 @@ class GlassCard extends StatelessWidget {
     this.color,
     this.borderColor,
     this.blurAmount = 15.0,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -69,7 +69,7 @@ class GlassButton extends StatelessWidget {
   final bool isLoading;
 
   const GlassButton({
-    Key? key,
+    super.key,
     required this.text,
     required this.onPressed,
     this.width = double.infinity,
@@ -77,7 +77,7 @@ class GlassButton extends StatelessWidget {
     this.isPrimary = true,
     this.icon,
     this.isLoading = false,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

@@ -1,101 +1,94 @@
 import 'package:flutter/material.dart';
 
 class PrismColors {
-  // 🌊 PRIMARY BRAND COLORS (Blue-Tinted)
-  static const Color primaryBlue = Color(0xFF00D4FF); // Bright Cyan
-  static const Color accentBlue = Color(0xFF4FC3F7); // Light Blue
-  static const Color deepBlue = Color(0xFF1976D2); // Deep Blue
-  
-  // 🌚 DARK MODE (Blue-Tinted Navy)
-  static const Color darkBase = Color(0xFF0A1929); // Deep Navy
-  static const Color darkCard = Color(0xFF1A2332); // Navy Card
-  static const Color darkElevated = Color(0xFF2C3E50); // Elevated Navy
-  
-  // 🌝 LIGHT MODE (Sky Blue Tints)
-  static const Color lightBase = Color(0xFFE3F2FD); // Light Sky Blue
-  static const Color lightCard = Color(0xFFFAFAFF); // Almost White
-  static const Color lightElevated = Color(0xFFBBDEFB); // Soft Blue
-  
-  // 🌫️ NEUTRALS (Theme-Adaptive)
-  static const Color textPrimaryDark = Color(0xFFE1F5FE); // Light Blue Text (Dark Mode)
-  static const Color textPrimaryLight = Color(0xFF0D47A1); // Dark Blue Text (Light Mode)
-  static const Color textSecondaryDark = Color(0xFF90CAF9); // Medium Blue (Dark)
-  static const Color textSecondaryLight = Color(0xFF1976D2); // Medium Blue (Light)
-  static const Color white = Colors.white;
-  static const Color dividerDark = Color(0xFF2C3E50);
-  static const Color dividerLight = Color(0xFFB3E5FC);
-  static const Color iconGray = Color(0xFF81D4FA);
-  static const Color white70 = ColorUtils.white70;
+  // 🌑 CORE PALETTE (Tech-Noir)
+  static const Color voidBlack = Color(0xFF0E0E0E); // Main Background
+  static const Color surfaceGray = Color(0xFF1C1C1E); // Cards / Modals
+  static const Color inputGray = Color(
+    0xFF2C2C2E,
+  ); // Inputs / Secondary Buttons
 
-  // ❄️ GLASSMORPHISM COLORS (Blue-Tinted Frost)
-  static const Color glassFrostedWhite = Color.fromRGBO(255, 255, 255, 0.18);
-  static const Color glassFrostedBlueDark = Color.fromRGBO(0, 212, 255, 0.15); // Cyan tint
-  static const Color glassFrostedBlueLight = Color.fromRGBO(25, 118, 210, 0.08); // Blue tint
-  static const Color glassSnowMist = Color.fromRGBO(255, 255, 255, 0.08);
-  static const Color glassFrostBorder = Color.fromRGBO(79, 195, 247, 0.25);
-  static const Color glassFrostShadow = Color.fromRGBO(0, 0, 0, 0.12);
-  static const Color glassDark = Color.fromRGBO(26, 35, 50, 0.65);
-  static const Color glassLight = Color.fromRGBO(227, 242, 253, 0.45);
-  static const Color glassBlueGlow = Color.fromRGBO(0, 212, 255, 0.35);
+  // ✨ ACCENTS
+  static const Color prismYellow = Color(0xFFF3E68F); // Primary Action
+  static const Color neonPink = Color(0xFFEFA9B6); // Face ID / Scanning
+  static const Color electricCyan = Color(0xFF4AF2EA); // AI / Loading
+  static const Color deepCyan = Color(0xFF2E86DE); // Gradient end for Cyan
 
-  // 🍃 SUCCESS / WARNING / ERROR (Consistent across themes)
-  static const Color successGreen = Color(0xFF4CAF50);
-  static const Color warningYellow = Color(0xFFFFB300);
-  static const Color errorRed = Color(0xFFF44336);
-  
-  // Friends Status Colors
-  static const Color friendAccepted = Color(0xFF4CAF50);
-  static const Color friendPending = Color(0xFFFFB300);
-  static const Color friendBlocked = Color(0xFFF44336);
+  // 🚦 FUNCTIONAL
+  static const Color successGreen = Color(0xFF4ADE80); // Text/Icon green
+  static const Color successGreenBg = Color(0xFF2E5C38); // Background green
+  static const Color destructiveRed = Color(0xFFFF0000); // Errors / Delete
 
-  // 🌤️ GRADIENTS (Blue-Tinted)
-  static const LinearGradient prismSignatureDark = LinearGradient(
-    colors: [Color(0xFF00D4FF), Color(0xFF0288D1)], // Cyan to Deep Blue
+  // 📝 TEXT
+  static const Color white = Color(0xFFFFFFFF); // Primary Text
+  static const Color secondaryText = Color(
+    0xFFA1A1AA,
+  ); // Subtitles / Placeholders
+  static const Color black = Color(0xFF000000); // Text on Yellow buttons
+
+  // 🌫️ GLASS & OVERLAYS (Adapted for Dark Mode)
+  static const Color glassDark = Color.fromRGBO(
+    28,
+    28,
+    30,
+    0.70,
+  ); // Surface Gray with opacity
+  static const Color overlayBlack = Color.fromRGBO(
+    0,
+    0,
+    0,
+    0.5,
+  ); // Modal backdrop
+
+  // 🌈 GRADIENTS
+  static const LinearGradient prismSignature = LinearGradient(
+    colors: [prismYellow, neonPink],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
-  static const LinearGradient prismSignatureLight = LinearGradient(
-    colors: [Color(0xFF4FC3F7), Color(0xFF1976D2)], // Light Blue to Deep Blue
+  static const LinearGradient cyanGradient = LinearGradient(
+    colors: [electricCyan, deepCyan],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
-  static const LinearGradient oceanBreezeDark = LinearGradient(
-    colors: [Color(0xFF006064), Color(0xFF00ACC1)], // Dark Teal to Cyan
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-
-  static const LinearGradient oceanBreezeLight = LinearGradient(
-    colors: [Color(0xFF00838F), Color(0xFF4DD0E1)], // Teal to Light Cyan
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-
-  static const LinearGradient royalNightFade = LinearGradient(
-    colors: [Color(0xFF0A1929), Color(0xFF1A2332)], // Deep Navy gradient
+  // Helper for "Void" background with no gradients generally, but keeping for legacy compatibility if needed
+  static const LinearGradient voidGradient = LinearGradient(
+    colors: [voidBlack, voidBlack],
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
   );
 
-  static const LinearGradient skyDayFade = LinearGradient(
-    colors: [Color(0xFFE3F2FD), Color(0xFFBBDEFB)], // Sky Blue gradient
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-  );
+  // Backward compatibility (Mapping old names to new palette where sensible to avoid immediate breakages)
+  static const Color primaryBlue = prismYellow; // Replaced by Yellow
+  static const Color accentBlue = electricCyan; // Replaced by Cyan
+  static const Color deepBlue = deepCyan;
+  static const Color darkBase = voidBlack;
+  static const Color darkCard = surfaceGray;
+  static const Color errorRed = destructiveRed;
+  static const Color textPrimaryDark = white;
+  static const Color textSecondaryDark = secondaryText;
 
-  // Backward compatibility (map to blue equivalents)
-  static const Color purple = primaryBlue;
-  static const Color electricBlue = accentBlue;
-  static const Color neoPink = deepBlue;
-  static const LinearGradient prismSignature = prismSignatureDark;
-  static const LinearGradient sunsetGlow = oceanBreezeDark;
-  static const LinearGradient auroraTeal = oceanBreezeLight;
-  static const Color textPrimary = textPrimaryDark;
-  static const Color textSecondary = textSecondaryDark;
-  static const Color divider = dividerDark;
-  static const Color glassLavenderGlow = glassBlueGlow;
+  // Missing aliases to fix lints
+  static const Color purple = prismYellow;
+  static const Color electricBlue = electricCyan;
+  static const Color neoPink = neonPink;
+  static const LinearGradient prismSignatureDark = prismSignature;
+  static const LinearGradient sunsetGlow = cyanGradient;
+  static const LinearGradient royalNightFade = voidGradient;
+  static const Color textSecondary = secondaryText;
+  static const Color warningYellow = prismYellow;
+
+  // Glass aliases
+  static const Color glassFrostedWhite = glassDark;
+  static const Color glassBlueGlow = electricCyan;
+  static const Color glassSnowMist = glassDark;
+  static const Color glassLight = glassDark;
+  static const Color glassFrostShadow = overlayBlack;
+  static const Color glassFrostBorder = inputGray;
+  static const Color lightElevated = surfaceGray;
+  static const Color textSecondaryLight = secondaryText;
 }
 
 class ColorUtils {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:prism/utils/theme.dart';
+import 'package:prism/utils/responsive_helper.dart';
 
 class OnboardingPageContent extends StatelessWidget {
   final String imagePath;
@@ -17,25 +18,22 @@ class OnboardingPageContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final isSmallScreen = size.width < 360;
+    final horizontalPadding = ResponsiveHelper.horizontalPadding(context);
+    final spacingXL = ResponsiveHelper.spacingXL(context);
+    final spacingM = ResponsiveHelper.spacingM(context);
 
     return Padding(
-      padding: const EdgeInsets.all(24.0),
+      padding: EdgeInsets.all(horizontalPadding),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           const Spacer(flex: 2),
-          
+
           // Image with subtle animation (Hero or simple fade)
-          Expanded(
-            flex: 5,
-            child: Image.asset(
-              imagePath,
-              fit: BoxFit.contain,
-            ),
-          ),
-          
-          const SizedBox(height: 40),
-          
+          Expanded(flex: 5, child: Image.asset(imagePath, fit: BoxFit.contain)),
+
+          SizedBox(height: spacingXL),
+
           // Title
           Text(
             title,
@@ -46,9 +44,9 @@ class OnboardingPageContent extends StatelessWidget {
               height: 1.2,
             ),
           ),
-          
-          const SizedBox(height: 16),
-          
+
+          SizedBox(height: spacingM),
+
           // Description
           Text(
             description,
@@ -59,7 +57,7 @@ class OnboardingPageContent extends StatelessWidget {
               fontSize: isSmallScreen ? 14 : 16,
             ),
           ),
-          
+
           const Spacer(flex: 3),
         ],
       ),

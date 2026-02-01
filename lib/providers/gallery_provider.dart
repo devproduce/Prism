@@ -3,10 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:prism/api/api_client.dart';
 import 'package:prism/models/gallery_image_model.dart';
 import 'package:prism/services/database_service.dart';
+import 'package:prism/services/gallery_save_service.dart';
+import 'package:prism/services/share_handler_service.dart';
 
 class GalleryProvider with ChangeNotifier {
   final ApiClient _apiClient = ApiClient();
   final DatabaseService _databaseService = DatabaseService.instance;
+  final GallerySaveService _gallerySaveService = GallerySaveService();
+  final ShareHandlerService _shareHandler = ShareHandlerService();
 
   List<GalleryImage> _images = [];
   Map<String, List<GalleryImage>> _groupedImages = {};
@@ -22,8 +26,9 @@ class GalleryProvider with ChangeNotifier {
   bool get isLoadingFromCache => _isLoadingFromCache;
 
   // Filtered getters - exclude bin images from all sections except Bin
-  List<GalleryImage> get allImages =>
-      _images.where((img) => !img.galleryMeta.bin).toList();
+  List<GalleryImage> get allImages => _images
+      .where((img) => !img.galleryMeta.bin && !img.galleryMeta.archive)
+      .toList();
   List<GalleryImage> get favouriteImages => _images
       .where((img) => img.galleryMeta.favourite && !img.galleryMeta.bin)
       .toList();
@@ -141,6 +146,9 @@ class GalleryProvider with ChangeNotifier {
 
       _groupImagesByMonth();
       _setLoading(false);
+
+      // Trigger auto-save to gallery in background
+      _triggerAutoSave();
     } on ApiException catch (e) {
       debugPrint('API Exception: ${e.message}');
       // Try to load from cache on error
@@ -509,4 +517,433 @@ class GalleryProvider with ChangeNotifier {
   Future<void> clearCache(String userId) async {
     await _databaseService.clearGalleryCache(userId);
   }
+
+  /// Trigger auto-save of received images to device gallery
+  /// Runs in background, doesn't block UI
+  void _triggerAutoSave() {
+    // Collect images that need to be saved
+    final imagesToSave = <Map<String, String>>[];
+
+    for (final image in _images) {
+      // Only save images that are not in bin and have valid URLs
+      if (!image.galleryMeta.bin &&
+          image.image.imageUrl != null &&
+          image.image.imageUrl!.isNotEmpty) {
+        imagesToSave.add({'id': image.image.id, 'url': image.image.imageUrl!});
+      }
+    }
+
+    if (imagesToSave.isNotEmpty) {
+      debugPrint(
+        '📱 [GalleryProvider] Triggering auto-save for ${imagesToSave.length} images',
+      );
+      // Process in background - don't await
+      _gallerySaveService.processImagesForAutoSave(imagesToSave);
+    }
+  }
+
+  /// Enable or disable auto-save feature
+  void setAutoSaveEnabled(bool enabled) {
+    _gallerySaveService.autoSaveEnabled = enabled;
+    debugPrint(
+      '📱 [GalleryProvider] Auto-save ${enabled ? 'enabled' : 'disabled'}',
+    );
+    notifyListeners();
+  }
+
+  /// Check if auto-save is enabled
+  bool get isAutoSaveEnabled => _gallerySaveService.autoSaveEnabled;
+
+  // ==================== LOCAL-FIRST LOADING ====================
+
+  /// Local album images cache
+  List<Map<String, dynamic>> _localAlbumImages = [];
+
+  /// Get images from local Prism album
+  List<Map<String, dynamic>> get localAlbumImages => _localAlbumImages;
+
+  /// Load images from local Prism album first, then sync with backend metadata
+  /// This provides instant loading from local storage
+  Future<void> fetchGalleryLocalFirst({
+    required String userId,
+    bool forceRefresh = false,
+  }) async {
+    try {
+      debugPrint(
+        '📱 [GalleryProvider] Loading from local Prism album first...',
+      );
+
+      // Step 1: Load from local album for instant display
+      _localAlbumImages = await _shareHandler.getLocalAlbumImages();
+      debugPrint(
+        '📱 [GalleryProvider] Found ${_localAlbumImages.length} images in local album',
+      );
+
+      // Step 2: Load cached metadata (for favorites, archive status, etc.)
+      if (!forceRefresh) {
+        final cachedData = await _databaseService.getGalleryCache(userId);
+        if (cachedData != null && cachedData.isNotEmpty) {
+          _isLoadingFromCache = true;
+          notifyListeners();
+
+          try {
+            final List<dynamic> jsonList = json.decode(cachedData);
+            _images = [];
+            bool hasExpiredUrls = false;
+
+            for (var i = 0; i < jsonList.length; i++) {
+              try {
+                final galleryImage = GalleryImage.fromJson(
+                  jsonList[i] as Map<String, dynamic>,
+                );
+                _images.add(galleryImage);
+
+                // Check if any URL is expired
+                if (!hasExpiredUrls && galleryImage.image.isUrlExpired) {
+                  hasExpiredUrls = true;
+                }
+              } catch (e) {
+                debugPrint('Error parsing cached image at index $i: $e');
+              }
+            }
+
+            // If we found expired URLs or force refresh, continue to fetch from backend
+            if (!hasExpiredUrls) {
+              _groupImagesByMonth();
+              _isLoadingFromCache = false;
+              _setError(null);
+              notifyListeners();
+              debugPrint(
+                '📱 [GalleryProvider] Using ${_images.length} images from cache with local files',
+              );
+              return;
+            }
+          } catch (e) {
+            debugPrint('Error parsing cached data: $e');
+            await _databaseService.clearGalleryCache(userId);
+          }
+        }
+      }
+
+      // Step 3: Fetch fresh data from backend and sync
+      await _syncWithBackend(userId);
+    } catch (e, stackTrace) {
+      debugPrint('❌ [GalleryProvider] Error in local-first loading: $e');
+      debugPrint('Stack trace: $stackTrace');
+      _setError('Failed to load gallery: ${e.toString()}');
+    }
+  }
+
+  /// Sync local album with backend data
+  /// Downloads any new images and updates metadata
+  Future<void> _syncWithBackend(String userId) async {
+    debugPrint('🔄 [GalleryProvider] Syncing with backend...');
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      final data = await _apiClient.getGallery(userId: userId);
+
+      debugPrint(
+        '📥 [GalleryProvider] Received ${data.length} images from backend',
+      );
+
+      _images = [];
+      final Set<String> backendImageIds = {};
+
+      for (var i = 0; i < data.length; i++) {
+        try {
+          final galleryImage = GalleryImage.fromJson(
+            data[i] as Map<String, dynamic>,
+          );
+          _images.add(galleryImage);
+          backendImageIds.add(galleryImage.image.id);
+        } catch (e) {
+          debugPrint('Error parsing image at index $i: $e');
+        }
+      }
+
+      debugPrint(
+        '✅ [GalleryProvider] Synced ${_images.length} images from backend',
+      );
+
+      // Cache the response
+      await _databaseService.saveGalleryCache(userId, json.encode(data));
+
+      _groupImagesByMonth();
+      _setLoading(false);
+
+      // Trigger auto-save to download new images to Prism album
+      _triggerAutoSave();
+    } on ApiException catch (e) {
+      debugPrint('API Exception during sync: ${e.message}');
+      _setError('Sync failed: ${e.message}');
+      _setLoading(false);
+    } catch (e) {
+      debugPrint('Error syncing with backend: $e');
+      _setError('Sync failed: ${e.toString()}');
+      _setLoading(false);
+    }
+  }
+
+  /// Delete image permanently (from backend bin AND from phone gallery)
+  /// Returns true if both operations succeed
+  Future<bool> deleteImagePermanently({
+    required String imageId,
+    required String userId,
+  }) async {
+    try {
+      debugPrint('🗑️ [GalleryProvider] Permanently deleting image: $imageId');
+
+      // Step 1: Find the image in local album FIRST (before moving to bin)
+      // We need to do this first because we need to find the local file
+      final localImages = await _shareHandler.getLocalAlbumImages();
+      debugPrint(
+        '📱 [GalleryProvider] Found ${localImages.length} images in local album',
+      );
+
+      int? mediaStoreId;
+      String? localFilePath;
+
+      for (final localImg in localImages) {
+        final fileName = localImg['fileName'] as String?;
+        final path = localImg['path'] as String?;
+        final id = localImg['id'];
+
+        // Match by imageId in filename (the file is saved as imageId.extension)
+        if (fileName != null) {
+          // Remove extension and check if it matches or contains the imageId
+          final fileNameWithoutExt = fileName.contains('.')
+              ? fileName.substring(0, fileName.lastIndexOf('.'))
+              : fileName;
+
+          debugPrint('   Comparing: "$fileNameWithoutExt" with "$imageId"');
+
+          if (fileNameWithoutExt == imageId || fileName.contains(imageId)) {
+            // Get the MediaStore ID (prefer this for deletion on Android 10+)
+            if (id != null) {
+              mediaStoreId = id is int ? id : int.tryParse(id.toString());
+            }
+            localFilePath = path;
+            debugPrint(
+              '✅ [GalleryProvider] Found matching file: $fileName (ID: $mediaStoreId, Path: $path)',
+            );
+            break;
+          }
+        }
+      }
+
+      // Step 2: Move to bin on backend
+      await toggleImageStatus(imageId: imageId, userId: userId, field: 'bin');
+      debugPrint('✅ [GalleryProvider] Moved to bin on backend');
+
+      // Step 3: Delete from phone gallery using MediaStore ID (preferred) or path
+      bool deleted = false;
+
+      if (mediaStoreId != null) {
+        debugPrint(
+          '📱 [GalleryProvider] Deleting from gallery by MediaStore ID: $mediaStoreId',
+        );
+        deleted = await _shareHandler.deleteFromGalleryById(mediaStoreId);
+        if (deleted) {
+          debugPrint('✅ [GalleryProvider] Deleted from phone gallery by ID');
+        } else {
+          debugPrint('⚠️ [GalleryProvider] Delete by ID failed');
+        }
+      }
+
+      // Fallback to path-based deletion if ID deletion failed
+      if (!deleted && localFilePath != null && localFilePath.isNotEmpty) {
+        debugPrint(
+          '📱 [GalleryProvider] Trying path-based deletion: $localFilePath',
+        );
+        deleted = await _shareHandler.deleteFromGallery(localFilePath);
+        if (deleted) {
+          debugPrint('✅ [GalleryProvider] Deleted from phone gallery by path');
+        } else {
+          debugPrint('⚠️ [GalleryProvider] Delete by path also failed');
+        }
+      }
+
+      if (deleted) {
+        // Remove tracking record
+        await _databaseService.removeGallerySaveRecord(imageId);
+      } else if (mediaStoreId == null &&
+          (localFilePath == null || localFilePath.isEmpty)) {
+        debugPrint(
+          '⚠️ [GalleryProvider] Could not find local file for image: $imageId',
+        );
+        debugPrint('   Available files in album:');
+        for (final img in localImages) {
+          debugPrint('   - ${img['fileName']}');
+        }
+      }
+
+      return true;
+    } catch (e) {
+      debugPrint('❌ [GalleryProvider] Error deleting permanently: $e');
+      return false;
+    }
+  }
+
+  /// Refresh gallery after share operation
+  /// Re-syncs local album with backend to pick up newly shared images
+  Future<void> refreshAfterShare(String userId) async {
+    debugPrint('🔄 [GalleryProvider] Refreshing gallery after share...');
+    // Force refresh to get the newly shared image
+    await fetchGallery(userId: userId, forceRefresh: true);
+    debugPrint('✅ [GalleryProvider] Gallery refreshed after share');
+  }
+
+  // ==================== LOCAL-FIRST GALLERY METHODS ====================
+
+  /// Initialize gallery on app start
+  /// This should be called early in the app lifecycle to:
+  /// 1. Rebuild tracking database from local files (if needed after reinstall)
+  /// 2. Load images from local storage for instant display
+  /// 3. Sync with backend in background
+  Future<void> initializeGallery({required String userId}) async {
+    try {
+      debugPrint('📱 [GalleryProvider] Initializing gallery for user: $userId');
+
+      // Step 1: Initialize the GallerySaveService (rebuilds tracking if needed)
+      await _gallerySaveService.initializeIfNeeded();
+
+      // Step 2: Load from local Prism album for instant display
+      _localAlbumImages = await _shareHandler.getLocalAlbumImages();
+      debugPrint(
+        '📱 [GalleryProvider] Found ${_localAlbumImages.length} local images',
+      );
+
+      // Step 3: Try to load cached metadata (for favorites, archive status, etc.)
+      final cachedData = await _databaseService.getGalleryCache(userId);
+      if (cachedData != null && cachedData.isNotEmpty) {
+        try {
+          final List<dynamic> jsonList = json.decode(cachedData);
+          _images = [];
+          bool hasExpiredUrls = false;
+
+          for (var i = 0; i < jsonList.length; i++) {
+            try {
+              final galleryImage = GalleryImage.fromJson(
+                jsonList[i] as Map<String, dynamic>,
+              );
+              _images.add(galleryImage);
+
+              // Check if any URL is expired
+              if (!hasExpiredUrls && galleryImage.image.isUrlExpired) {
+                hasExpiredUrls = true;
+              }
+            } catch (e) {
+              debugPrint('Error parsing cached image at index $i: $e');
+            }
+          }
+
+          _groupImagesByMonth();
+          _setError(null);
+          notifyListeners();
+
+          debugPrint(
+            '📱 [GalleryProvider] Loaded ${_images.length} images from cache',
+          );
+
+          // If URLs are expired, sync with backend in background
+          if (hasExpiredUrls) {
+            debugPrint(
+              '📱 [GalleryProvider] URLs expired, syncing with backend...',
+            );
+            _syncWithBackend(userId); // Don't await, let it run in background
+          }
+
+          return;
+        } catch (e) {
+          debugPrint('Error parsing cached data: $e');
+          await _databaseService.clearGalleryCache(userId);
+        }
+      }
+
+      // Step 4: No valid cache, fetch from backend
+      debugPrint('📱 [GalleryProvider] No cache, fetching from backend...');
+      await _syncWithBackend(userId);
+    } catch (e, stackTrace) {
+      debugPrint('❌ [GalleryProvider] Error initializing gallery: $e');
+      debugPrint('Stack trace: $stackTrace');
+      _setError('Failed to initialize gallery: ${e.toString()}');
+    }
+  }
+
+  /// Refresh and sync with backend
+  /// Call this when user pulls to refresh or wants to check for new images
+  /// Only downloads images not already present locally
+  Future<void> refreshAndSync({required String userId}) async {
+    try {
+      debugPrint('🔄 [GalleryProvider] Refresh and sync requested...');
+      _setLoading(true);
+      _setError(null);
+
+      // Refresh local image cache first
+      await _gallerySaveService.refreshLocalImageCache();
+
+      // Fetch fresh data from backend
+      final data = await _apiClient.getGallery(userId: userId);
+
+      debugPrint(
+        '📥 [GalleryProvider] Received ${data.length} images from backend',
+      );
+
+      _images = [];
+      final imagesToSave = <Map<String, String>>[];
+
+      for (var i = 0; i < data.length; i++) {
+        try {
+          final galleryImage = GalleryImage.fromJson(
+            data[i] as Map<String, dynamic>,
+          );
+          _images.add(galleryImage);
+
+          // Collect images for auto-save
+          if (!galleryImage.galleryMeta.bin &&
+              galleryImage.image.imageUrl.isNotEmpty) {
+            imagesToSave.add({
+              'id': galleryImage.image.id,
+              'url': galleryImage.image.imageUrl,
+            });
+          }
+        } catch (e) {
+          debugPrint('Error parsing image at index $i: $e');
+        }
+      }
+
+      // Cache the response
+      await _databaseService.saveGalleryCache(userId, json.encode(data));
+
+      _groupImagesByMonth();
+      _setLoading(false);
+
+      // Auto-save only NEW images (local-first checking happens in GallerySaveService)
+      if (imagesToSave.isNotEmpty) {
+        debugPrint(
+          '📱 [GalleryProvider] Triggering auto-save for ${imagesToSave.length} images',
+        );
+        _gallerySaveService.processImagesForAutoSave(imagesToSave);
+      }
+
+      debugPrint('✅ [GalleryProvider] Refresh and sync complete');
+    } on ApiException catch (e) {
+      debugPrint('API Exception during refresh: ${e.message}');
+      _setError('Refresh failed: ${e.message}');
+      _setLoading(false);
+    } catch (e) {
+      debugPrint('Error during refresh: $e');
+      _setError('Refresh failed: ${e.toString()}');
+      _setLoading(false);
+    }
+  }
+
+  /// Get count of images in local Prism album
+  /// Useful for showing user how many images are stored locally
+  int get localImageCount => _localAlbumImages.length;
+
+  /// Check if local images are available (for UI feedback)
+  bool get hasLocalImages => _localAlbumImages.isNotEmpty;
 }

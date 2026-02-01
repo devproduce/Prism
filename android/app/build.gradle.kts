@@ -13,6 +13,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -42,3 +43,14 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    
+    // OkHttp for native HTTP requests in BackgroundShareService
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    
+    // Gson for JSON parsing
+    implementation("com.google.code.gson:gson:2.10.1")
+}
+

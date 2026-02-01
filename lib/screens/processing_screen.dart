@@ -1,12 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/screens/confirm_sharing_screen.dart';
-import 'package:prism/utils/theme.dart';
-import 'package:prism/widgets/gradient_scaffold.dart';
+import 'package:prism/theme/colors.dart';
+import 'package:prism/theme/text_styles.dart';
+import 'package:prism/widgets/prism_button.dart';
+import 'package:prism/utils/error_handler.dart';
 
 class ProcessingScreen extends StatefulWidget {
-  const ProcessingScreen({super.key});
+  /// Optional batch ID when navigating from notification.
+  /// If provided, the screen will load the batch status from the server.
+  final String? batchId;
+
+  const ProcessingScreen({super.key, this.batchId});
 
   @override
   State<ProcessingScreen> createState() => _ProcessingScreenState();
@@ -16,6 +24,10 @@ class _ProcessingScreenState extends State<ProcessingScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   bool _hasNavigated = false;
+  bool _isLoadingBatch = false;
+
+  // Animation state for logs
+  int _logStep = 0;
 
   @override
   void initState() {
@@ -24,6 +36,81 @@ class _ProcessingScreenState extends State<ProcessingScreen>
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
+
+    // Start log sequence
+    _startLogSequence();
+
+    // If batchId is provided (navigation from notification), load batch status
+    if (widget.batchId != null) {
+      _loadBatchStatusIfNeeded();
+    }
+  }
+
+  /// Load batch status when navigating from notification.
+  Future<void> _loadBatchStatusIfNeeded() async {
+    if (widget.batchId == null) return;
+
+    setState(() => _isLoadingBatch = true);
+
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final sharingProvider = Provider.of<SharingProvider>(
+        context,
+        listen: false,
+      );
+
+      final userId = authProvider.currentUser?.userId;
+      if (userId == null) {
+        debugPrint('⚠️ [ProcessingScreen] User not authenticated');
+        setState(() => _isLoadingBatch = false);
+        return;
+      }
+
+      debugPrint(
+        '🔄 [ProcessingScreen] Loading batch status for: ${widget.batchId}',
+      );
+
+      final success = await sharingProvider.loadBatchStatus(
+        widget.batchId!,
+        userId,
+      );
+
+      if (success && sharingProvider.batchStatus?.isCompleted == true) {
+        // Batch is already complete, navigate to confirm screen
+        _navigateToConfirm();
+      }
+    } catch (e) {
+      debugPrint('❌ [ProcessingScreen] Error loading batch status: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingBatch = false);
+      }
+    }
+  }
+
+  void _startLogSequence() {
+    // Sequence timing to match a "real" feel
+    const steps = [
+      Duration(milliseconds: 500), // System initialized
+      Duration(milliseconds: 1500), // Extracting embeddings
+      Duration(milliseconds: 2000), // Matching faces
+      Duration(milliseconds: 1000), // Scene classification
+    ];
+
+    // Better approach: recursive delays
+    _runLogStep(0, steps);
+  }
+
+  void _runLogStep(int step, List<Duration> delays) {
+    if (step >= delays.length) return;
+
+    // Wait for the duration of the current step
+    Future.delayed(delays[step], () {
+      if (mounted) {
+        setState(() => _logStep = step + 1);
+        _runLogStep(step + 1, delays);
+      }
+    });
   }
 
   @override
@@ -44,14 +131,13 @@ class _ProcessingScreenState extends State<ProcessingScreen>
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return WillPopScope(
       onWillPop: () async {
         // Prevent back navigation during processing
         return false;
       },
-      child: GradientScaffold(
+      child: Scaffold(
+        backgroundColor: PrismColors.voidBlack,
         body: SafeArea(
           child: Consumer<SharingProvider>(
             builder: (context, sharingProvider, _) {
@@ -65,156 +151,168 @@ class _ProcessingScreenState extends State<ProcessingScreen>
 
               return Column(
                 children: [
-                  // Header
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          onPressed: () =>
-                              _showCancelDialog(context, sharingProvider),
-                          icon: const Icon(Icons.close),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Processing',
-                          style: theme.textTheme.titleLarge,
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Error banner if present
-                  if (sharingProvider.error != null)
-                    Container(
-                      margin: const EdgeInsets.all(16),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.errorContainer,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.error_outline,
-                            color: theme.colorScheme.onErrorContainer,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              sharingProvider.error!,
-                              style: TextStyle(
-                                color: theme.colorScheme.onErrorContainer,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
                   // Content
                   Expanded(
                     child: Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          // Loading animation
-                          SizedBox(
-                            width: 120,
-                            height: 120,
-                            child: Stack(
-                              alignment: Alignment.center,
+                          // Header
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    PrismColors.electricCyan,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                'Analyzing Content',
+                                style: PrismTextStyles.h2,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Prism AI is detecting faces and scenes...',
+                            style: PrismTextStyles.bodyMedium.copyWith(
+                              color: PrismColors.secondaryText,
+                            ),
+                          ),
+
+                          const SizedBox(height: 48),
+
+                          // Terminal Log Box
+                          Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.symmetric(horizontal: 24),
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              color: PrismColors.black.withValues(alpha: 0.4),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: PrismColors.white.withValues(
+                                  alpha: 0.05,
+                                ),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                SizedBox(
-                                  width: 120,
-                                  height: 120,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 8,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      theme.colorScheme.primaryContainer,
-                                    ),
-                                  ),
+                                _buildLogItem(
+                                  label: 'System initialized',
+                                  color: PrismColors.successGreen,
+                                  icon: Icons.terminal,
+                                  isVisible: _logStep >= 1,
+                                  isCompleted: true,
                                 ),
-                                SizedBox(
-                                  width: 120,
-                                  height: 120,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 8,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      theme.colorScheme.primary,
-                                    ),
-                                    // Indeterminate for now, could be progress based
-                                  ),
+                                const SizedBox(height: 12),
+                                _buildLogItem(
+                                  label: 'Extracting embeddings...',
+                                  color: PrismColors.electricCyan,
+                                  icon: Icons.refresh,
+                                  isVisible: _logStep >= 2,
+                                  isLoading: _logStep == 2,
                                 ),
-                                Icon(
-                                  Icons.auto_awesome,
-                                  size: 48,
-                                  color: theme.colorScheme.primary,
+                                const SizedBox(height: 12),
+                                _buildLogItem(
+                                  label: 'Matching faces...',
+                                  color: PrismColors.secondaryText,
+                                  isDot: true,
+                                  isVisible: _logStep >= 3,
+                                  isLoading: _logStep == 3,
+                                ),
+                                const SizedBox(height: 12),
+                                _buildLogItem(
+                                  label: 'Scene classification...',
+                                  color: PrismColors.secondaryText,
+                                  isDot: true,
+                                  isVisible: _logStep >= 4,
+                                  isLoading: _logStep == 4,
                                 ),
                               ],
                             ),
-                          ),
-
-                          const SizedBox(height: 48),
-
-                          // Status text
-                          Text(
-                            'Analyzing your content',
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-
-                          const SizedBox(height: 16),
-
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 32),
-                            child: Text(
-                              'Prism\'s AI is performing Triple-Filtered Relevance analysis.',
-                              style: theme.textTheme.bodyLarge?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-
-                          const SizedBox(height: 48),
-
-                          // Analysis steps
-                          _buildAnalysisStep(
-                            context,
-                            'Face Recognition',
-                            sharingProvider.batchStatus?.isCompleted == true,
-                          ),
-                          _buildAnalysisStep(
-                            context,
-                            'Object/Scene Analysis',
-                            sharingProvider.batchStatus?.isCompleted == true,
-                          ),
-                          _buildAnalysisStep(
-                            context,
-                            'Video Content Analysis',
-                            sharingProvider.batchStatus?.isCompleted == true,
                           ),
                         ],
                       ),
                     ),
                   ),
 
-                  // Stop button
+                  // Bottom Controls
                   Padding(
                     padding: const EdgeInsets.all(24),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: () =>
-                            _showCancelDialog(context, sharingProvider),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: theme.colorScheme.error,
-                          foregroundColor: theme.colorScheme.onError,
+                    child: Column(
+                      children: [
+                        // Auto-clean Mock Toggle (Visual only matching page12)
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Auto-clean',
+                                  style: PrismTextStyles.bodyLarge.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  'Remove irrelevant photos',
+                                  style: PrismTextStyles.bodySmall.copyWith(
+                                    color: PrismColors.secondaryText,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Switch(
+                              value: sharingProvider.autoClean,
+                              onChanged: (v) {
+                                HapticFeedback.selectionClick();
+                                sharingProvider.setAutoClean(v);
+                              },
+                              activeColor: PrismColors.prismYellow,
+                              activeTrackColor: PrismColors.prismYellow
+                                  .withValues(alpha: 0.3),
+                              inactiveThumbColor: PrismColors.secondaryText,
+                              inactiveTrackColor: PrismColors.white.withValues(
+                                alpha: 0.1,
+                              ),
+                            ),
+                          ],
                         ),
-                        child: const Text('Stop Processing'),
-                      ),
+                        const SizedBox(height: 24),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: PrismButton(
+                                text: 'Cancel',
+                                onPressed: () {
+                                  HapticFeedback.selectionClick();
+                                  _showCancelDialog(context, sharingProvider);
+                                },
+                                type:
+                                    PrismButtonType.secondary, // Outline approx
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              flex: 2,
+                              child: PrismButton(
+                                text: 'Sharing...',
+                                onPressed: null, // Disabled
+                                type: PrismButtonType.primary,
+                                isLoading: true,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -226,68 +324,79 @@ class _ProcessingScreenState extends State<ProcessingScreen>
     );
   }
 
-  void _showCancelDialog(
-    BuildContext context,
-    SharingProvider sharingProvider,
-  ) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Stop Processing?'),
-        content: const Text(
-          'Are you sure you want to stop the processing? Your images will not be shared.',
+  Widget _buildLogItem({
+    required String label,
+    required Color color,
+    IconData? icon,
+    bool isDot = false,
+    bool isVisible = false,
+    bool isLoading = false,
+    bool isCompleted = false,
+  }) {
+    if (!isVisible) {
+      return const SizedBox(height: 24); // Placeholder height
+    }
+
+    return Row(
+      children: [
+        SizedBox(
+          width: 20,
+          child: Center(
+            child: isLoading
+                ? SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(color),
+                    ),
+                  )
+                : isDot
+                ? Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: color.withValues(alpha: 0.5),
+                        width: 1.5,
+                      ),
+                    ),
+                  )
+                : Icon(icon, color: color, size: 16),
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Continue Processing'),
+        const SizedBox(width: 12),
+        Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontFamily: 'Roboto Mono', // Monospace feel
+            fontSize: 14,
           ),
-          FilledButton(
-            onPressed: () {
-              sharingProvider.cancel();
-              Navigator.pop(dialogContext); // Close dialog
-              Navigator.pop(context); // Close processing screen
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
-            ),
-            child: const Text('Stop'),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  Widget _buildAnalysisStep(
+  void _showCancelDialog(
     BuildContext context,
-    String title,
-    bool isCompleted,
-  ) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 8),
-      child: Row(
-        children: [
-          Icon(
-            isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
-            color: isCompleted
-                ? theme.colorScheme.primary
-                : theme.colorScheme.onSurfaceVariant,
-            size: 20,
-          ),
-          const SizedBox(width: 16),
-          Text(
-            title,
-            style: theme.textTheme.bodyLarge?.copyWith(
-              color: isCompleted
-                  ? theme.colorScheme.onSurface
-                  : theme.colorScheme.onSurfaceVariant,
-              fontWeight: isCompleted ? FontWeight.w600 : FontWeight.normal,
-            ),
-          ),
-        ],
-      ),
+    SharingProvider sharingProvider,
+  ) async {
+    HapticFeedback.selectionClick();
+
+    final confirmed = await ErrorHandler.showConfirmationDialog(
+      context,
+      title: 'Stop Processing?',
+      message: 'Are you sure you want to stop? Your upload will be cancelled.',
+      confirmText: 'Stop',
+      cancelText: 'Resume',
+      isDestructive: true,
     );
+
+    if (confirmed == true && context.mounted) {
+      sharingProvider.cancel();
+      Navigator.pop(context);
+    }
   }
 }

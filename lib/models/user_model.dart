@@ -15,6 +15,7 @@ class UserModel {
   final String? countryCode;
   final String? phoneNumber;
   final DateTime? createdAt;
+  final String? archivePin;
 
   UserModel({
     required this.userId,
@@ -31,6 +32,7 @@ class UserModel {
     this.countryCode,
     this.phoneNumber,
     this.createdAt,
+    this.archivePin,
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
@@ -51,6 +53,7 @@ class UserModel {
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'])
           : null,
+      archivePin: json['archive_pin'],
     );
   }
 
@@ -70,6 +73,7 @@ class UserModel {
       'country_code': countryCode,
       'phone_number': phoneNumber,
       'created_at': createdAt?.toIso8601String(),
+      'archive_pin': archivePin,
     };
   }
 
@@ -78,10 +82,10 @@ class UserModel {
     // Priority: imageId > profilePicId
     final picId = imageId ?? profilePicId;
     if (picId == null || picId.isEmpty) return null;
-    
+
     // If it's already a full URL, return it
     if (picId.startsWith('http')) return picId;
-    
+
     // Otherwise, construct the URL from base URL
     return '${ApiConstants.baseUrl}/images/$picId';
   }
@@ -101,6 +105,7 @@ class UserModel {
     String? countryCode,
     String? phoneNumber,
     DateTime? createdAt,
+    String? archivePin,
   }) {
     return UserModel(
       userId: userId ?? this.userId,
@@ -117,6 +122,7 @@ class UserModel {
       countryCode: countryCode ?? this.countryCode,
       phoneNumber: phoneNumber ?? this.phoneNumber,
       createdAt: createdAt ?? this.createdAt,
+      archivePin: archivePin ?? this.archivePin,
     );
   }
 }

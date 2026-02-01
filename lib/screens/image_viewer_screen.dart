@@ -5,10 +5,15 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:prism/models/gallery_image_model.dart';
 import 'package:prism/widgets/image_info_sheet.dart';
 import 'package:prism/widgets/description_editor_dialog.dart';
+import 'package:prism/widgets/video_player_widget.dart'; // Import video player
 import 'package:provider/provider.dart';
 import 'package:prism/providers/gallery_provider.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:flutter/services.dart';
+import 'package:prism/theme/colors.dart';
+import 'package:prism/theme/text_styles.dart';
+import 'package:prism/widgets/pin_dialog.dart';
+import 'package:prism/utils/error_handler.dart';
 
 class ImageViewerScreen extends StatefulWidget {
   final List<GalleryImage> images;
@@ -94,6 +99,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   }
 
   Future<void> _toggleFavourite() async {
+    HapticFeedback.selectionClick();
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final galleryProvider = Provider.of<GalleryProvider>(
       context,
@@ -139,13 +145,10 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         );
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to toggle favourite: $e'),
-              behavior: SnackBarBehavior.floating,
-              backgroundColor: Theme.of(context).colorScheme.error,
-              duration: const Duration(seconds: 2),
-            ),
+          ErrorHandler.showErrorSnackbar(
+            context,
+            message:
+                'Failed to toggle favourite: ${ErrorHandler.getErrorMessage(e)}',
           );
         }
       }
@@ -153,6 +156,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   }
 
   Future<void> _toggleArchive() async {
+    HapticFeedback.selectionClick();
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final galleryProvider = Provider.of<GalleryProvider>(
       context,
@@ -160,6 +164,33 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
     );
 
     if (authProvider.currentUser != null) {
+      // Security Check
+      if (!currentImage.galleryMeta.archive) {
+        // We are Archiving (Moving to Secure Archive)
+        if (!authProvider.hasArchivePin) {
+          // Pin not set, force set
+          final success = await showDialog<bool>(
+            context: context,
+            builder: (context) => PinDialog(
+              isSettingPin: true,
+              onConfirm: (pin) {
+                authProvider.setArchivePin(pin);
+                return true;
+              },
+            ),
+          );
+          if (success != true) return; // User cancelled
+        }
+        // If Pin is set, we proceed to archive.
+      } else {
+        // Un-Archiving?
+        // If we are viewing an archived image (accessed via Edit Profile -> Pin),
+        // we might want to allow un-archiving freely or require PIN again?
+        // Since we are already IN the secure view (implied), we can probably allow un-archiving.
+        // But if we are in Home Screen and somehow viewing it (shouldn't happen),
+        // anyway current logic is fine.
+      }
+
       try {
         // Optimistically update UI immediately
         final newValue = !currentImage.galleryMeta.archive;
@@ -198,13 +229,10 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         );
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to toggle archive: $e'),
-              behavior: SnackBarBehavior.floating,
-              backgroundColor: Theme.of(context).colorScheme.error,
-              duration: const Duration(seconds: 2),
-            ),
+          ErrorHandler.showErrorSnackbar(
+            context,
+            message:
+                'Failed to toggle archive: ${ErrorHandler.getErrorMessage(e)}',
           );
         }
       }
@@ -212,31 +240,21 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   }
 
   Future<void> _moveToBin() async {
-    final confirmed = await showDialog<bool>(
+    HapticFeedback.selectionClick();
+
+    // Show enhanced dialog with delete from phone option
+    final result = await showDialog<Map<String, bool>>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Move to Bin?'),
-        content: const Text(
-          'This image will be moved to the bin. You can restore it later.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
-            ),
-            child: const Text('Move to Bin'),
-          ),
-        ],
-      ),
+      builder: (context) => _DeleteConfirmationDialog(),
     );
 
-    if (confirmed == true && mounted) {
+    if (result == null || result['confirmed'] != true) {
+      return; // User cancelled
+    }
+
+    final deleteFromPhone = result['deleteFromPhone'] ?? false;
+
+    if (mounted) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final galleryProvider = Provider.of<GalleryProvider>(
         context,
@@ -247,28 +265,31 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         try {
           final imageIdToDelete = currentImage.image.id;
 
-          // Update backend first
-          await galleryProvider.toggleImageStatus(
-            userId: authProvider.currentUser!.userId,
-            imageId: imageIdToDelete,
-            field: 'bin',
-          );
+          if (deleteFromPhone) {
+            // Delete from backend bin AND phone gallery
+            await galleryProvider.deleteImagePermanently(
+              imageId: imageIdToDelete,
+              userId: authProvider.currentUser!.userId,
+            );
+          } else {
+            // Just move to bin on backend (existing behavior)
+            await galleryProvider.toggleImageStatus(
+              userId: authProvider.currentUser!.userId,
+              imageId: imageIdToDelete,
+              field: 'bin',
+            );
+          }
 
           if (mounted) {
-            // Success - no snackbar needed
-
             // Always close viewer to return to home screen
             Navigator.pop(context);
           }
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Failed to move to bin: $e'),
-                behavior: SnackBarBehavior.floating,
-                backgroundColor: Theme.of(context).colorScheme.error,
-                duration: const Duration(seconds: 2),
-              ),
+            ErrorHandler.showErrorSnackbar(
+              context,
+              message:
+                  'Failed to delete image: ${ErrorHandler.getErrorMessage(e)}',
             );
           }
         }
@@ -277,6 +298,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   }
 
   Future<void> _restoreFromBin() async {
+    HapticFeedback.selectionClick();
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final galleryProvider = Provider.of<GalleryProvider>(
       context,
@@ -296,12 +318,9 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to restore: $e'),
-              behavior: SnackBarBehavior.floating,
-              backgroundColor: Theme.of(context).colorScheme.error,
-            ),
+          ErrorHandler.showErrorSnackbar(
+            context,
+            message: 'Failed to restore: ${ErrorHandler.getErrorMessage(e)}',
           );
         }
       }
@@ -323,18 +342,16 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
+      backgroundColor: PrismColors.surfaceGray,
       builder: (context) => ImageInfoSheet(image: currentImage),
     );
   }
 
   Widget _buildBottomActionBar() {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
     // If image is in bin, only show restore option
     if (widget.isFromBin || currentImage.galleryMeta.bin) {
       return Container(
-        color: Colors.black.withOpacity(0.7),
+        color: PrismColors.voidBlack.withValues(alpha: 0.9),
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -342,14 +359,14 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             _buildActionButton(
               icon: Icons.restore_from_trash,
               label: 'Restore',
-              color: Colors.green,
+              color: PrismColors.successGreen,
               onTap: _restoreFromBin,
             ),
             const SizedBox(width: 40),
             _buildActionButton(
               icon: Icons.info_outline,
               label: 'Info',
-              color: Colors.white,
+              color: PrismColors.white,
               onTap: _showImageInfo,
             ),
           ],
@@ -359,7 +376,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
     // Normal action bar for non-bin images
     return Container(
-      color: Colors.black.withOpacity(0.7),
+      color: PrismColors.voidBlack.withValues(alpha: 0.9),
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -367,7 +384,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
           _buildActionButton(
             icon: Icons.share_outlined,
             label: 'Share',
-            color: Colors.white,
+            color: PrismColors.white,
             onTap: () async {
               if (widget.onShare != null) {
                 try {
@@ -377,11 +394,10 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                   widget.onShare!(file);
                 } catch (e) {
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Failed to prepare image: $e'),
-                        backgroundColor: Theme.of(context).colorScheme.error,
-                      ),
+                    ErrorHandler.showErrorSnackbar(
+                      context,
+                      message:
+                          'Failed to prepare image: ${ErrorHandler.getErrorMessage(e)}',
                     );
                   }
                 }
@@ -396,8 +412,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                 : Icons.favorite_border,
             label: 'Favourite',
             color: currentImage.galleryMeta.favourite
-                ? Colors.red
-                : Colors.white,
+                ? PrismColors.destructiveRed
+                : PrismColors.white,
             onTap: _toggleFavourite,
           ),
           _buildActionButton(
@@ -405,31 +421,31 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                 ? Icons.unarchive
                 : Icons.archive_outlined,
             label: 'Archive',
-            color: Colors.white,
+            color: PrismColors.white,
             onTap: _toggleArchive,
           ),
           _buildActionButton(
             icon: Icons.rotate_right,
             label: 'Rotate',
-            color: Colors.white,
+            color: PrismColors.white,
             onTap: _rotateImage,
           ),
           _buildActionButton(
             icon: Icons.edit_outlined,
             label: 'Edit',
-            color: Colors.white,
+            color: PrismColors.white,
             onTap: _showDescriptionEditor,
           ),
           _buildActionButton(
             icon: Icons.info_outline,
             label: 'Info',
-            color: Colors.white,
+            color: PrismColors.white,
             onTap: _showImageInfo,
           ),
           _buildActionButton(
             icon: Icons.delete_outline,
             label: 'Delete',
-            color: colorScheme.error,
+            color: PrismColors.destructiveRed,
             onTap: _moveToBin,
           ),
         ],
@@ -444,7 +460,10 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
     required Color color,
   }) {
     return InkWell(
-      onTap: onTap,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.all(8.0),
@@ -455,10 +474,9 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             const SizedBox(height: 4),
             Text(
               label,
-              style: TextStyle(
+              style: PrismTextStyles.bodySmall.copyWith(
                 color: color,
                 fontSize: 10,
-                fontWeight: FontWeight.w500,
               ),
             ),
           ],
@@ -470,17 +488,17 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: PrismColors.voidBlack,
       extendBodyBehindAppBar: true,
       appBar: _showControls
           ? AppBar(
-              backgroundColor: Colors.black.withOpacity(0.5),
+              backgroundColor: PrismColors.voidBlack.withValues(alpha: 0.5),
               elevation: 0,
-              iconTheme: const IconThemeData(color: Colors.white),
+              iconTheme: const IconThemeData(color: PrismColors.white),
               systemOverlayStyle: SystemUiOverlayStyle.light,
               title: Text(
                 '${_currentIndex + 1} / ${widget.images.length}',
-                style: const TextStyle(color: Colors.white),
+                style: PrismTextStyles.h3.copyWith(color: PrismColors.white),
               ),
             )
           : null,
@@ -509,22 +527,32 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                       angle: _rotationAngle,
                       child: Hero(
                         tag: 'image_${image.image.id}',
-                        child: CachedNetworkImage(
-                          imageUrl: image.image.imageUrl,
-                          fit: BoxFit.contain,
-                          placeholder: (context, url) => Center(
-                            child: CircularProgressIndicator(
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                          ),
-                          errorWidget: (context, url, error) => const Center(
-                            child: Icon(
-                              Icons.broken_image,
-                              color: Colors.white54,
-                              size: 64,
-                            ),
-                          ),
-                        ),
+                        child: image.image.mediaType.startsWith('video/')
+                            ? VideoPlayerWidget(
+                                key: ValueKey('video_${image.image.id}_$index'),
+                                videoUrl: image.image.imageUrl,
+                                autoPlay:
+                                    index ==
+                                    _currentIndex, // Only autoplay on current page
+                                looping: true,
+                              )
+                            : CachedNetworkImage(
+                                imageUrl: image.image.imageUrl,
+                                fit: BoxFit.contain,
+                                placeholder: (context, url) => const Center(
+                                  child: CircularProgressIndicator(
+                                    color: PrismColors.prismYellow,
+                                  ),
+                                ),
+                                errorWidget: (context, url, error) =>
+                                    const Center(
+                                      child: Icon(
+                                        Icons.broken_image,
+                                        color: PrismColors.secondaryText,
+                                        size: 64,
+                                      ),
+                                    ),
+                              ),
                       ),
                     ),
                   ),
@@ -542,6 +570,127 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// Dialog for confirming delete with option to delete from phone storage
+class _DeleteConfirmationDialog extends StatefulWidget {
+  @override
+  State<_DeleteConfirmationDialog> createState() =>
+      _DeleteConfirmationDialogState();
+}
+
+class _DeleteConfirmationDialogState extends State<_DeleteConfirmationDialog> {
+  bool _deleteFromPhone = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: PrismColors.surfaceGray,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text(
+        'Delete Image?',
+        style: PrismTextStyles.h3.copyWith(color: PrismColors.white),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'This image will be moved to the bin.',
+            style: PrismTextStyles.bodyMedium.copyWith(
+              color: PrismColors.secondaryText,
+            ),
+          ),
+          const SizedBox(height: 16),
+          InkWell(
+            onTap: () {
+              setState(() {
+                _deleteFromPhone = !_deleteFromPhone;
+              });
+              HapticFeedback.selectionClick();
+            },
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: _deleteFromPhone
+                            ? PrismColors.destructiveRed
+                            : PrismColors.secondaryText,
+                        width: 2,
+                      ),
+                      color: _deleteFromPhone
+                          ? PrismColors.destructiveRed
+                          : Colors.transparent,
+                    ),
+                    child: _deleteFromPhone
+                        ? const Icon(
+                            Icons.check,
+                            size: 16,
+                            color: PrismColors.white,
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Also delete from phone storage',
+                      style: PrismTextStyles.bodyMedium.copyWith(
+                        color: PrismColors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_deleteFromPhone)
+            Padding(
+              padding: const EdgeInsets.only(left: 36, top: 4),
+              child: Text(
+                'The image will be removed from your photo gallery.',
+                style: PrismTextStyles.bodySmall.copyWith(
+                  color: PrismColors.destructiveRed.withValues(alpha: 0.8),
+                ),
+              ),
+            ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Navigator.pop(context, null);
+          },
+          child: Text(
+            'Cancel',
+            style: PrismTextStyles.button.copyWith(
+              color: PrismColors.secondaryText,
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: () {
+            Navigator.pop(context, {
+              'confirmed': true,
+              'deleteFromPhone': _deleteFromPhone,
+            });
+          },
+          child: Text(
+            'Delete',
+            style: PrismTextStyles.button.copyWith(
+              color: PrismColors.destructiveRed,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

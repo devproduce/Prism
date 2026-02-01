@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:prism/providers/gallery_provider.dart';
-import 'package:prism/providers/auth_provider.dart';
-import 'package:prism/widgets/gradient_scaffold.dart';
 import 'package:prism/models/gallery_image_model.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:prism/screens/image_viewer_screen.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
+import 'package:prism/widgets/prism_media_preview.dart';
+import 'package:prism/widgets/empty_state_widget.dart';
+import 'package:prism/widgets/shimmer_placeholder.dart';
+import 'package:prism/utils/responsive_helper.dart';
 
 class CollectionDetailScreen extends StatefulWidget {
   final String title;
@@ -40,61 +42,59 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
         groupedImages = {};
     }
 
-    // Flatten logic for Staggered Grid if we wanted single list, but keeping sections is better for "Month" headers
-    // For Staggered Grid with Sections, we can use SliverStaggeredGrid or similar, but simplified Masonry is easiest for now.
-    // However, sticking to the existing grouped structure is fine, just replacing the GridView with MasonryGridView.
-
-    return GradientScaffold(
+    return Scaffold(
+      backgroundColor: PrismColors.voidBlack,
       appBar: AppBar(
         title: Text(widget.title, style: PrismTextStyles.h2),
         backgroundColor: Colors.transparent,
         centerTitle: true,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
-        leading: const BackButton(color: Colors.white),
+        leading: BackButton(
+          color: PrismColors.white,
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
-      body: groupedImages.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    _getIconForTitle(widget.title),
-                    size: 64,
-                    color: Colors.white24,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No items in ${widget.title}',
-                    style: PrismTextStyles.bodyMedium.copyWith(color: Colors.white54),
-                  ),
-                ],
+      body: galleryProvider.isLoading
+          ? Padding(
+              padding: const EdgeInsets.all(16),
+              child: ShimmerLayouts.galleryGrid(
+                itemCount: 12,
+                crossAxisCount: ResponsiveHelper.galleryGridCount(context),
               ),
             )
+          : groupedImages.isEmpty
+          ? _buildEmptyState()
           : CustomScrollView(
               slivers: groupedImages.entries.map((entry) {
                 return SliverMainAxisGroup(
                   slivers: [
                     SliverToBoxAdapter(
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                        padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
                         child: Text(
                           entry.key,
-                          style: PrismTextStyles.h3.copyWith(color: PrismColors.electricBlue),
+                          style: PrismTextStyles.h3.copyWith(
+                            color: PrismColors.prismYellow,
+                            fontSize: 18,
+                          ),
                         ),
                       ),
                     ),
                     SliverPadding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       sliver: SliverMasonryGrid.count(
-                        crossAxisCount: 3,
-                        mainAxisSpacing: 8,
-                        crossAxisSpacing: 8,
+                        crossAxisCount: ResponsiveHelper.galleryGridCount(
+                          context,
+                        ),
+                        mainAxisSpacing: ResponsiveHelper.spacingS(context),
+                        crossAxisSpacing: ResponsiveHelper.spacingS(context),
                         childCount: entry.value.length,
                         itemBuilder: (context, index) {
                           final image = entry.value[index];
                           return GestureDetector(
                             onTap: () {
+                              HapticFeedback.selectionClick();
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
@@ -107,17 +107,15 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                               );
                             },
                             child: Hero(
-                              tag: 'collection_${widget.title}_${image.image.id}',
+                              tag:
+                                  'collection_${widget.title}_${image.image.id}',
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
-                                child: CachedNetworkImage(
+                                child: PrismMediaPreview(
                                   imageUrl: image.image.imageUrl,
+                                  mediaType: image.image.mediaType,
                                   fit: BoxFit.cover,
-                                  placeholder: (context, url) => Container(color: PrismColors.glassFrostedWhite),
-                                  errorWidget: (context, url, error) => Container(
-                                    color: PrismColors.glassFrostedWhite,
-                                    child: const Icon(Icons.broken_image, color: Colors.white24),
-                                  ),
+                                  placeholderColor: PrismColors.surfaceGray,
                                 ),
                               ),
                             ),
@@ -142,6 +140,28 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
         return Icons.delete_outline_rounded;
       default:
         return Icons.image_outlined;
+    }
+  }
+
+  Widget _buildEmptyState() {
+    switch (widget.title) {
+      case 'Favourites':
+        return EmptyStateWidget.noFavorites();
+      case 'Bin':
+        return EmptyStateWidget(
+          icon: Icons.delete_outline_rounded,
+          title: 'Bin is empty',
+          message:
+              'Deleted items will appear here for 30 days before permanent deletion.',
+        );
+      case 'Archived':
+        return EmptyStateWidget(
+          icon: Icons.archive_outlined,
+          title: 'No archived items',
+          message: 'Archived photos will appear here.',
+        );
+      default:
+        return EmptyStateWidget.noMedia();
     }
   }
 }

@@ -34,6 +34,9 @@ class ApiClient {
     _authToken = null;
   }
 
+  // Get authentication token
+  String? get token => _authToken;
+
   // Get common headers
   Map<String, String> _getHeaders({bool isMultipart = false}) {
     final headers = <String, String>{
@@ -84,6 +87,7 @@ class ApiClient {
     required String firstName,
     String? lastName,
     required File profileImage,
+    List<String>? faceIds, // Optional face IDs from multi-view registration
   }) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.register}');
@@ -96,6 +100,12 @@ class ApiClient {
       request.fields['first_name'] = firstName;
       if (lastName != null && lastName.isNotEmpty) {
         request.fields['last_name'] = lastName;
+      }
+
+      // Add face_ids if provided (multi-view registration)
+      if (faceIds != null && faceIds.isNotEmpty) {
+        request.fields['face_ids'] = json.encode(faceIds);
+        debugPrint('✓ Including ${faceIds.length} face IDs in registration');
       }
 
       // Add image file
@@ -116,8 +126,9 @@ class ApiClient {
 
   /// Login user
   /// POST /auth/login
+  /// Now accepts either username OR email as identifier
   Future<AuthResponse> login({
-    required String email,
+    required String identifier, // Changed from 'email' to 'identifier'
     required String password,
   }) async {
     try {
@@ -125,7 +136,10 @@ class ApiClient {
       final response = await _client.post(
         uri,
         headers: _getHeaders(),
-        body: json.encode({'email': email, 'password': password}),
+        body: json.encode({
+          'identifier': identifier, // Changed from 'email' to 'identifier'
+          'password': password,
+        }),
       );
 
       final data = _handleResponse(response);
@@ -133,6 +147,50 @@ class ApiClient {
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Login failed: ${e.toString()}');
+    }
+  }
+
+  /// Verify password for archive unlock
+  /// POST /auth/verify-password
+  Future<bool> verifyPassword({
+    required String userId,
+    required String password,
+  }) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/auth/verify-password');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers.addAll(_getHeaders(isMultipart: true));
+      request.fields['user_id'] = userId;
+      request.fields['password'] = password;
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+      final data = _handleResponse(response);
+
+      return data['valid'] as bool;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Password verification failed: ${e.toString()}');
+    }
+  }
+
+  /// Check username or email availability
+  /// GET /auth/check-availability
+  Future<bool> checkAvailability({
+    required String type, // 'username' or 'email'
+    required String value,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/auth/check-availability',
+      ).replace(queryParameters: {'type': type, 'value': value});
+
+      final response = await _client.get(uri, headers: _getHeaders());
+      final data = _handleResponse(response);
+      return data['available'] as bool;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to check availability: ${e.toString()}');
     }
   }
 
@@ -203,8 +261,9 @@ class ApiClient {
       if (lastName != null) request.fields['last_name'] = lastName;
       if (pronouns != null) request.fields['pronouns'] = pronouns;
       if (bio != null) request.fields['bio'] = bio;
-      if (dob != null)
+      if (dob != null) {
         request.fields['dob'] = dob.toIso8601String().split('T')[0];
+      }
       if (countryCode != null) request.fields['country_code'] = countryCode;
       if (phoneNumber != null) request.fields['phone_number'] = phoneNumber;
 
@@ -245,6 +304,29 @@ class ApiClient {
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to upload profile picture: ${e.toString()}');
+    }
+  }
+
+  /// Reset profile picture to default avatar
+  /// DELETE /users/me/profile-picture
+  Future<Map<String, dynamic>> resetProfilePicture({
+    required String userId,
+  }) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/users/me/profile-picture');
+      // Use MultipartRequest for form data
+      final request = http.MultipartRequest('DELETE', uri);
+      request.headers.addAll(_getHeaders(isMultipart: true));
+      request.fields['user_id'] = userId;
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+      final data = _handleResponse(response);
+
+      return data as Map<String, dynamic>;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to reset profile picture: ${e.toString()}');
     }
   }
 
@@ -497,6 +579,30 @@ class ApiClient {
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to get contacts: ${e.toString()}');
+    }
+  }
+
+  /// Add contacts in batch
+  /// POST /users/me/contacts/batch
+  Future<Map<String, dynamic>> addContactsBatch({
+    required String userId,
+    required List<Map<String, dynamic>> contacts,
+  }) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/users/me/contacts/batch');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers.addAll(_getHeaders(isMultipart: true));
+      request.fields['user_id'] = userId;
+      request.fields['contacts'] = json.encode(contacts);
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+      final data = _handleResponse(response);
+
+      return data as Map<String, dynamic>;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to add contacts batch: ${e.toString()}');
     }
   }
 
@@ -881,11 +987,18 @@ class ApiClient {
   }
 
   /// Get batch status
-  /// GET /images/batch/{batch_id}
-  Future<Map<String, dynamic>> getBatchStatus({required String batchId}) async {
+  /// GET /images/batch/{batch_id}?user_id={user_id}
+  /// Requires user_id for authorization
+  Future<Map<String, dynamic>> getBatchStatus({
+    required String batchId,
+    required String userId, // Added for authorization
+  }) async {
     try {
       debugPrint('🔄 [ApiClient] GET /images/batch/$batchId');
-      final uri = Uri.parse('${ApiConstants.baseUrl}/images/batch/$batchId');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/images/batch/$batchId',
+      ).replace(queryParameters: {'user_id': userId});
+
       final response = await _client.get(uri, headers: _getHeaders());
 
       debugPrint('✅ [ApiClient] Batch status response: ${response.statusCode}');
@@ -900,18 +1013,56 @@ class ApiClient {
     }
   }
 
+  /// Cancel batch upload
+  /// DELETE /images/batch/{batch_id}/cancel
+  Future<Map<String, dynamic>> cancelBatch({
+    required String batchId,
+    required String userId,
+  }) async {
+    try {
+      debugPrint('🔄 [ApiClient] DELETE /images/batch/$batchId/cancel');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/images/batch/$batchId/cancel',
+      );
+      // Use MultipartRequest for form data
+      final request = http.MultipartRequest('DELETE', uri);
+      request.headers.addAll(_getHeaders(isMultipart: true));
+      request.fields['user_id'] = userId;
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      debugPrint('✅ [ApiClient] Cancel batch response: ${response.statusCode}');
+      debugPrint('   Body: ${response.body}');
+
+      final data = _handleResponse(response);
+      return data as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('❌ [ApiClient] Cancel batch error: $e');
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to cancel batch: ${e.toString()}');
+    }
+  }
+
   /// Confirm share
   /// POST /images/share/confirm
+  /// Requires user_id for authorization
   Future<Map<String, dynamic>> confirmShare({
     required String batchId,
+    required String userId,
     required List<String> recipients,
     required bool autoClean,
+    Map<String, List<String>>? imageRecipientMap, // Added parameter
   }) async {
     try {
       debugPrint('📤 [ApiClient] POST /images/share/confirm');
       debugPrint('   Batch ID: $batchId');
+      debugPrint('   User ID: $userId');
       debugPrint('   Recipients: $recipients');
       debugPrint('   Auto Clean: $autoClean');
+      if (imageRecipientMap != null) {
+        debugPrint('   Custom Map: ${imageRecipientMap.length} entries');
+      }
 
       final uri = Uri.parse('${ApiConstants.baseUrl}/images/share/confirm');
       final response = await _client.post(
@@ -919,8 +1070,11 @@ class ApiClient {
         headers: _getHeaders(),
         body: json.encode({
           'batch_id': batchId,
+          'user_id': userId,
           'recipients': recipients,
           'auto_clean': autoClean,
+          if (imageRecipientMap != null)
+            'image_recipient_map': imageRecipientMap, // Added field
         }),
       );
 

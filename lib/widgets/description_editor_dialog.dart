@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:prism/utils/theme.dart';
 import 'package:prism/providers/gallery_provider.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:provider/provider.dart';

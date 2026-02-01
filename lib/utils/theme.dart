@@ -214,11 +214,9 @@ class AppTheme {
         primary: primaryAccent,
         secondary: secondaryAccent,
         surface: darkBackground,
-        background: darkBackground,
         onPrimary: buttonText,
         onSecondary: buttonText,
         onSurface: darkPrimaryText,
-        onBackground: darkPrimaryText,
         surfaceTint: Colors.transparent, // Remove tint on surfaces
       ),
       appBarTheme: const AppBarTheme(
@@ -294,11 +292,9 @@ class AppTheme {
         primary: primaryAccent,
         secondary: secondaryAccent,
         surface: lightBackground,
-        background: lightBackground,
         onPrimary: buttonText,
         onSecondary: buttonText,
         onSurface: lightPrimaryText,
-        onBackground: lightPrimaryText,
         surfaceTint: Colors.transparent,
       ),
       appBarTheme: const AppBarTheme(

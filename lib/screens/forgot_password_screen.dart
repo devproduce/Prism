@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:prism/utils/theme.dart';
-import 'package:prism/screens/login_screen.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:prism/theme/colors.dart';
+import 'package:prism/theme/text_styles.dart';
+import 'package:prism/widgets/prism_card.dart';
+import 'package:prism/widgets/prism_button.dart';
+import 'package:prism/utils/error_handler.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -23,6 +28,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   Future<void> _handleSendLink() async {
     if (!_formKey.currentState!.validate()) return;
 
+    HapticFeedback.mediumImpact();
     setState(() => _isLoading = true);
 
     // TODO: Implement forgot password API call
@@ -30,118 +36,162 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
     if (mounted) {
       setState(() => _isLoading = false);
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Password reset link sent to your email'),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-        ),
+
+      ErrorHandler.showSuccessSnackbar(
+        context,
+        message: 'Password reset link sent to your email',
       );
       Navigator.pop(context);
     }
   }
 
+  InputDecoration _prismInputDecoration(String hint, IconData icon) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: PrismTextStyles.bodyMedium.copyWith(
+        color: PrismColors.secondaryText,
+      ),
+      prefixIcon: Icon(icon, color: PrismColors.secondaryText),
+      filled: true,
+      fillColor: PrismColors.inputGray,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(
+          color: PrismColors.prismYellow,
+          width: 1.5,
+        ),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
-      backgroundColor: AppTheme.primaryBackground(context),
+      backgroundColor: PrismColors.voidBlack,
       appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: PrismColors.white,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Reset Password'),
+        title: Text('Reset Password', style: PrismTextStyles.h3),
+        centerTitle: true,
       ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 24),
-                
-                // Icon
-                Icon(
-                  Icons.lock_reset,
-                  size: 64,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(height: 24),
+          child: Column(
+            children: [
+              const SizedBox(height: 24),
 
-                // Header
-                Text(
-                  'Forgot Password?',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.headlineMedium,
-                ),
-                const SizedBox(height: 16),
-
-                // Subtitle
-                Text(
-                  'Enter your email address and we\'ll send you a link to reset your password.',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: AppTheme.secondaryText(context),
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: PrismColors.surfaceGray,
+                  border: Border.all(
+                    color: PrismColors.white.withValues(alpha: 0.1),
                   ),
                 ),
-
-                const SizedBox(height: 48),
-
-                // Email Field
-                TextFormField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  style: theme.textTheme.bodyLarge,
-                  decoration: const InputDecoration(
-                    labelText: 'Email Address',
-                    hintText: 'Enter your email',
-                    prefixIcon: Icon(Icons.email_outlined),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your email';
-                    }
-                    if (!value.contains('@')) {
-                      return 'Please enter a valid email';
-                    }
-                    return null;
-                  },
+                child: const Icon(
+                  Icons.lock_reset_rounded,
+                  size: 48,
+                  color: PrismColors.prismYellow,
                 ),
+              ).animate().scale(duration: 500.ms, curve: Curves.elasticOut),
 
-                const SizedBox(height: 32),
+              const SizedBox(height: 32),
 
-                // Send Link Button
-                SizedBox(
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _handleSendLink,
-                    child: _isLoading
-                        ? SizedBox(
-                            height: 24,
-                            width: 24,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: theme.colorScheme.onPrimary,
-                            ),
+              PrismCard(
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Forgot Password?',
+                        textAlign: TextAlign.center,
+                        style: PrismTextStyles.h2,
+                      ).animate().fadeIn().moveY(begin: 10, end: 0),
+
+                      const SizedBox(height: 12),
+
+                      Text(
+                        'Enter your email address and we\'ll send you a link to reset your password.',
+                        textAlign: TextAlign.center,
+                        style: PrismTextStyles.bodyMedium.copyWith(
+                          color: PrismColors.secondaryText,
+                        ),
+                      ).animate().fadeIn(delay: 200.ms),
+
+                      const SizedBox(height: 32),
+
+                      Text(
+                        'Email Address',
+                        style: PrismTextStyles.bodyMedium,
+                      ).animate().fadeIn(delay: 300.ms),
+                      const SizedBox(height: 8),
+
+                      TextFormField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        style: PrismTextStyles.bodyLarge,
+                        decoration: _prismInputDecoration(
+                          'Enter your email',
+                          Icons.email_outlined,
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter your email';
+                          }
+                          if (!value.contains('@')) {
+                            return 'Please enter a valid email';
+                          }
+                          return null;
+                        },
+                      ).animate().fadeIn(delay: 350.ms),
+
+                      const SizedBox(height: 32),
+
+                      PrismButton(
+                            text: 'Send Reset Link',
+                            isLoading: _isLoading,
+                            onPressed: _handleSendLink,
+                            type: PrismButtonType.primary,
                           )
-                        : const Text('Send Reset Link'),
+                          .animate()
+                          .fadeIn(delay: 450.ms)
+                          .moveY(begin: 10, end: 0),
+                    ],
                   ),
                 ),
+              ),
 
-                const SizedBox(height: 24),
+              const SizedBox(height: 24),
 
-                // Back to Login
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Back to Log In'),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(
+                  'Back to Log In',
+                  style: PrismTextStyles.button.copyWith(
+                    color: PrismColors.secondaryText,
+                  ),
                 ),
-              ],
-            ),
+              ).animate().fadeIn(delay: 550.ms),
+            ],
           ),
         ),
       ),

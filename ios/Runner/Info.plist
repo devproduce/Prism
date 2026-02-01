@@ -45,5 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Prism needs access to your gallery to share photos and videos with friends.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Prism needs camera access to capture moments.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Prism needs microphone access to record audio with your videos.</string>
 </dict>
 </plist>

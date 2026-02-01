@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:prism/models/gallery_image_model.dart';
-import 'package:prism/utils/theme.dart';
 
 class ImageInfoSheet extends StatelessWidget {
   final GalleryImage image;
@@ -38,7 +37,10 @@ class ImageInfoSheet extends StatelessWidget {
               ),
               // Header
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 8,
+                ),
                 child: Row(
                   children: [
                     Text(
@@ -127,8 +129,8 @@ class ImageInfoSheet extends StatelessWidget {
                               child: ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 leading: CircleAvatar(
-                                  backgroundColor: theme
-                                      .colorScheme.primaryContainer,
+                                  backgroundColor:
+                                      theme.colorScheme.primaryContainer,
                                   child: Icon(
                                     Icons.person,
                                     color: theme.colorScheme.onPrimaryContainer,

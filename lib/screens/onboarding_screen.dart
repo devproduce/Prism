@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:prism/screens/login_screen.dart';
 import 'package:prism/screens/register_screen.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
-import 'package:prism/widgets/glass_widgets.dart';
-import 'package:prism/widgets/gradient_background.dart';
+import 'package:prism/widgets/prism_button.dart';
+import 'package:prism/utils/responsive_helper.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -52,6 +53,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   void _navigateToLogin() {
+    HapticFeedback.lightImpact();
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (_, __, ___) => const LoginScreen(),
@@ -63,6 +65,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   void _navigateToRegister() {
+    HapticFeedback.mediumImpact();
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (_, __, ___) => const RegisterScreen(),
@@ -75,18 +78,27 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return GradientBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: Stack(
-          children: [
+    final screenWidth = ResponsiveHelper.screenWidth(context);
+    final horizontalPadding = ResponsiveHelper.horizontalPadding(context);
+    final spacingS = ResponsiveHelper.spacingS(context);
+    final spacingM = ResponsiveHelper.spacingM(context);
+    final spacingL = ResponsiveHelper.spacingL(context);
+    final spacingXL = ResponsiveHelper.spacingXL(context);
+
+    return Scaffold(
+      backgroundColor: PrismColors.voidBlack,
+      body: Stack(
+        children: [
           // Content
           Column(
             children: [
               // Skip Button
               SafeArea(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: horizontalPadding,
+                    vertical: spacingS,
+                  ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
@@ -96,7 +108,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           child: Text(
                             'Skip',
                             style: PrismTextStyles.button.copyWith(
-                              color: Colors.white.withOpacity(0.6),
+                              color: PrismColors.secondaryText,
                               fontWeight: FontWeight.w400,
                             ),
                           ),
@@ -115,7 +127,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   itemBuilder: (context, index) {
                     final page = _pages[index];
                     return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: horizontalPadding,
+                      ),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -123,8 +137,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           Expanded(
                             flex: 5,
                             child: Container(
-                              margin: const EdgeInsets.all(20),
-                              padding: const EdgeInsets.all(20),
+                              margin: EdgeInsets.all(spacingM),
+                              padding: EdgeInsets.all(spacingM),
                               decoration: BoxDecoration(
                                 image: DecorationImage(
                                   image: AssetImage(page['image']!),
@@ -133,7 +147,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                               ),
                             ).animate().scale(duration: 600.ms, delay: 200.ms),
                           ),
-                          
+
                           // Text Content
                           Expanded(
                             flex: 3,
@@ -146,21 +160,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                     height: 1.1,
                                     shadows: [
                                       BoxShadow(
-                                        color: PrismColors.purple.withOpacity(0.5),
+                                        color: PrismColors.purple.withValues(
+                                          alpha: 0.5,
+                                        ),
                                         blurRadius: 20,
                                         offset: const Offset(0, 5),
                                       ),
                                     ],
                                   ),
                                 ).animate().fadeIn().moveY(begin: 30, end: 0),
-                                
-                                const SizedBox(height: 16),
-                                
+
+                                SizedBox(height: spacingM),
+
                                 Text(
                                   page['description']!,
                                   textAlign: TextAlign.center,
                                   style: PrismTextStyles.bodyMedium.copyWith(
                                     height: 1.5,
+                                    color: PrismColors.secondaryText,
                                   ),
                                 ).animate().fadeIn(delay: 200.ms),
                               ],
@@ -175,7 +192,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
               // Bottom Control Area
               Container(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 40),
+                padding: EdgeInsets.fromLTRB(
+                  horizontalPadding,
+                  0,
+                  horizontalPadding,
+                  spacingXL,
+                ),
                 child: Column(
                   children: [
                     // Indicators
@@ -185,39 +207,46 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         _pages.length,
                         (index) => AnimatedContainer(
                           duration: const Duration(milliseconds: 300),
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
-                          width: _currentPage == index ? 32 : 8,
-                          height: 8,
+                          margin: EdgeInsets.symmetric(
+                            horizontal: spacingS * 0.5,
+                          ),
+                          width: _currentPage == index
+                              ? screenWidth * 0.08
+                              : screenWidth * 0.02,
+                          height: screenWidth * 0.02,
                           decoration: BoxDecoration(
-                            gradient: _currentPage == index 
-                                ? PrismColors.prismSignature 
+                            gradient: _currentPage == index
+                                ? PrismColors.prismSignature
                                 : null,
-                            color: _currentPage == index 
-                                ? null 
-                                : Colors.white.withOpacity(0.2),
+                            color: _currentPage == index
+                                ? null
+                                : PrismColors.surfaceGray,
                             borderRadius: BorderRadius.circular(4),
                           ),
                         ),
                       ),
                     ),
 
-                    const SizedBox(height: 32),
+                    SizedBox(height: spacingL),
 
                     // Actions
                     if (_currentPage == _pages.length - 1) ...[
-                      GlassButton(
+                      PrismButton(
                         text: 'Get Started',
                         onPressed: _navigateToRegister,
-                        isPrimary: true,
+                        type: PrismButtonType.primary,
                       ).animate().fadeIn().moveY(begin: 20, end: 0),
-                      const SizedBox(height: 16),
-                      GlassButton(
-                        text: 'I already have an account',
-                        onPressed: _navigateToLogin,
-                        isPrimary: false,
-                      ).animate().fadeIn(delay: 200.ms).moveY(begin: 20, end: 0),
+                      SizedBox(height: spacingM),
+                      PrismButton(
+                            text: 'I already have an account',
+                            onPressed: _navigateToLogin,
+                            type: PrismButtonType.secondary,
+                          )
+                          .animate()
+                          .fadeIn(delay: 200.ms)
+                          .moveY(begin: 20, end: 0),
                     ] else ...[
-                       GlassButton(
+                      PrismButton(
                         text: 'Next',
                         onPressed: () {
                           _pageController.nextPage(
@@ -225,10 +254,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             curve: Curves.easeOutCubic,
                           );
                         },
-                        isPrimary: true,
-                         icon: Icons.arrow_forward_rounded,
+                        type: PrismButtonType.primary,
+                        icon: Icons.arrow_forward_rounded,
                       ),
-                      const SizedBox(height: 72), // Height of secondary button + margin to keep layout stable
+                      SizedBox(
+                        height:
+                            ResponsiveHelper.buttonHeight(context) + spacingM,
+                      ), // Height of secondary button + margin
                     ],
                   ],
                 ),
@@ -236,7 +268,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ],
           ),
         ],
-        ),
       ),
     );
   }

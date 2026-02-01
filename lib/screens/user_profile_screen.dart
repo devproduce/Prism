@@ -1,15 +1,20 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/models/user_model.dart';
-import 'package:prism/models/friend_model.dart';
 import 'package:prism/models/gallery_image_model.dart';
 import 'package:prism/api/api_client.dart';
-import 'package:prism/widgets/gradient_scaffold.dart';
 import 'package:prism/screens/image_viewer_screen.dart';
+import 'package:prism/theme/colors.dart';
+import 'package:prism/theme/text_styles.dart';
+import 'package:prism/widgets/prism_button.dart';
+import 'package:prism/widgets/prism_media_preview.dart';
+import 'package:prism/utils/error_handler.dart';
+import 'package:prism/widgets/shimmer_placeholder.dart';
+import 'package:prism/widgets/empty_state_widget.dart';
 
 class UserProfileScreen extends StatefulWidget {
   final String userId;
@@ -122,14 +127,11 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     try {
       final apiClient = ApiClient();
       debugPrint('📸 Fetching shared gallery for friend: ${widget.userId}');
-      debugPrint('📸 Current user: ${authProvider.currentUser!.userId}');
 
       final data = await apiClient.getSharedGallery(
         userId: authProvider.currentUser!.userId,
         friendId: widget.userId,
       );
-
-      debugPrint('📸 Received ${data.length} items from API');
 
       if (!mounted) return;
 
@@ -141,22 +143,6 @@ class _UserProfileScreenState extends State<UserProfileScreen>
         _sharedImages = images;
         _isLoadingSharedImages = false;
       });
-
-      debugPrint('📸 Loaded ${_sharedImages.length} shared images');
-
-      // Debug: Log type information
-      for (var img in _sharedImages) {
-        debugPrint('📸 Image ${img.image.id} type: ${img.type}');
-      }
-
-      // Count sent and received
-      final sentCount = _sharedImages.where((img) => img.type == 'sent').length;
-      final receivedCount = _sharedImages
-          .where((img) => img.type == 'received')
-          .length;
-
-      debugPrint('📸 Sent images: $sentCount');
-      debugPrint('📸 Received images: $receivedCount');
     } catch (e) {
       debugPrint('❌ Error loading shared images: $e');
       if (mounted) {
@@ -167,75 +153,77 @@ class _UserProfileScreenState extends State<UserProfileScreen>
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final authProvider = Provider.of<AuthProvider>(context);
-
     if (_isLoading) {
-      return GradientScaffold(
-        body: Center(
-          child: CircularProgressIndicator(color: theme.colorScheme.primary),
-        ),
+      return Scaffold(
+        backgroundColor: PrismColors.voidBlack,
+        body: Center(child: ShimmerLayouts.profileHeader()),
       );
     }
 
     if (_userData == null) {
-      final isDark = theme.brightness == Brightness.dark;
-      return GradientScaffold(
+      return Scaffold(
+        backgroundColor: PrismColors.voidBlack,
         appBar: AppBar(
-          title: Text(
-            'Profile',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 22,
-              color: theme.colorScheme.onSurface,
-            ),
-          ),
-          backgroundColor: isDark
-              ? const Color(0xFF1E1E1E)
-              : const Color(0xFFF5F5F5),
+          title: Text('Profile', style: PrismTextStyles.h2),
+          backgroundColor: Colors.transparent,
           centerTitle: true,
           elevation: 0,
-          surfaceTintColor: Colors.transparent,
+          leading: BackButton(
+            color: PrismColors.white,
+            onPressed: () => Navigator.pop(context),
+          ),
         ),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
+              const Icon(
                 Icons.person_off_outlined,
                 size: 64,
-                color: theme.colorScheme.onSurfaceVariant,
+                color: PrismColors.secondaryText,
               ),
               const SizedBox(height: 16),
-              Text('User not found', style: theme.textTheme.titleMedium),
+              Text(
+                'User not found',
+                style: PrismTextStyles.h3.copyWith(
+                  color: PrismColors.secondaryText,
+                ),
+              ),
             ],
           ),
         ),
       );
     }
 
-    return GradientScaffold(
+    return Scaffold(
+      backgroundColor: PrismColors.voidBlack,
       body: NestedScrollView(
         headerSliverBuilder: (context, innerBoxIsScrolled) {
           return [
             SliverAppBar(
               title: Text(
                 _userData?.username ?? widget.username ?? 'Profile',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.onSurface,
-                ),
+                style: PrismTextStyles.h2,
               ),
-              backgroundColor: Colors.transparent,
+              backgroundColor: PrismColors.voidBlack,
               centerTitle: true,
               elevation: 0,
               surfaceTintColor: Colors.transparent,
+              leading: BackButton(
+                color: PrismColors.white,
+                onPressed: () => Navigator.pop(context),
+              ),
               actions: [
                 if (_isFriend)
                   PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert),
+                    icon: const Icon(Icons.more_vert, color: PrismColors.white),
+                    color: PrismColors.surfaceGray,
                     onSelected: (value) async {
                       final friendsProvider = Provider.of<FriendsProvider>(
+                        context,
+                        listen: false,
+                      );
+                      final authProvider = Provider.of<AuthProvider>(
                         context,
                         listen: false,
                       );
@@ -268,11 +256,16 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                         value: 'block',
                         child: Row(
                           children: [
-                            Icon(Icons.block, color: Colors.red),
+                            Icon(
+                              Icons.block,
+                              color: PrismColors.destructiveRed,
+                            ),
                             SizedBox(width: 8),
                             Text(
                               'Block User',
-                              style: TextStyle(color: Colors.red),
+                              style: TextStyle(
+                                color: PrismColors.destructiveRed,
+                              ),
                             ),
                           ],
                         ),
@@ -281,11 +274,16 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                         value: 'remove',
                         child: Row(
                           children: [
-                            Icon(Icons.person_remove, color: Colors.orange),
+                            Icon(
+                              Icons.person_remove,
+                              color: PrismColors.secondaryText,
+                            ),
                             SizedBox(width: 8),
                             Text(
                               'Remove Friend',
-                              style: TextStyle(color: Colors.orange),
+                              style: TextStyle(
+                                color: PrismColors.secondaryText,
+                              ),
                             ),
                           ],
                         ),
@@ -295,7 +293,6 @@ class _UserProfileScreenState extends State<UserProfileScreen>
               ],
               pinned: true,
               floating: false,
-              expandedHeight: 0,
             ),
             SliverToBoxAdapter(
               child: Padding(
@@ -313,7 +310,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: theme.colorScheme.surfaceContainerHighest,
+                              color: PrismColors.surfaceGray,
                               width: 2,
                             ),
                           ),
@@ -325,14 +322,19 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                                     imageUrl: _userData!.profilePictureUrl!,
                                     fit: BoxFit.cover,
                                     placeholder: (context, url) => Container(
-                                      color: theme
-                                          .colorScheme
-                                          .surfaceContainerHighest,
+                                      color: PrismColors.surfaceGray,
                                     ),
                                     errorWidget: (context, url, error) =>
-                                        const Icon(Icons.person),
+                                        const Icon(
+                                          Icons.person,
+                                          color: PrismColors.secondaryText,
+                                        ),
                                   )
-                                : const Icon(Icons.person, size: 40),
+                                : const Icon(
+                                    Icons.person,
+                                    size: 40,
+                                    color: PrismColors.secondaryText,
+                                  ),
                           ),
                         ),
                         const SizedBox(width: 24),
@@ -345,7 +347,6 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                                 _friendsCount.toString(),
                                 'Friends',
                               ),
-                              // Add more stats if available
                             ],
                           ),
                         ),
@@ -357,55 +358,55 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                     Text(
                       '${_userData?.firstName ?? ''} ${_userData?.lastName ?? ''}'
                           .trim(),
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: PrismTextStyles.h3,
                     ),
                     if (_userData?.pronouns != null &&
                         _userData!.pronouns!.isNotEmpty)
                       Text(
                         _userData!.pronouns!,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                        style: PrismTextStyles.bodySmall.copyWith(
+                          color: PrismColors.secondaryText,
                         ),
                       ),
                     if (_userData?.bio != null && _userData!.bio!.isNotEmpty)
                       Padding(
-                        padding: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.only(top: 8),
                         child: Text(
                           _userData!.bio!,
-                          style: theme.textTheme.bodyMedium,
+                          style: PrismTextStyles.bodyMedium,
                         ),
                       ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 24),
 
                     // Action Buttons
                     if (!_isFriend && !_isPending)
                       SizedBox(
                         width: double.infinity,
-                        child: FilledButton.icon(
+                        child: PrismButton(
+                          text: 'Add Friend',
+                          icon: Icons.person_add,
                           onPressed: () => _handleSendFriendRequest(),
-                          icon: const Icon(Icons.person_add),
-                          label: const Text('Add Friend'),
                         ),
                       ),
                     if (!_isFriend && _isPending)
                       SizedBox(
                         width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: null,
-                          icon: const Icon(Icons.schedule),
-                          label: const Text('Request Pending'),
+                        child: PrismButton(
+                          text: 'Request Pending',
+                          icon: Icons.schedule,
+                          type: PrismButtonType.secondary,
+                          onPressed: () {}, // No action, just status
                         ),
                       ),
                     if (_isFriend)
                       SizedBox(
                         width: double.infinity,
-                        child: OutlinedButton.icon(
+                        child: PrismButton(
+                          text: 'View Friends',
+                          icon: Icons.people,
+                          type: PrismButtonType.secondary,
                           onPressed: () => _showFriendsList(),
-                          icon: const Icon(Icons.people),
-                          label: const Text('View Friends'),
                         ),
                       ),
                   ],
@@ -417,14 +418,17 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                 delegate: _SliverAppBarDelegate(
                   TabBar(
                     controller: _tabController,
-                    indicatorColor: theme.colorScheme.primary,
-                    labelColor: theme.colorScheme.primary,
-                    unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
-                    dividerColor: theme.colorScheme.outlineVariant.withOpacity(
-                      0.3,
+                    indicatorColor: PrismColors.prismYellow,
+                    labelColor: PrismColors.prismYellow,
+                    unselectedLabelColor: PrismColors.secondaryText,
+                    dividerColor: PrismColors.white.withValues(alpha: 0.1),
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    labelStyle: PrismTextStyles.bodyMedium.copyWith(
+                      fontWeight: FontWeight.bold,
                     ),
+                    unselectedLabelStyle: PrismTextStyles.bodyMedium,
                     overlayColor: WidgetStateProperty.all(
-                      theme.colorScheme.primary.withOpacity(0.1),
+                      PrismColors.prismYellow.withValues(alpha: 0.1),
                     ),
                     tabs: const [
                       Tab(text: 'Sent'),
@@ -448,46 +452,39 @@ class _UserProfileScreenState extends State<UserProfileScreen>
   }
 
   Widget _buildStatColumn(String value, String label) {
-    final theme = Theme.of(context);
     return Column(
       children: [
+        Text(value, style: PrismTextStyles.h3),
         Text(
-          value,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.bold,
+          label,
+          style: PrismTextStyles.bodySmall.copyWith(
+            color: PrismColors.secondaryText,
           ),
         ),
-        Text(label, style: theme.textTheme.bodyMedium),
       ],
     );
   }
 
   Widget _buildNonFriendView() {
-    final theme = Theme.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
+            const Icon(
               Icons.lock_outline,
               size: 64,
-              color: theme.colorScheme.onSurfaceVariant,
+              color: PrismColors.secondaryText,
             ),
             const SizedBox(height: 16),
-            Text(
-              'This account is private',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            Text('This account is private', style: PrismTextStyles.h3),
             const SizedBox(height: 8),
             Text(
               'Follow this user to see their shared photos and videos.',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+              style: PrismTextStyles.bodyMedium.copyWith(
+                color: PrismColors.secondaryText,
               ),
             ),
           ],
@@ -497,33 +494,23 @@ class _UserProfileScreenState extends State<UserProfileScreen>
   }
 
   Widget _buildSentImagesTab() {
-    final theme = Theme.of(context);
-
     // Filter images where type is 'sent' (sent TO the friend)
     final sentImages = _sharedImages
         .where((img) => img.type == 'sent')
         .toList();
 
     if (_isLoadingSharedImages) {
-      return Center(
-        child: CircularProgressIndicator(color: theme.colorScheme.primary),
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: ShimmerLayouts.galleryGrid(itemCount: 9, crossAxisCount: 3),
       );
     }
 
     if (sentImages.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.send_outlined,
-              size: 64,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: 16),
-            Text('No images sent yet', style: theme.textTheme.titleMedium),
-          ],
-        ),
+      return const EmptyStateWidget(
+        icon: Icons.send_outlined,
+        title: 'No images sent yet',
+        message: '',
       );
     }
 
@@ -547,17 +534,11 @@ class _UserProfileScreenState extends State<UserProfileScreen>
               ),
             );
           },
-          child: CachedNetworkImage(
+          child: PrismMediaPreview(
             imageUrl: image.image.imageUrl,
+            mediaType: image.image.mediaType,
             fit: BoxFit.cover,
-            placeholder: (context, url) => Container(
-              color: Colors.grey[800],
-              child: const Center(child: CircularProgressIndicator()),
-            ),
-            errorWidget: (context, url, error) => Container(
-              color: Colors.grey[800],
-              child: const Icon(Icons.error),
-            ),
+            placeholderColor: PrismColors.surfaceGray,
           ),
         );
       },
@@ -565,33 +546,23 @@ class _UserProfileScreenState extends State<UserProfileScreen>
   }
 
   Widget _buildReceivedImagesTab() {
-    final theme = Theme.of(context);
-
     // Filter images where type is 'received' (received FROM the friend)
     final receivedImages = _sharedImages
         .where((img) => img.type == 'received')
         .toList();
 
     if (_isLoadingSharedImages) {
-      return Center(
-        child: CircularProgressIndicator(color: theme.colorScheme.primary),
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: ShimmerLayouts.galleryGrid(itemCount: 9, crossAxisCount: 3),
       );
     }
 
     if (receivedImages.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.inbox_outlined,
-              size: 64,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: 16),
-            Text('No images received yet', style: theme.textTheme.titleMedium),
-          ],
-        ),
+      return const EmptyStateWidget(
+        icon: Icons.inbox_outlined,
+        title: 'No images received yet',
+        message: '',
       );
     }
 
@@ -617,17 +588,11 @@ class _UserProfileScreenState extends State<UserProfileScreen>
               ),
             );
           },
-          child: CachedNetworkImage(
+          child: PrismMediaPreview(
             imageUrl: image.image.imageUrl,
+            mediaType: image.image.mediaType,
             fit: BoxFit.cover,
-            placeholder: (context, url) => Container(
-              color: Colors.grey[800],
-              child: const Center(child: CircularProgressIndicator()),
-            ),
-            errorWidget: (context, url, error) => Container(
-              color: Colors.grey[800],
-              child: const Icon(Icons.error),
-            ),
+            placeholderColor: PrismColors.surfaceGray,
           ),
         );
       },
@@ -661,19 +626,17 @@ class _UserProfileScreenState extends State<UserProfileScreen>
         });
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            success
-                ? 'Friend request sent!'
-                : friendsProvider.error ?? 'Failed to send request',
-          ),
-          backgroundColor: success
-              ? Colors.green
-              : Theme.of(context).colorScheme.error,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      if (success) {
+        ErrorHandler.showSuccessSnackbar(
+          context,
+          message: 'Friend request sent!',
+        );
+      } else {
+        ErrorHandler.showErrorSnackbar(
+          context,
+          message: friendsProvider.error ?? 'Failed to send request',
+        );
+      }
     }
   }
 
@@ -683,61 +646,37 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     String friendName,
     FriendsProvider friendsProvider,
   ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Block User'),
-        content: Text(
+    HapticFeedback.selectionClick();
+
+    final confirmed = await ErrorHandler.showConfirmationDialog(
+      context,
+      title: 'Block User',
+      message:
           'Are you sure you want to block $friendName? They will be removed from your friends list.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
-            ),
-            child: const Text('Block'),
-          ),
-        ],
-      ),
+      confirmText: 'Block',
+      isDestructive: true,
     );
 
     if (confirmed != true) return;
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Blocking user...'),
-          duration: Duration(seconds: 1),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      ErrorHandler.showInfoSnackbar(context, message: 'Blocking user...');
     }
 
     final success = await friendsProvider.blockUser(friendId, userId);
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            success
-                ? '$friendName has been blocked'
-                : friendsProvider.error ?? 'Failed to block user',
-          ),
-          backgroundColor: success
-              ? Colors.green
-              : Theme.of(context).colorScheme.error,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-
       if (success) {
+        ErrorHandler.showSuccessSnackbar(
+          context,
+          message: '$friendName has been blocked',
+        );
         Navigator.pop(context);
+      } else {
+        ErrorHandler.showErrorSnackbar(
+          context,
+          message: friendsProvider.error ?? 'Failed to block user',
+        );
       }
     }
   }
@@ -748,28 +687,15 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     String friendName,
     FriendsProvider friendsProvider,
   ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove Friend'),
-        content: Text(
+    HapticFeedback.selectionClick();
+
+    final confirmed = await ErrorHandler.showConfirmationDialog(
+      context,
+      title: 'Remove Friend',
+      message:
           'Are you sure you want to remove $friendName from your friends list?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.orange,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+      confirmText: 'Remove',
+      isDestructive: true,
     );
 
     if (confirmed != true) return;
@@ -777,160 +703,54 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     final success = await friendsProvider.unfriend(friendId, userId);
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            success
-                ? '$friendName removed from friends'
-                : friendsProvider.error ?? 'Failed to remove friend',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-
       if (success) {
+        ErrorHandler.showSuccessSnackbar(
+          context,
+          message: '$friendName removed from friends',
+        );
         setState(() {
           _isFriend = false;
         });
+      } else {
+        ErrorHandler.showErrorSnackbar(
+          context,
+          message: friendsProvider.error ?? 'Failed to remove friend',
+        );
       }
     }
   }
 
   Future<void> _showFriendsList() async {
-    final apiClient = ApiClient();
-    final theme = Theme.of(context);
-
-    // Show loading dialog
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      barrierDismissible: false,
-      builder: (context) => Center(
-        child: CircularProgressIndicator(color: theme.colorScheme.primary),
+      backgroundColor: PrismColors.surfaceGray,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-    );
-
-    try {
-      // Fetch the user's friends list
-      final response = await apiClient.getFriends(userId: widget.userId);
-      final friendsList = response
-          .map((json) => Friend.fromJson(json))
-          .toList();
-
-      if (mounted) {
-        Navigator.pop(context); // Close loading dialog
-
-        // Show friends list in a bottom sheet
-        showModalBottomSheet(
-          context: context,
-          isScrollControlled: true,
-          showDragHandle: true,
-          builder: (context) => _buildFriendsListSheet(friendsList),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.pop(context); // Close loading dialog
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Failed to load friends list'),
-            backgroundColor: theme.colorScheme.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-  }
-
-  Widget _buildFriendsListSheet(List<Friend> friendsList) {
-    final theme = Theme.of(context);
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.7,
-      minChildSize: 0.5,
-      maxChildSize: 0.9,
-      expand: false,
-      builder: (context, scrollController) {
-        return Column(
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(
-                '${_userData?.firstName ?? _userData?.username ?? 'User'}\'s Friends',
-                style: theme.textTheme.titleLarge,
+            const Icon(
+              Icons.engineering,
+              size: 48,
+              color: PrismColors.prismYellow,
+            ),
+            const SizedBox(height: 16),
+            Text('Coming Soon', style: PrismTextStyles.h2),
+            const SizedBox(height: 8),
+            Text(
+              'Viewing other user\'s friends list will be available in a future update.',
+              textAlign: TextAlign.center,
+              style: PrismTextStyles.bodyMedium.copyWith(
+                color: PrismColors.secondaryText,
               ),
             ),
-            const Divider(),
-            Expanded(
-              child: friendsList.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.people_outline,
-                            size: 64,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No friends yet',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : ListView.separated(
-                      controller: scrollController,
-                      itemCount: friendsList.length,
-                      separatorBuilder: (context, index) => const Divider(),
-                      itemBuilder: (context, index) {
-                        final friend = friendsList[index];
-                        return ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: theme.colorScheme.primaryContainer,
-                            backgroundImage: friend.profilePictureUrl.isNotEmpty
-                                ? CachedNetworkImageProvider(
-                                    friend.profilePictureUrl,
-                                  )
-                                : null,
-                            child: friend.profilePictureUrl.isEmpty
-                                ? Icon(
-                                    Icons.person,
-                                    color: theme.colorScheme.onPrimaryContainer,
-                                  )
-                                : null,
-                          ),
-                          title: Text(
-                            friend.displayName,
-                            style: theme.textTheme.titleMedium,
-                          ),
-                          subtitle: Text(
-                            '@${friend.username}',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          onTap: () {
-                            Navigator.pop(context); // Close bottom sheet
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => UserProfileScreen(
-                                  userId: friend.userId,
-                                  username: friend.username,
-                                ),
-                              ),
-                            );
-                          },
-                        );
-                      },
-                    ),
-            ),
+            const SizedBox(height: 24),
           ],
-        );
-      },
+        ),
+      ),
     );
   }
 }
@@ -951,22 +771,9 @@ class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
     double shrinkOffset,
     bool overlapsContent,
   ) {
-    final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.surface,
-      elevation: 2,
-      child: Container(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          border: Border(
-            bottom: BorderSide(
-              color: theme.colorScheme.outlineVariant.withOpacity(0.3),
-              width: 0.5,
-            ),
-          ),
-        ),
-        child: _tabBar,
-      ),
+    return Container(
+      color: PrismColors.voidBlack, // Match scaffold background
+      child: _tabBar,
     );
   }
 

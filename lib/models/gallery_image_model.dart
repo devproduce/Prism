@@ -95,6 +95,18 @@ class ImageData {
     };
   }
 
+  // Helper to determine media type from URL extension
+  String get mediaType {
+    if (imageUrl.isEmpty) return 'image/jpeg';
+    // Remove query parameters if present (e.g. signed URLs)
+    final cleanUrl = imageUrl.split('?').first;
+    final ext = cleanUrl.split('.').last.toLowerCase();
+    if (['mp4', 'mov', 'avi', 'mkv', 'webm'].contains(ext)) {
+      return 'video/$ext';
+    }
+    return 'image/jpeg';
+  }
+
   /// Check if the presigned URL is expired (for AWS S3/Supabase URLs)
   bool get isUrlExpired {
     try {

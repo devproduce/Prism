@@ -21,7 +21,7 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
-  final int _totalPages = 7; // Updated from 6 to 7
+  final int _totalPages = 6;
 
   // Form controllers
   final _usernameController = TextEditingController();
@@ -39,7 +39,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _step2Key = GlobalKey<FormState>();
   final _step3Key = GlobalKey<FormState>();
   final _step4Key = GlobalKey<FormState>();
-  final _step5Key = GlobalKey<FormState>();
   final _step6Key = GlobalKey<FormState>();
   final _step7Key = GlobalKey<FormState>();
 
@@ -268,9 +267,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       }
     }
 
-    // Navigate to home screen
+    // Navigate to home screen and clear all previous routes
+    // This prevents the app from going back to splash/onboarding on rebuild
     if (mounted) {
-      Navigator.of(context).pushReplacement(
+      Navigator.of(context).pushAndRemoveUntil(
         PageRouteBuilder(
           pageBuilder: (_, __, ___) =>
               HomeScreen(key: HomeScreen.homeScreenKey),
@@ -278,6 +278,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             return FadeTransition(opacity: animation, child: child);
           },
         ),
+        (route) => false, // Remove all previous routes from the stack
       );
     }
   }
@@ -535,50 +536,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         if (_step4Key.currentState!.validate()) _nextPage();
                       },
                     ),
+                    // Step 5: Face ID Recognition (Required)
                     _buildStepTemplate(
                       key: const ValueKey('step5'),
-                      formKey: _step5Key,
-                      title: 'Vibe Check',
-                      subtitle:
-                          'A few extra details to personalize your profile.',
-                      fields: [
-                        TextFormField(
-                          controller: _pronounsController,
-                          style: PrismTextStyles.bodyLarge,
-                          decoration: _glassInputDecoration(
-                            'Pronouns (Optional)',
-                            Icons.face,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _dobController,
-                          readOnly: true,
-                          onTap: _selectDate,
-                          style: PrismTextStyles.bodyLarge,
-                          decoration: _glassInputDecoration(
-                            'Date of Birth (Optional)',
-                            Icons.calendar_today,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _phoneController,
-                          keyboardType: TextInputType.phone,
-                          style: PrismTextStyles.bodyLarge,
-                          decoration: _glassInputDecoration(
-                            'Phone Number (Optional)',
-                            Icons.phone,
-                          ),
-                        ),
-                      ],
-                      onNext: () {
-                        if (_step5Key.currentState!.validate()) _nextPage();
-                      },
-                    ),
-                    // Step 6: Face ID Recognition (Required)
-                    _buildStepTemplate(
-                      key: const ValueKey('step6'),
                       formKey: _step6Key,
                       title: 'Face ID Recognition',
                       subtitle:
@@ -652,9 +612,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       },
                       buttonText: 'Register',
                     ),
-                    // Step 7: Profile Picture (Optional)
+                    // Step 6: Profile Picture (Optional)
                     SingleChildScrollView(
-                      key: const ValueKey('step7'),
+                      key: const ValueKey('step6'),
                       padding: const EdgeInsets.all(24.0),
                       child: GlassCard(
                         borderRadius: 30,

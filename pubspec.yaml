@@ -67,7 +67,17 @@ dependencies:
   flutter_staggered_grid_view: ^0.7.0
   glassmorphism: ^3.0.0
   url_launcher: ^6.3.2
+  flutter_local_notifications: ^17.2.1
+  video_player: ^2.10.1
+  chewie: ^1.13.0
+  intl: ^0.20.2
+  video_thumbnail: ^0.5.6
 
+  path_provider: any
+  camera: ^0.11.2+1
+  web_socket_channel: ^3.0.3
+  photo_manager: ^3.8.3
+  open_filex: ^4.7.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -86,9 +96,9 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: false
-  image_path: "assets/Images/image.png"
+  image_path: "assets/Images/Prism Logo.png"
   adaptive_icon_background: "#0F1419"
-  adaptive_icon_foreground: "assets/Images/image.png"
+  adaptive_icon_foreground: "assets/Images/Prism Logo.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -103,7 +113,7 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
-    - assets/Images/image.png
+    - assets/Images/Prism Logo.png
     - assets/Images/onboarding1.png
     - assets/Images/onboarding2.png
     - assets/Images/onboarding3.png

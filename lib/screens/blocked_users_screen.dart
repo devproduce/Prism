@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
-import 'package:prism/widgets/glass_widgets.dart';
-import 'package:prism/widgets/gradient_background.dart';
+import 'package:prism/widgets/prism_card.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
+import 'package:prism/utils/error_handler.dart';
+import 'package:prism/widgets/empty_state_widget.dart';
+import 'package:prism/widgets/shimmer_placeholder.dart';
 
 class BlockedUsersScreen extends StatefulWidget {
   const BlockedUsersScreen({super.key});
@@ -43,7 +46,11 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          backgroundColor: PrismColors.darkCard,
+          backgroundColor: PrismColors.surfaceGray,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: PrismColors.white.withValues(alpha: 0.1)),
+          ),
           title: Text('Block User', style: PrismTextStyles.h3),
           content: TextField(
             controller: controller,
@@ -51,22 +58,28 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
             decoration: InputDecoration(
               hintText: 'Enter username',
               hintStyle: PrismTextStyles.bodyMedium.copyWith(
-                color: Colors.white54,
+                color: PrismColors.secondaryText,
               ),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.05),
+              fillColor: PrismColors.black.withValues(alpha: 0.26),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
               ),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text(
+              child: Text(
                 'Cancel',
-                style: TextStyle(color: Colors.white60),
+                style: PrismTextStyles.button.copyWith(
+                  color: PrismColors.secondaryText,
+                ),
               ),
             ),
             FilledButton(
@@ -77,9 +90,12 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
                 }
               },
               style: FilledButton.styleFrom(
-                backgroundColor: PrismColors.errorRed,
+                backgroundColor: PrismColors.destructiveRed,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
-              child: const Text('Block'),
+              child: Text('Block', style: PrismTextStyles.button),
             ),
           ],
         );
@@ -97,12 +113,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
     if (authProvider.currentUser == null) return;
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Blocking user...'),
-          backgroundColor: PrismColors.primaryBlue,
-        ),
-      );
+      ErrorHandler.showInfoSnackbar(context, message: 'Blocking user...');
     }
 
     final success = await friendsProvider.blockUser(
@@ -113,50 +124,24 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       if (success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Blocked $username'),
-            backgroundColor: PrismColors.successGreen,
-          ),
-        );
+        ErrorHandler.showSuccessSnackbar(context, message: 'Blocked $username');
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(friendsProvider.error ?? 'Failed to block user'),
-            backgroundColor: PrismColors.errorRed,
-          ),
+        ErrorHandler.showErrorSnackbar(
+          context,
+          message: friendsProvider.error ?? 'Failed to block user',
         );
       }
     }
   }
 
   Future<void> _unblockUser(String userId, String username) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: PrismColors.darkCard,
-        title: Text('Unblock User', style: PrismTextStyles.h3),
-        content: Text(
-          'Are you sure you want to unblock $username?',
-          style: PrismTextStyles.bodyMedium,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Colors.white60),
-            ),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: PrismColors.primaryBlue,
-            ),
-            child: const Text('Unblock'),
-          ),
-        ],
-      ),
+    HapticFeedback.selectionClick();
+
+    final confirmed = await ErrorHandler.showConfirmationDialog(
+      context,
+      title: 'Unblock User',
+      message: 'Are you sure you want to unblock $username?',
+      confirmText: 'Unblock',
     );
 
     if (confirmed == true) {
@@ -169,12 +154,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
       if (authProvider.currentUser == null) return;
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unblocking user...'),
-            backgroundColor: PrismColors.primaryBlue,
-          ),
-        );
+        ErrorHandler.showInfoSnackbar(context, message: 'Unblocking user...');
       }
 
       final success = await friendsProvider.unblockUser(
@@ -185,18 +165,14 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Unblocked $username'),
-              backgroundColor: PrismColors.successGreen,
-            ),
+          ErrorHandler.showSuccessSnackbar(
+            context,
+            message: 'Unblocked $username',
           );
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(friendsProvider.error ?? 'Failed to unblock user'),
-              backgroundColor: PrismColors.errorRed,
-            ),
+          ErrorHandler.showErrorSnackbar(
+            context,
+            message: friendsProvider.error ?? 'Failed to unblock user',
           );
         }
       }
@@ -209,140 +185,109 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
     final blockedUsers = friendsProvider.blockedUsers;
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: GradientBackground(
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // AppBar
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(
-                            Icons.arrow_back_ios_new_rounded,
-                            color: Colors.white,
-                          ),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                        const SizedBox(width: 8),
-                        Text('Blocked Users', style: PrismTextStyles.h2),
-                      ],
-                    ),
-                    IconButton(
-                      onPressed: _showBlockUserDialog,
-                      icon: const Icon(
-                        Icons.add_circle_outline_rounded,
-                        color: PrismColors.errorRed,
-                        size: 28,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: Text(
-                  'Blocked users cannot see your profile or send you messages.',
-                  style: PrismTextStyles.bodyMedium.copyWith(
-                    color: Colors.white60,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              Expanded(
-                child: friendsProvider.isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator(
-                          color: PrismColors.primaryBlue,
-                        ),
-                      )
-                    : blockedUsers.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.block_flipped,
-                              size: 64,
-                              color: Colors.white24,
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'No blocked users',
-                              style: PrismTextStyles.h3.copyWith(
-                                color: Colors.white38,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: blockedUsers.length,
-                        separatorBuilder: (context, index) =>
-                            const SizedBox(height: 12),
-                        itemBuilder: (context, index) {
-                          final user = blockedUsers[index];
-                          return GlassCard(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
-                            ),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 24,
-                                  backgroundColor: PrismColors.errorRed
-                                      .withOpacity(0.2),
-                                  backgroundImage:
-                                      user.profilePictureUrl.isNotEmpty
-                                      ? CachedNetworkImageProvider(
-                                          user.profilePictureUrl,
-                                        )
-                                      : null,
-                                  child: user.profilePictureUrl.isEmpty
-                                      ? const Icon(
-                                          Icons.block,
-                                          color: PrismColors.errorRed,
-                                        )
-                                      : null,
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Text(
-                                    user.displayName,
-                                    style: PrismTextStyles.bodyLarge,
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: () => _unblockUser(
-                                    user.userId,
-                                    user.displayName,
-                                  ),
-                                  child: Text(
-                                    'Unblock',
-                                    style: PrismTextStyles.button.copyWith(
-                                      color: PrismColors.primaryBlue,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
+      backgroundColor: PrismColors.voidBlack,
+      appBar: AppBar(
+        title: Text('Blocked Users', style: PrismTextStyles.h2),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        leading: BackButton(
+          color: PrismColors.white,
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          IconButton(
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              _showBlockUserDialog();
+            },
+            icon: const Icon(
+              Icons.add_circle_outline_rounded,
+              color: PrismColors.destructiveRed,
+              size: 28,
+            ),
           ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0),
+              child: Text(
+                'Blocked users cannot see your profile or send you messages.',
+                style: PrismTextStyles.bodyMedium.copyWith(
+                  color: PrismColors.secondaryText,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: friendsProvider.isLoading
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: ShimmerLayouts.listItems(count: 5),
+                    )
+                  : blockedUsers.isEmpty
+                  ? EmptyStateWidget.noBlockedUsers()
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: blockedUsers.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final user = blockedUsers[index];
+                        return PrismCard(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 20,
+                                backgroundColor: PrismColors.destructiveRed
+                                    .withValues(alpha: 0.2),
+                                backgroundImage:
+                                    user.profilePictureUrl.isNotEmpty
+                                    ? CachedNetworkImageProvider(
+                                        user.profilePictureUrl,
+                                      )
+                                    : null,
+                                child: user.profilePictureUrl.isEmpty
+                                    ? const Icon(
+                                        Icons.block,
+                                        color: PrismColors.destructiveRed,
+                                        size: 20,
+                                      )
+                                    : null,
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Text(
+                                  user.displayName,
+                                  style: PrismTextStyles.bodyLarge,
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: () =>
+                                    _unblockUser(user.userId, user.displayName),
+                                child: Text(
+                                  'Unblock',
+                                  style: PrismTextStyles.button.copyWith(
+                                    color: PrismColors.prismYellow,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
         ),
       ),
     );

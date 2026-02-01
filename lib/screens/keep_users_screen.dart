@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
-import 'package:prism/widgets/glass_widgets.dart';
-import 'package:prism/widgets/gradient_background.dart';
+import 'package:prism/widgets/prism_card.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/screens/friends_screen.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:prism/widgets/prism_button.dart';
+import 'package:prism/utils/error_handler.dart';
 
 class KeepUsersScreen extends StatefulWidget {
   const KeepUsersScreen({super.key});
@@ -88,14 +90,9 @@ class _KeepUsersScreenState extends State<KeepUsersScreen> {
           }
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              friendsProvider.error ?? 'Failed to update keep status',
-            ),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: PrismColors.errorRed,
-          ),
+        ErrorHandler.showErrorSnackbar(
+          context,
+          message: friendsProvider.error ?? 'Failed to update keep status',
         );
       }
     }
@@ -107,172 +104,170 @@ class _KeepUsersScreenState extends State<KeepUsersScreen> {
     final friends = friendsProvider.friends;
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: GradientBackground(
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // AppBar
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(
-                            Icons.arrow_back_ios_new_rounded,
-                            color: Colors.white,
+      backgroundColor: PrismColors.voidBlack,
+      appBar: AppBar(
+        title: Text('Keep Users', style: PrismTextStyles.h2),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        leading: BackButton(
+          color: PrismColors.white,
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          IconButton(
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const FriendsScreen()),
+              );
+            },
+            icon: const Icon(
+              Icons.person_add_rounded,
+              color: PrismColors.prismYellow,
+              size: 28,
+            ),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0),
+              child: Text(
+                'People in this list will always be kept in your gallery during Auto Clean.',
+                style: PrismTextStyles.bodyMedium.copyWith(
+                  color: PrismColors.secondaryText,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: friendsProvider.isLoading
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: PrismColors.prismYellow,
+                      ),
+                    )
+                  : friends.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: PrismColors.surfaceGray,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: PrismColors.white.withValues(alpha: 0.1),
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.people_outline_rounded,
+                              size: 48,
+                              color: PrismColors.secondaryText,
+                            ),
                           ),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                        const SizedBox(width: 8),
-                        Text('Keep Users', style: PrismTextStyles.h2),
-                      ],
-                    ),
-                    IconButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const FriendsScreen(),
+                          const SizedBox(height: 16),
+                          Text(
+                            'No friends yet',
+                            style: PrismTextStyles.h3.copyWith(
+                              color: PrismColors.secondaryText,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          PrismButton(
+                            text: 'Add Friends',
+                            icon: Icons.add,
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const FriendsScreen(),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: friends.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final friend = friends[index];
+                        final isKept = _keepUserIds.contains(friend.userId);
+
+                        return PrismCard(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 20,
+                                backgroundColor: PrismColors.surfaceGray,
+                                backgroundImage:
+                                    friend.profilePictureUrl.isNotEmpty
+                                    ? CachedNetworkImageProvider(
+                                        friend.profilePictureUrl,
+                                      )
+                                    : null,
+                                child: friend.profilePictureUrl.isEmpty
+                                    ? Icon(
+                                        Icons.person,
+                                        color: PrismColors.white.withValues(
+                                          alpha: 0.6,
+                                        ),
+                                      )
+                                    : null,
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      friend.displayName,
+                                      style: PrismTextStyles.bodyLarge,
+                                    ),
+                                    Text(
+                                      '@${friend.username}',
+                                      style: PrismTextStyles.bodySmall.copyWith(
+                                        color: PrismColors.secondaryText,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Switch(
+                                value: isKept,
+                                onChanged: (value) {
+                                  HapticFeedback.selectionClick();
+                                  _toggleKeepUser(friend.userId);
+                                },
+                                activeColor: PrismColors.prismYellow,
+                                activeTrackColor: PrismColors.prismYellow
+                                    .withValues(alpha: 0.3),
+                                inactiveThumbColor: PrismColors.white
+                                    .withValues(alpha: 0.54),
+                                inactiveTrackColor: PrismColors.white
+                                    .withValues(alpha: 0.1),
+                              ),
+                            ],
                           ),
                         );
                       },
-                      icon: const Icon(
-                        Icons.person_add_rounded,
-                        color: PrismColors.electricBlue,
-                        size: 28,
-                      ),
                     ),
-                  ],
-                ),
-              ),
-
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: Text(
-                  'People in this list will always be kept in your gallery during Auto Clean.',
-                  style: PrismTextStyles.bodyMedium.copyWith(
-                    color: Colors.white60,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              Expanded(
-                child: friendsProvider.isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator(
-                          color: PrismColors.primaryBlue,
-                        ),
-                      )
-                    : friends.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.people_outline_rounded,
-                              size: 64,
-                              color: Colors.white24,
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'No friends yet',
-                              style: PrismTextStyles.h3.copyWith(
-                                color: Colors.white38,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            GlassButton(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => const FriendsScreen(),
-                                  ),
-                                );
-                              },
-                              text: 'Add Friends',
-                              icon: Icons.add,
-                            ),
-                          ],
-                        ),
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: friends.length,
-                        separatorBuilder: (context, index) =>
-                            const SizedBox(height: 12),
-                        itemBuilder: (context, index) {
-                          final friend = friends[index];
-                          final isKept = _keepUserIds.contains(friend.userId);
-
-                          return GlassCard(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 24,
-                                  backgroundColor: PrismColors.glassLight,
-                                  backgroundImage:
-                                      friend.profilePictureUrl.isNotEmpty
-                                      ? CachedNetworkImageProvider(
-                                          friend.profilePictureUrl,
-                                        )
-                                      : null,
-                                  child: friend.profilePictureUrl.isEmpty
-                                      ? const Icon(
-                                          Icons.person,
-                                          color: Colors.white60,
-                                        )
-                                      : null,
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        friend.displayName,
-                                        style: PrismTextStyles.bodyLarge,
-                                      ),
-                                      Text(
-                                        '@${friend.username}',
-                                        style: PrismTextStyles.bodySmall
-                                            .copyWith(color: Colors.white54),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Switch(
-                                  value: isKept,
-                                  onChanged: (value) =>
-                                      _toggleKeepUser(friend.userId),
-                                  activeColor: PrismColors.electricBlue,
-                                  activeTrackColor: PrismColors.electricBlue
-                                      .withOpacity(0.3),
-                                  inactiveThumbColor: Colors.white54,
-                                  inactiveTrackColor: Colors.white.withOpacity(
-                                    0.1,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

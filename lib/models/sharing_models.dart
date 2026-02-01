@@ -226,10 +226,50 @@ class BatchStatusResponse {
 class BatchImage {
   final String id;
   final String? url;
+  final String? thumbUrl;
+  final List<dynamic>? detectedFaces; // Raw detected faces data
 
-  BatchImage({required this.id, this.url});
+  BatchImage({required this.id, this.url, this.thumbUrl, this.detectedFaces});
 
   factory BatchImage.fromJson(Map<String, dynamic> json) {
-    return BatchImage(id: json['id'] as String, url: json['url'] as String?);
+    // API returns 'image_url' but model expects 'url'
+    // Support both field names
+    final imageUrl = json['image_url'] ?? json['url'];
+    final thumbUrl = json['thumb_url'] ?? json['thumbnail_url'];
+
+    debugPrint('📦 BatchImage.fromJson:');
+    debugPrint('   Raw json keys: ${json.keys.toList()}');
+    debugPrint('   id: ${json['id']}');
+    debugPrint('   image_url: ${json['image_url']}');
+    debugPrint('   url: ${json['url']}');
+    debugPrint('   Final URL: $imageUrl');
+
+    return BatchImage(
+      id: json['id'],
+      url: _ensureAbsoluteUrl(imageUrl),
+      thumbUrl: _ensureAbsoluteUrl(
+        thumbUrl ?? imageUrl,
+      ), // Use main image as thumb if no thumb
+      detectedFaces: json['detected_faces'] as List<dynamic>?,
+    );
+  }
+
+  static String? _ensureAbsoluteUrl(String? url) {
+    if (url == null || url.isEmpty) return null;
+    if (url.startsWith('http')) return url;
+    if (url.startsWith('/')) return '${ApiConstants.baseUrl}$url';
+    return '${ApiConstants.baseUrl}/$url';
+  }
+
+  // Helper to determine media type from URL extension
+  String get mediaType {
+    if (url == null) return 'image/jpeg';
+    // Remove query parameters if present
+    final cleanUrl = url!.split('?').first;
+    final ext = cleanUrl.split('.').last.toLowerCase();
+    if (['mp4', 'mov', 'avi', 'mkv', 'webm'].contains(ext)) {
+      return 'video/$ext';
+    }
+    return 'image/jpeg';
   }
 }
