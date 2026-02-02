@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
+import 'package:path_provider/path_provider.dart';
 import 'package:prism/services/cv_service.dart';
 import 'package:prism/theme/colors.dart';
-import 'package:prism/widgets/face_scan_grid.dart';
+
+import 'package:flutter_animate/flutter_animate.dart';
 
 class MultiViewCaptureScreen extends StatefulWidget {
   const MultiViewCaptureScreen({super.key});
@@ -20,12 +23,21 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
 
   bool _isInitialized = false;
   bool _isProcessing = false;
-  bool _isCapturing = false; // Flag to prevent concurrent captures
+  bool _isCapturing = false;
   String _message = 'Initializing camera...';
-  List<int> _capturedIndices = [];
-  int? _currentGridIndex;
+  List<int> _capturedIndices = []; // Still useful for raw feedback
+
   bool _isComplete = false;
-  List<String>? _faceIds;
+  List<String>? _faceIds; // Face IDs from backend
+  Map<int, Uint8List> _capturedFrames = {}; // Store local frames for display
+  bool _isSaving = false;
+
+  // 3-View Progress Tracking (Simplified)
+  // We assume the server guides the user: Center -> Left -> Right (or similar)
+  // We'll trust the server's "capturedIndices" or "message" to guide the user.
+  // But for UI, we want to show 3 clear steps.
+  // Let's assume indices 0, 1, 2 correspond to Left, Center, Right or similar.
+  // We'll visualize progress based on count of captured views.
 
   Timer? _frameSendTimer;
 
@@ -38,16 +50,12 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
 
   Future<void> _initializeCamera() async {
     try {
-      // Get available cameras
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
-        setState(() {
-          _message = 'No camera found';
-        });
+        setState(() => _message = 'No camera found');
         return;
       }
 
-      // Use front camera for face capture
       final frontCamera = cameras.firstWhere(
         (camera) => camera.lensDirection == CameraLensDirection.front,
         orElse: () => cameras.first,
@@ -69,13 +77,10 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
         _message = 'Connecting to CV service...';
       });
 
-      // Connect to CV service
       await _connectToCvService();
     } catch (e) {
       debugPrint('Error initializing camera: $e');
-      setState(() {
-        _message = 'Camera error: ${e.toString()}';
-      });
+      setState(() => _message = 'Camera error: ${e.toString()}');
     }
   }
 
@@ -83,53 +88,55 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
     try {
       await _cvService.connect();
 
-      // Listen to CV feedback
       _cvService.statusStream.listen(
         (feedback) {
           if (!mounted) return;
 
           setState(() {
             _message = feedback.message;
+
+            // Check for new captures to save frame
+            for (final index in feedback.capturedIndices) {
+              if (!_capturedFrames.containsKey(index) &&
+                  _lastSentFrame != null) {
+                // Approximate: Valid enough for UI feedback
+                _capturedFrames[index] = _lastSentFrame!;
+              }
+            }
+
             _capturedIndices = feedback.capturedIndices;
-            _currentGridIndex = feedback.currentPose?.gridIndex;
 
             if (feedback.status == 'completed') {
+              // Capture remaining frames if missing (e.g. fast completion)
+              // This is tricky without the video stream.
+              // We'll rely on what we have or show placeholders.
               _isComplete = true;
               _faceIds = feedback.faceIds;
+              _message = 'Face scan complete!';
               _stopFrameSending();
-              _cameraController?.dispose();
             }
           });
         },
         onError: (error) {
           debugPrint('CV Service error: $error');
-          setState(() {
-            _message = 'Connection error';
-          });
+          setState(() => _message = 'Connection error');
         },
       );
 
       if (!mounted) return;
 
-      setState(() {
-        _message = 'Align your face in the center';
-      });
-
-      // Start sending frames
+      setState(() => _message = 'Align your face in the center');
       _startFrameSending();
     } catch (e) {
       debugPrint('Error connecting to CV service: $e');
-      setState(() {
-        _message = 'Failed to connect: ${e.toString()}';
-      });
+      setState(() => _message = 'Failed to connect: ${e.toString()}');
     }
   }
 
   void _startFrameSending() {
     _isProcessing = true;
-    // Send frames at ~5 FPS (200ms interval) to prevent camera overload
-    // This gives camera sufficient time to complete each capture
-    _frameSendTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+    // Send frames at ~3 FPS to prevent camera overload
+    _frameSendTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
       _sendFrame();
     });
   }
@@ -141,47 +148,75 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
   }
 
   Future<void> _sendFrame() async {
-    // Check if camera is ready and no capture is in progress
     if (_cameraController == null ||
         !_cameraController!.value.isInitialized ||
         !_isProcessing ||
         _isComplete ||
         _isCapturing) {
-      // Prevent concurrent captures
       return;
     }
 
     try {
-      _isCapturing = true; // Mark capture as in progress
-      debugPrint('🎥 Attempting to capture frame...');
-
+      _isCapturing = true;
       final image = await _cameraController!.takePicture();
-      debugPrint('✓ Frame captured, size: ${await image.length()} bytes');
       final bytes = await image.readAsBytes();
 
-      // Optionally compress/resize the image before sending
+      // Optimize image size for bandwidth
+      // Optimize image size for bandwidth
       final decodedImage = img.decodeImage(bytes);
       if (decodedImage != null) {
-        // Resize to reasonable size (e.g., 640x480) to reduce bandwidth
         final resized = img.copyResize(decodedImage, width: 640);
         final jpeg = img.encodeJpg(resized, quality: 80);
-        debugPrint('📤 Sending ${jpeg.length} bytes to CV service...');
         _cvService.sendFrame(Uint8List.fromList(jpeg));
+
+        // Store frame for potential display (Approximation: store every frame?? No, too heavy)
+        // Better strategy: Store the *last* frame sent for each *potential* index if we could?
+        // Actually, we can just save the last frame sent to a temp variable.
+        // If the *next* feedback says "captured index X", we assign that temp frame to X.
+        // This requires careful sync.
+        // For now, let's just update the "last sent frame"
+        _lastSentFrame = Uint8List.fromList(jpeg);
       } else {
-        // Send original if decoding fails
         _cvService.sendFrame(Uint8List.fromList(bytes));
+        _lastSentFrame = Uint8List.fromList(bytes);
       }
     } catch (e) {
-      debugPrint('❌ Error in _sendFrame: $e');
+      debugPrint('Error sending frame: $e');
     } finally {
-      _isCapturing = false; // Release the flag
+      _isCapturing = false;
     }
   }
 
-  void _handleComplete() {
+  Future<void> _handleComplete() async {
     if (_faceIds != null && _faceIds!.isNotEmpty) {
-      // Return face IDs to previous screen
-      Navigator.of(context).pop(_faceIds);
+      String? imagePath;
+      try {
+        // Save a captured frame to use as profile picture
+        if (_capturedFrames.isNotEmpty) {
+          // Prefer center frame (index 1) or just first available
+          final key = _capturedFrames.containsKey(1)
+              ? 1
+              : _capturedFrames.keys.first;
+          final bytes = _capturedFrames[key];
+
+          if (bytes != null) {
+            final tempDir = await getTemporaryDirectory();
+            final file = File(
+              '${tempDir.path}/face_capture_${DateTime.now().millisecondsSinceEpoch}.jpg',
+            );
+            await file.writeAsBytes(bytes);
+            imagePath = file.path;
+          }
+        }
+      } catch (e) {
+        debugPrint('Error saving face capture image: $e');
+      }
+
+      if (mounted) {
+        Navigator.of(
+          context,
+        ).pop({'faceIds': _faceIds, 'imagePath': imagePath});
+      }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -197,7 +232,9 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
       _isComplete = false;
       _faceIds = null;
       _capturedIndices = [];
-      _currentGridIndex = null;
+
+      _capturedFrames.clear(); // Clear local frames
+      _lastSentFrame = null;
       _message = 'Align your face in the center';
     });
 
@@ -207,6 +244,8 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
     _initializeCamera();
   }
 
+  Uint8List? _lastSentFrame;
+
   @override
   void dispose() {
     _stopFrameSending();
@@ -215,115 +254,330 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
     super.dispose();
   }
 
+  // Update check logic to save frame if index increased
+  // This needs to be in the listener, but we can't easily access _lastSentFrame there due to async gap?
+  // Actually we can.
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: PrismColors.voidBlack,
+      // Minimal app bar just for close
       appBar: AppBar(
-        backgroundColor: PrismColors.voidBlack,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: const Text(
-          'Face ID Setup',
-          style: TextStyle(color: Colors.white),
-        ),
       ),
-      body: SafeArea(
-        child: _isComplete ? _buildCompletionView() : _buildCaptureView(),
+      extendBodyBehindAppBar: true,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [PrismColors.voidBlack, Color(0xFF1A1A1A)],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              const SizedBox(height: 20),
+
+              // Header
+              Text(
+                _isComplete ? 'Scan Complete' : 'Face ID Setup',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Complete a quick face scan to continue',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.6),
+                  fontSize: 14,
+                ),
+              ),
+
+              const Spacer(),
+
+              // Main Content (Containerized like Modal)
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 24),
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: PrismColors.surfaceGray.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Tutorial / Progress Grid (Top of card)
+                    if (!_isComplete) ...[
+                      _buildStepIndicator(),
+                      const SizedBox(height: 24),
+                    ],
+
+                    // Camera / Results Area
+                    Container(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.of(context).size.height * 0.45,
+                        minHeight: 250,
+                      ),
+                      child: AspectRatio(
+                        aspectRatio: 3 / 4, // Typical camera aspect ratio
+                        child: Container(
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: _isComplete
+                                  ? PrismColors.successGreen.withOpacity(0.3)
+                                  : Colors.transparent,
+                              width: 1,
+                            ),
+                          ),
+                          clipBehavior: Clip.hardEdge,
+                          child: _isComplete
+                              ? _buildCapturedGrid()
+                              : _buildCameraFeed(),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Status Message
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (_isComplete)
+                          Icon(
+                            Icons.auto_awesome,
+                            color: PrismColors.successGreen,
+                            size: 20,
+                          )
+                        else if (_isProcessing)
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: PrismColors.prismYellow,
+                            ),
+                          ),
+
+                        const SizedBox(width: 8),
+                        Text(
+                          _message,
+                          style: TextStyle(
+                            color: _isComplete
+                                ? PrismColors.successGreen
+                                : Colors.white.withOpacity(0.7),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Actions
+                    // Actions
+                    if (_isComplete)
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: _retakeScan,
+                            icon: const Icon(Icons.refresh, size: 18),
+                            label: const Text('Retake'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: BorderSide(
+                                color: Colors.white.withOpacity(0.2),
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(30),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                            ),
+                          ),
+                          ElevatedButton.icon(
+                            onPressed: _handleComplete, // "Save & Continue"
+                            icon: _isSaving
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.black,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.check, size: 18),
+                            label: const Text('Save & Continue'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: PrismColors.prismYellow,
+                              foregroundColor: Colors.black,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(30),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Complete all 3 positions to continue',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.4),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+
+              const Spacer(flex: 2),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildCaptureView() {
-    return Stack(
-      fit: StackFit.expand,
+  Widget _buildStepIndicator() {
+    // Determine current step based on captured count
+    final stepIndex = _capturedIndices.length.clamp(0, 2);
+
+    final instructions = [
+      "Look Straight Ahead",
+      "Turn Head Slightly Left",
+      "Turn Head Slightly Right",
+    ];
+
+    final icons = [Icons.face, Icons.turn_left, Icons.turn_right];
+
+    return Column(
       children: [
-        // Camera preview
-        if (_isInitialized && _cameraController != null)
-          Center(
-            child: AspectRatio(
-              aspectRatio: _cameraController!.value.aspectRatio,
-              child: CameraPreview(_cameraController!),
-            ),
-          )
-        else
-          Center(
-            child: CircularProgressIndicator(color: PrismColors.prismYellow),
-          ),
-
-        // Semi-transparent overlay
-        Container(color: Colors.black.withOpacity(0.3)),
-
-        // 3x3 Grid overlay
-        if (_isInitialized)
-          FaceScanGrid(
-            capturedIndices: _capturedIndices,
-            currentGridIndex: _currentGridIndex,
-            message: _message,
-          ),
+        Icon(icons[stepIndex], size: 32, color: PrismColors.prismYellow)
+            .animate(key: ValueKey('icon_$stepIndex'))
+            .scale(duration: 300.ms, curve: Curves.easeOutBack),
+        const SizedBox(height: 8),
+        Text(
+              instructions[stepIndex],
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            )
+            .animate(key: ValueKey('text_$stepIndex'))
+            .fadeIn()
+            .moveY(begin: 5, end: 0),
       ],
     );
   }
 
-  Widget _buildCompletionView() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.check_circle, size: 80, color: PrismColors.successGreen),
-            const SizedBox(height: 24),
-            const Text(
-              'Face ID Setup Complete!',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
+  Widget _buildCameraFeed() {
+    if (!_isInitialized || _cameraController == null) {
+      return const Center(
+        child: CircularProgressIndicator(color: PrismColors.prismYellow),
+      );
+    }
+
+    return Stack(
+      fit: StackFit.loose,
+      alignment: Alignment.center,
+      children: [
+        // Camera Preview centered and scaled to show FULL FOV (contain)
+        Center(child: CameraPreview(_cameraController!)),
+
+        // Face Guide Circle
+        Center(
+          child: Container(
+            width: 200,
+            height: 240,
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: PrismColors.prismYellow.withOpacity(0.5),
+                width: 3,
               ),
-              textAlign: TextAlign.center,
+              borderRadius: BorderRadius.circular(120),
             ),
-            const SizedBox(height: 12),
-            Text(
-              'Captured ${_capturedIndices.length}/9 angles',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.7),
-                fontSize: 16,
-              ),
-            ),
-            const SizedBox(height: 48),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _handleComplete,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: PrismColors.prismYellow,
-                  foregroundColor: PrismColors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text(
-                  'Continue',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextButton(
-              onPressed: _retakeScan,
-              child: const Text(
-                'Retake Scan',
-                style: TextStyle(color: PrismColors.prismYellow, fontSize: 14),
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
+      ],
+    );
+  }
+
+  Widget _buildCapturedGrid() {
+    if (_capturedFrames.isEmpty) {
+      // Fallback if no frames were saved (shouldn't happen with logic above)
+      return const Center(
+        child: Text(
+          "No frames captured locally",
+          style: TextStyle(color: Colors.white54),
+        ),
+      );
+    }
+
+    return Row(
+      children: List.generate(3, (index) {
+        final frame = _capturedFrames[index];
+        return Expanded(
+          child: Container(
+            margin: EdgeInsets.only(right: index < 2 ? 8.0 : 0),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: PrismColors.successGreen.withOpacity(0.3),
+                width: 2,
+              ),
+              color: Colors.black54,
+            ),
+            clipBehavior: Clip.hardEdge,
+            child: frame != null
+                ? Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // Blurred Background (Zoomed to cover)
+                      Image.memory(
+                        frame,
+                        fit: BoxFit.cover,
+                        color: Colors.black.withOpacity(0.6),
+                        colorBlendMode: BlendMode.darken,
+                      ),
+                      // Foreground Image (Contained to show full face)
+                      Center(child: Image.memory(frame, fit: BoxFit.contain)),
+                    ],
+                  )
+                : const Center(
+                    child: Icon(Icons.check, color: PrismColors.successGreen),
+                  ),
+          ),
+        );
+      }),
     );
   }
 }

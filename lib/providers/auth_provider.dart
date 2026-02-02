@@ -92,7 +92,7 @@ class AuthProvider with ChangeNotifier {
     required String password,
     required String firstName,
     String? lastName,
-    required File profileImage,
+    File? profileImage,
     List<String>? faceIds, // Optional face IDs from multi-view registration
   }) async {
     try {
@@ -110,14 +110,33 @@ class AuthProvider with ChangeNotifier {
       );
 
       _currentUser = response.user;
+      final token = response.token;
+
+      debugPrint(
+        'Registration Response - UserID: "${_currentUser?.userId}", Token: "${token ?? 'null'}"',
+      );
+
+      // FAILSAFE: If registration response didn't return a valid userId OR a valid token, try to login automatically
+      // This is crucial because some backends don't return the full session on register, or parsing might fail.
+      bool needsAutoLogin = _currentUser?.userId.isEmpty ?? true;
+      if (!needsAutoLogin && (token == null || token.isEmpty)) {
+        debugPrint(
+          '⚠️ Registration successful but NO TOKEN returned. Forcing auto-login to establish session.',
+        );
+        needsAutoLogin = true;
+      }
+
+      if (needsAutoLogin) {
+        debugPrint('🔄 Initiating Auto-Login Sequence...');
+        return await login(identifier: email, password: password);
+      }
+
       _isAuthenticated = true;
 
       // Set auth token in ApiClient if provided by backend
-      if (response.token != null && response.token!.isNotEmpty) {
-        _apiClient.setAuthToken(response.token!);
+      if (token != null && token.isNotEmpty) {
+        _apiClient.setAuthToken(token);
         debugPrint('✅ Auth token set from register response');
-      } else {
-        debugPrint('⚠️ No auth token in register response');
       }
 
       // Save user session to database
@@ -458,8 +477,28 @@ class AuthProvider with ChangeNotifier {
         profileImage: profileImage,
       );
 
+      debugPrint(
+        'Upload Profile Picture Response - UserID: "${updatedUser.userId}"',
+      );
+
+      // CRITICAL FAILSAFE: Verify the API returned a valid user ID.
+      // If not, assume the backend only returned partial data and PRESERVE our existing valid ID.
+      UserModel finalUser = updatedUser;
+      if (updatedUser.userId.isEmpty) {
+        debugPrint(
+          '⚠️ Upload Profile Picture returned empty User ID! Preserving existing ID: ${_currentUser!.userId}',
+        );
+        // Merge the new data (likely just profile_pic_id) into the existing user object
+        // OR force the ID back into the new object
+        finalUser = updatedUser.copyWith(
+          userId: _currentUser!.userId, // Restore valid ID
+          // Token is not part of UserModel, so no need to restore it here.
+          // It is managed by ApiClient and SharedPreferences.
+        );
+      }
+
       // Preserve local archive PIN
-      _currentUser = updatedUser.copyWith(archivePin: _currentUser!.archivePin);
+      _currentUser = finalUser.copyWith(archivePin: _currentUser!.archivePin);
 
       // Update user session in database
       await _databaseService.updateUserSession(_currentUser!);

@@ -86,7 +86,7 @@ class ApiClient {
     required String password,
     required String firstName,
     String? lastName,
-    required File profileImage,
+    File? profileImage, // Changed to optional
     List<String>? faceIds, // Optional face IDs from multi-view registration
   }) async {
     try {
@@ -108,10 +108,12 @@ class ApiClient {
         debugPrint('✓ Including ${faceIds.length} face IDs in registration');
       }
 
-      // Add image file
-      request.files.add(
-        await http.MultipartFile.fromPath('image', profileImage.path),
-      );
+      // Add image file if provided
+      if (profileImage != null) {
+        request.files.add(
+          await http.MultipartFile.fromPath('image', profileImage.path),
+        );
+      }
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);

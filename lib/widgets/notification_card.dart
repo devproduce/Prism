@@ -3,6 +3,8 @@ import 'package:prism/models/notification_model.dart';
 import 'package:prism/providers/notifications_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:prism/theme/colors.dart';
+import 'package:prism/theme/text_styles.dart';
 
 class NotificationCard extends StatelessWidget {
   final NotificationModel notification;
@@ -14,75 +16,160 @@ class NotificationCard extends StatelessWidget {
     required this.currentUserId,
   });
 
+  bool get _isRequest =>
+      notification.type == 'friend_request' ||
+      notification.type == 'friend_request_received';
+
   @override
   Widget build(BuildContext context) {
+    // If it's a request, use the High-Priority Card style
+    if (_isRequest) {
+      return _buildRequestCard(context);
+    }
+    // Otherwise, use the Low-Priority List Item style
+    return _buildActivityItem(context);
+  }
+
+  Widget _buildRequestCard(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final screenWidth = MediaQuery.of(context).size.width;
 
-    // Responsive dimensions
-    final cardMarginH = screenWidth < 360 ? 12.0 : 16.0;
-    final cardPadding = screenWidth < 360 ? 12.0 : 16.0;
-    final avatarRadius = screenWidth < 360
-        ? 20.0
-        : (screenWidth > 600 ? 28.0 : 24.0);
-    final buttonSize = screenWidth < 360
-        ? 32.0
-        : (screenWidth > 600 ? 40.0 : 36.0);
-    final iconButtonSize = screenWidth < 360 ? 16.0 : 18.0;
-    final messageFontSize = screenWidth < 360
-        ? 13.0
-        : (screenWidth > 600 ? 15.0 : 14.0);
-    final timeFontSize = screenWidth < 360 ? 11.0 : 12.0;
+    // Using a distinct card background for requests to emphasize importance
+    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
 
-    // Colors from design
-    // Theme-aware colors
-    final yellowColor = const Color(0xFFFCE76C);
-    final cardBackground = isDark
-        ? const Color(0xFF2A2A2A)
-        : theme.colorScheme.surfaceContainerHighest;
-    final primaryTextColor = theme.colorScheme.onSurface;
-    final secondaryTextColor = theme.colorScheme.onSurfaceVariant;
-    final avatarBgColor = isDark
-        ? Colors.grey[800]!
-        : theme.colorScheme.surfaceContainerHigh;
-
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 500),
-      curve: Curves.easeOutQuart,
-      builder: (context, value, child) {
-        return Transform.translate(
-          offset: Offset(0, 20 * (1 - value)),
-          child: Opacity(opacity: value, child: child),
-        );
-      },
-      child: Dismissible(
-        key: Key(notification.id),
-        direction: DismissDirection.endToStart,
-        background: Container(
-          alignment: Alignment.centerRight,
-          padding: const EdgeInsets.only(right: 20),
-          color: Colors.red,
-          child: const Icon(Icons.delete, color: Colors.white),
-        ),
-        onDismissed: (direction) {
-          Provider.of<NotificationsProvider>(
-            context,
-            listen: false,
-          ).markAsRead(notification.id);
-        },
-        child: Container(
-          margin: EdgeInsets.symmetric(horizontal: cardMarginH, vertical: 8),
-          padding: EdgeInsets.all(cardPadding),
-          decoration: BoxDecoration(
-            color: cardBackground,
-            borderRadius: BorderRadius.circular(16),
+    // Requests are handled by buttons, so no Dismissible needed here implicitly
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: PrismColors.white.withValues(alpha: 0.05)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
-          child: Row(
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
             children: [
-              // Avatar or Icon
-              _buildAvatar(context, avatarRadius, yellowColor, avatarBgColor),
+              _buildAvatar(radius: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    RichText(
+                      text: TextSpan(
+                        style: PrismTextStyles.bodyMedium.copyWith(
+                          color: PrismColors.white,
+                        ),
+                        children: [
+                          TextSpan(
+                            text: notification.username ?? 'Unknown',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          const TextSpan(text: ' sent you a friend request.'),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      notification.timeAgo,
+                      style: PrismTextStyles.bodySmall.copyWith(
+                        color: PrismColors.white.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _buildActionButton(
+                  context,
+                  label: 'Decline',
+                  isPrimary: false,
+                  onTap: () {
+                    Provider.of<NotificationsProvider>(
+                      context,
+                      listen: false,
+                    ).rejectFriendRequest(
+                      notification.id,
+                      currentUserId,
+                      context,
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildActionButton(
+                  context,
+                  label: 'Accept',
+                  isPrimary: true,
+                  onTap: () {
+                    Provider.of<NotificationsProvider>(
+                      context,
+                      listen: false,
+                    ).acceptFriendRequest(
+                      notification.id,
+                      currentUserId,
+                      context,
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActivityItem(BuildContext context) {
+    final isUnread = !notification.isRead;
+
+    // Use Dismissible with confirmDismiss to avoid removal-from-tree crash
+    return Dismissible(
+      key: Key(notification.id),
+      direction: DismissDirection.endToStart,
+      background: _buildDismissBackground(),
+      confirmDismiss: (direction) async {
+        _markAsRead(context);
+        // Return false to snap back, keeping the item in the list (history)
+        // This avoids the "Dismissed widget still in tree" error
+        return false;
+      },
+      child: InkWell(
+        onTap: () => _markAsRead(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Status Indicator (Dot)
+              Container(
+                width: 8,
+                height: 8,
+                margin: const EdgeInsets.only(top: 6, right: 12),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isUnread
+                      ? PrismColors.prismYellow
+                      : Colors.transparent,
+                ),
+              ),
+
+              // Variable Icon/Avatar based on type
+              _buildContextIcon(),
               const SizedBox(width: 12),
 
               // Content
@@ -90,135 +177,28 @@ class NotificationCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (notification.type == 'friend_request' ||
-                        notification.type == 'friend_request_received')
-                      RichText(
-                        text: TextSpan(
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: primaryTextColor,
-                            fontSize: messageFontSize,
-                          ),
-                          children: [
-                            TextSpan(
-                              text: notification.username ?? 'Unknown',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      Text(
-                        notification.message,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: primaryTextColor,
-                          fontSize: messageFontSize,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                    Text(
+                      notification.message,
+                      style: PrismTextStyles.bodyMedium.copyWith(
+                        color: isUnread
+                            ? PrismColors.white
+                            : PrismColors.white.withValues(alpha: 0.7),
+                        fontWeight: isUnread
+                            ? FontWeight.w500
+                            : FontWeight.w400,
                       ),
-
-                    const SizedBox(height: 4),
+                    ),
+                    const SizedBox(height: 2),
                     Text(
                       notification.timeAgo,
-                      style: TextStyle(
-                        color: secondaryTextColor,
-                        fontSize: timeFontSize,
+                      style: PrismTextStyles.bodySmall.copyWith(
+                        color: PrismColors.white.withValues(alpha: 0.4),
+                        fontSize: 12,
                       ),
                     ),
                   ],
                 ),
               ),
-
-              // Actions
-              if (notification.type == 'friend_request' ||
-                  notification.type == 'friend_request_received')
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Reject Button
-                    GestureDetector(
-                      onTap: () {
-                        Provider.of<NotificationsProvider>(
-                          context,
-                          listen: false,
-                        ).rejectFriendRequest(
-                          notification.id,
-                          currentUserId,
-                          context,
-                        );
-                      },
-                      child: Container(
-                        width: buttonSize,
-                        height: buttonSize,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.close,
-                          color: Colors.white,
-                          size: iconButtonSize,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    // Accept Button
-                    GestureDetector(
-                      onTap: () {
-                        Provider.of<NotificationsProvider>(
-                          context,
-                          listen: false,
-                        ).acceptFriendRequest(
-                          notification.id,
-                          currentUserId,
-                          context,
-                        );
-                      },
-                      child: Container(
-                        width: buttonSize,
-                        height: buttonSize,
-                        decoration: BoxDecoration(
-                          color: yellowColor,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.check,
-                          color: Colors.black,
-                          size: iconButtonSize,
-                        ),
-                      ),
-                    ),
-                  ],
-                )
-              else if (notification.type == 'image_share' ||
-                  notification.type == 'batch_shared')
-                Container(
-                  width: buttonSize,
-                  height: buttonSize,
-                  decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.check,
-                    color: Colors.green,
-                    size: iconButtonSize,
-                  ),
-                )
-              else
-                // General notification indicator (yellow dot)
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: notification.isRead
-                        ? Colors.transparent
-                        : yellowColor,
-                    shape: BoxShape.circle,
-                  ),
-                ),
             ],
           ),
         ),
@@ -226,34 +206,128 @@ class NotificationCard extends StatelessWidget {
     );
   }
 
-  Widget _buildAvatar(
-    BuildContext context,
-    double radius,
-    Color yellowColor,
-    Color avatarBgColor,
-  ) {
+  Widget _buildContextIcon() {
+    // If user-related, show avatar
+    if (notification.type.contains('friend') || notification.username != null) {
+      return _buildAvatar(radius: 20);
+    }
+
+    // Otherwise show system icon
+    IconData iconData;
+    Color iconColor;
+
+    switch (notification.type) {
+      case 'image_share':
+      case 'batch_shared':
+        iconData = Icons.collections_rounded;
+        iconColor = Colors.blueAccent;
+        break;
+      case 'security':
+        iconData = Icons.security_rounded;
+        iconColor = Colors.orangeAccent;
+        break;
+      default:
+        iconData = Icons.notifications_none_rounded;
+        iconColor = PrismColors.white.withValues(alpha: 0.6);
+    }
+
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: iconColor.withValues(alpha: 0.15),
+        shape: BoxShape.circle,
+      ),
+      child: Icon(iconData, size: 20, color: iconColor),
+    );
+  }
+
+  Widget _buildAvatar({required double radius}) {
     if (notification.profilePicId != null &&
         notification.profilePicId!.isNotEmpty) {
-      return CircleAvatar(
-        radius: radius,
-        backgroundImage: CachedNetworkImageProvider(
-          notification.profilePictureUrl,
+      return CachedNetworkImage(
+        imageUrl: notification.profilePictureUrl,
+        imageBuilder: (context, imageProvider) => CircleAvatar(
+          radius: radius,
+          backgroundImage: imageProvider,
+          backgroundColor: Colors.grey[800],
         ),
-        backgroundColor: avatarBgColor,
-      );
-    } else {
-      return CircleAvatar(
-        radius: radius,
-        backgroundColor: avatarBgColor,
-        child: Text(
-          notification.username?.substring(0, 1).toUpperCase() ?? '?',
-          style: TextStyle(
-            color: yellowColor,
-            fontWeight: FontWeight.bold,
-            fontSize: radius * 0.6, // Responsive font size
+        placeholder: (context, url) => CircleAvatar(
+          radius: radius,
+          backgroundColor: Colors.grey[800],
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            valueColor: AlwaysStoppedAnimation<Color>(PrismColors.prismYellow),
           ),
         ),
+        errorWidget: (context, url, error) => _buildFallbackAvatar(radius),
       );
+    } else {
+      return _buildFallbackAvatar(radius);
+    }
+  }
+
+  Widget _buildFallbackAvatar(double radius) {
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: Colors.grey[800],
+      child: Text(
+        notification.username?.substring(0, 1).toUpperCase() ?? '?',
+        style: TextStyle(
+          color: PrismColors.prismYellow,
+          fontWeight: FontWeight.bold,
+          fontSize: radius * 0.8,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionButton(
+    BuildContext context, {
+    required String label,
+    required bool isPrimary,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: isPrimary ? PrismColors.prismYellow : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: isPrimary
+              ? null
+              : Border.all(color: PrismColors.white.withValues(alpha: 0.3)),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: PrismTextStyles.bodySmall.copyWith(
+            color: isPrimary ? Colors.black : PrismColors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDismissBackground() {
+    return Container(
+      color: PrismColors.prismYellow.withValues(
+        alpha: 0.2,
+      ), // Change to "Read" color
+      alignment: Alignment.centerRight,
+      padding: const EdgeInsets.only(right: 20),
+      child: const Icon(Icons.done_all_rounded, color: PrismColors.prismYellow),
+    );
+  }
+
+  void _markAsRead(BuildContext context) {
+    if (!notification.isRead) {
+      Provider.of<NotificationsProvider>(
+        context,
+        listen: false,
+      ).markAsRead(notification.id);
     }
   }
 }

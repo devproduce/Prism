@@ -190,6 +190,24 @@ class ShimmerLayouts {
     );
   }
 
+  /// Creates a shimmer placeholder for a generic rectangle
+  static Widget rect({
+    double? width,
+    required double height,
+    double borderRadius = 8,
+  }) {
+    return ShimmerPlaceholder(
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: PrismColors.surfaceGray,
+          borderRadius: BorderRadius.circular(borderRadius),
+        ),
+      ),
+    );
+  }
+
   /// Creates a shimmer placeholder for a grid item
   static Widget gridItem({double aspectRatio = 1.0}) {
     return ShimmerPlaceholder(

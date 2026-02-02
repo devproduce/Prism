@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 
@@ -6,9 +5,9 @@ import 'package:photo_manager/photo_manager.dart';
 class AlbumInfo {
   final AssetPathEntity album;
   final int assetCount;
-  final Uint8List? thumbnail;
+  final AssetEntity? coverAsset;
 
-  AlbumInfo({required this.album, required this.assetCount, this.thumbnail});
+  AlbumInfo({required this.album, required this.assetCount, this.coverAsset});
 
   String get name => album.name;
   String get id => album.id;
@@ -23,15 +22,21 @@ class LocalGalleryProvider with ChangeNotifier {
   bool _isLoading = false;
   bool _hasPermission = false;
   String? _error;
+  bool _isPermissionChecked = false;
 
   // Getters
   List<AlbumInfo> get albums => _albums;
   bool get isLoading => _isLoading;
   bool get hasPermission => _hasPermission;
+  bool get isPermissionChecked => _isPermissionChecked;
   String? get error => _error;
 
   /// Request permission and fetch albums
-  Future<bool> requestPermissionAndFetch() async {
+  Future<bool> requestPermissionAndFetch({bool force = false}) async {
+    if (!force && _hasPermission && _albums.isNotEmpty) {
+      return true;
+    }
+
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -39,6 +44,8 @@ class LocalGalleryProvider with ChangeNotifier {
     try {
       final PermissionState permission =
           await PhotoManager.requestPermissionExtend();
+
+      _isPermissionChecked = true; // Mark as checked
 
       if (permission.isAuth || permission.hasAccess) {
         _hasPermission = true;
@@ -52,6 +59,7 @@ class LocalGalleryProvider with ChangeNotifier {
         return false;
       }
     } catch (e) {
+      _isPermissionChecked = true; // Mark as checked even on error
       _error = 'Failed to request permission: $e';
       _isLoading = false;
       notifyListeners();
@@ -94,12 +102,11 @@ class LocalGalleryProvider with ChangeNotifier {
       });
 
       _albums = albumInfoList;
-
-      // Preload thumbnails for visible albums (first 10)
-      await _loadAlbumThumbnails(_albums.take(10).toList());
-
       _isLoading = false;
       notifyListeners();
+
+      // Load covers for all albums in background
+      _loadAllAlbumCovers();
     } catch (e) {
       _error = 'Failed to fetch albums: $e';
       _isLoading = false;
@@ -107,31 +114,26 @@ class LocalGalleryProvider with ChangeNotifier {
     }
   }
 
-  /// Load thumbnails for albums
-  Future<void> _loadAlbumThumbnails(List<AlbumInfo> albumInfos) async {
-    for (int i = 0; i < albumInfos.length; i++) {
-      final albumInfo = albumInfos[i];
-      if (albumInfo.thumbnail != null) continue;
+  /// Load covers for all albums
+  Future<void> _loadAllAlbumCovers() async {
+    for (int i = 0; i < _albums.length; i++) {
+      // Optimization: Notify in batches or if needed
+      if (i % 5 == 0 && i > 0) notifyListeners();
 
       try {
-        final assets = await albumInfo.album.getAssetListRange(
+        final assets = await _albums[i].album.getAssetListRange(
           start: 0,
           end: 1,
         );
         if (assets.isNotEmpty) {
-          final thumb = await assets.first.thumbnailDataWithSize(
-            const ThumbnailSize(200, 200),
-            quality: 80,
-          );
-          // Update the album info with thumbnail
           _albums[i] = AlbumInfo(
-            album: albumInfo.album,
-            assetCount: albumInfo.assetCount,
-            thumbnail: thumb,
+            album: _albums[i].album,
+            assetCount: _albums[i].assetCount,
+            coverAsset: assets.first,
           );
         }
       } catch (e) {
-        debugPrint('Error loading thumbnail for ${albumInfo.name}: $e');
+        debugPrint('Error loading cover for ${_albums[i].name}: $e');
       }
     }
     notifyListeners();

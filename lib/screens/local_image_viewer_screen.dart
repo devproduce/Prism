@@ -2,12 +2,14 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:open_filex/open_filex.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:prism/screens/share_upload_screen.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/utils/error_handler.dart';
+
+import 'package:chewie/chewie.dart';
+import 'package:video_player/video_player.dart';
 
 /// A simplified image viewer for local device images.
 /// Uses a separate stateful widget for each page to ensure smooth animations.
@@ -150,6 +152,7 @@ class _LocalImageViewerScreenState extends State<LocalImageViewerScreen> {
         children: [
           // Image/Video viewer
           PageView.builder(
+            physics: const BouncingScrollPhysics(),
             controller: _pageController,
             itemCount: widget.assets.length,
             onPageChanged: _onPageChanged,
@@ -221,8 +224,7 @@ class _LocalAssetPageState extends State<LocalAssetPage>
   @override
   void initState() {
     super.initState();
-    // Use a high-quality thumbnail instead of originBytes for better performance/memory
-    // 2000x2000 is usually enough for full screen on mobile
+    // Use a high-quality thumbnail for photos
     _imageFuture = widget.asset.thumbnailDataWithSize(
       const ThumbnailSize(2000, 2000),
       quality: 90,
@@ -234,6 +236,10 @@ class _LocalAssetPageState extends State<LocalAssetPage>
     super.build(context); // Required for AutomaticKeepAliveClientMixin
 
     final isVideo = widget.asset.type == AssetType.video;
+
+    if (isVideo) {
+      return _LocalVideoPlayer(asset: widget.asset);
+    }
 
     return FutureBuilder<Uint8List?>(
       future: _imageFuture,
@@ -249,51 +255,6 @@ class _LocalAssetPageState extends State<LocalAssetPage>
               gaplessPlayback: true,
             ),
           );
-
-          if (isVideo) {
-            return Center(
-              child: GestureDetector(
-                onTap: () async {
-                  HapticFeedback.selectionClick();
-                  debugPrint('📽️ Video tapped: ${widget.asset.id}');
-                  final file = await widget.asset.file;
-                  if (file != null) {
-                    debugPrint('📂 Opening file: ${file.path}');
-                    final result = await OpenFilex.open(file.path);
-                    debugPrint(
-                      '▶️ OpenFilex result: ${result.message} (${result.type})',
-                    );
-                  } else {
-                    debugPrint('❌ Video file is null');
-                    if (context.mounted) {
-                      ErrorHandler.showErrorSnackbar(
-                        context,
-                        message: 'Could not access video file',
-                      );
-                    }
-                  }
-                },
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    imageWidget,
-                    Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: PrismColors.black.withValues(alpha: 0.6),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.play_arrow_rounded,
-                        color: PrismColors.white,
-                        size: 48,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
 
           // For photos, support zoom and rotation
           return Center(
@@ -316,6 +277,110 @@ class _LocalAssetPageState extends State<LocalAssetPage>
           ),
         );
       },
+    );
+  }
+}
+
+class _LocalVideoPlayer extends StatefulWidget {
+  final AssetEntity asset;
+
+  const _LocalVideoPlayer({required this.asset});
+
+  @override
+  State<_LocalVideoPlayer> createState() => _LocalVideoPlayerState();
+}
+
+class _LocalVideoPlayerState extends State<_LocalVideoPlayer> {
+  VideoPlayerController? _videoController;
+  ChewieController? _chewieController;
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializePlayer();
+  }
+
+  Future<void> _initializePlayer() async {
+    try {
+      final file = await widget.asset.file;
+      if (file == null) {
+        if (mounted) setState(() => _error = 'Could not load video file');
+        return;
+      }
+
+      _videoController = VideoPlayerController.file(file);
+      await _videoController!.initialize();
+
+      _chewieController = ChewieController(
+        videoPlayerController: _videoController!,
+        autoPlay: true,
+        looping: true,
+        showControls: true,
+        materialProgressColors: ChewieProgressColors(
+          playedColor: PrismColors.prismYellow,
+          handleColor: PrismColors.prismYellow,
+          backgroundColor: Colors.grey.withOpacity(0.5),
+          bufferedColor: Colors.white.withOpacity(0.5),
+        ),
+        placeholder: const Center(
+          child: CircularProgressIndicator(color: PrismColors.prismYellow),
+        ),
+        autoInitialize: true,
+      );
+
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      debugPrint('Error initializing video player: $e');
+      if (mounted) setState(() => _error = 'Failed to play video');
+    }
+  }
+
+  @override
+  void dispose() {
+    _videoController?.dispose();
+    _chewieController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.error_outline,
+              color: PrismColors.errorRed,
+              size: 48,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _error!,
+              style: PrismTextStyles.bodyMedium.copyWith(
+                color: PrismColors.white,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: PrismColors.prismYellow),
+      );
+    }
+
+    return Center(
+      child: AspectRatio(
+        aspectRatio: _videoController!.value.aspectRatio,
+        child: Chewie(controller: _chewieController!),
+      ),
     );
   }
 }

@@ -8,8 +8,14 @@ class AuthResponse {
   AuthResponse({required this.user, required this.message, this.token});
 
   factory AuthResponse.fromJson(Map<String, dynamic> json) {
+    // Check if user data is nested under 'user' key
+    final userData =
+        (json['user'] != null && json['user'] is Map<String, dynamic>)
+        ? json['user'] as Map<String, dynamic>
+        : json;
+
     return AuthResponse(
-      user: UserModel.fromJson(json),
+      user: UserModel.fromJson(userData),
       message: json['message'] ?? 'Success',
       token: json['access_token'] ?? json['token'], // Try both field names
     );

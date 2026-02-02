@@ -6,10 +6,11 @@ import 'package:provider/provider.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/widgets/glass_widgets.dart';
-import 'package:prism/widgets/gradient_background.dart';
+
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/screens/login_screen.dart';
 import 'package:prism/screens/home_screen.dart';
+import 'package:prism/screens/multi_view_capture_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -21,7 +22,7 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
-  final int _totalPages = 6;
+  final int _totalPages = 6; // Updated from 7 to 6 -- Removed Vibe Check
 
   // Form controllers
   final _usernameController = TextEditingController();
@@ -30,21 +31,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _pronounsController = TextEditingController();
-  final _dobController = TextEditingController();
-  final _phoneController = TextEditingController();
 
   // Form keys
   final _step1Key = GlobalKey<FormState>();
   final _step2Key = GlobalKey<FormState>();
   final _step3Key = GlobalKey<FormState>();
   final _step4Key = GlobalKey<FormState>();
+
   final _step6Key = GlobalKey<FormState>();
   final _step7Key = GlobalKey<FormState>();
 
-  File? _faceIdImage; // For face recognition (required)
+  List<String>? _faceIds; // Face IDs from multi-view capture
   File? _profilePicImage; // For profile display (optional)
-  DateTime? _selectedDob;
+
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
 
@@ -57,9 +56,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _pronounsController.dispose();
-    _dobController.dispose();
-    _phoneController.dispose();
+
     super.dispose();
   }
 
@@ -83,17 +80,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  Future<void> _pickFaceIdImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(
-      source: ImageSource.camera, // Camera only for face recognition
-      imageQuality: 70,
+  Future<void> _startFaceIdScan() async {
+    final result = await Navigator.of(context).push(
+      MaterialPageRoute(builder: (context) => const MultiViewCaptureScreen()),
     );
 
-    if (pickedFile != null) {
-      setState(() {
-        _faceIdImage = File(pickedFile.path);
-      });
+    if (result != null) {
+      if (result is Map) {
+        // New format with image path
+        final faces = result['faceIds'];
+        final imagePath = result['imagePath'] as String?;
+
+        if (faces is List<String>) {
+          setState(() {
+            _faceIds = faces;
+            // Set captured face as default profile picture
+            if (imagePath != null) {
+              _profilePicImage = File(imagePath);
+            }
+          });
+        }
+      } else if (result is List<String>) {
+        // Fallback for list only
+        setState(() {
+          _faceIds = result;
+        });
+      }
     }
   }
 
@@ -143,41 +155,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  Future<void> _selectDate() async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now().subtract(const Duration(days: 6570)),
-      firstDate: DateTime(1900),
-      lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.dark(
-              primary: PrismColors.purple,
-              onPrimary: Colors.white,
-              surface: PrismColors.darkCard,
-              onSurface: Colors.white,
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-
-    if (picked != null) {
-      setState(() {
-        _selectedDob = picked;
-        _dobController.text = '${picked.month}/${picked.day}/${picked.year}';
-      });
-    }
-  }
-
   /// Handle registration on Face Reveal screen (Step 6)
   Future<void> _handleFaceRevealNext() async {
-    if (_faceIdImage == null) {
+    if (_faceIds == null || _faceIds!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please capture your face ID image'),
+          content: Text('Please complete Face ID scan'),
           backgroundColor: PrismColors.errorRed,
           behavior: SnackBarBehavior.floating,
         ),
@@ -195,35 +178,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ? null
         : _lastNameController.text.trim();
 
-    // Register with face ID image
+    // Register with face IDs
+    // Note: profileImage is null here, as it's optional now
+    // User can add profile picture in the next step
     final success = await authProvider.register(
       username: _usernameController.text.trim(),
       email: _emailController.text.trim(),
       password: _passwordController.text,
       firstName: firstName,
       lastName: lastName,
-      profileImage: _faceIdImage!, // Use face ID image for registration
+      profileImage: _profilePicImage, // Use captured face image if available
+      faceIds: _faceIds, // Pass the captured face IDs
     );
 
     if (success && mounted) {
-      // Update optional profile fields if provided
-      if (_pronounsController.text.trim().isNotEmpty ||
-          _selectedDob != null ||
-          _phoneController.text.trim().isNotEmpty) {
-        await authProvider.updateProfile(
-          username: _usernameController.text.trim(),
-          firstName: firstName,
-          lastName: lastName,
-          pronouns: _pronounsController.text.trim().isEmpty
-              ? null
-              : _pronounsController.text.trim(),
-          dob: _selectedDob,
-          phoneNumber: _phoneController.text.trim().isEmpty
-              ? null
-              : _phoneController.text.trim(),
-        );
-      }
-
       // Proceed to profile picture screen
       if (mounted) {
         _nextPage();
@@ -310,459 +278,471 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return GradientBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: SafeArea(
-          child: Column(
-            children: [
-              // Custom AppBar
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        Icons.arrow_back_ios_new_rounded,
-                        color: Colors.white.withOpacity(0.8),
-                      ),
-                      onPressed: _currentPage > 0
-                          ? _previousPage
-                          : () => Navigator.of(context).pushReplacement(
-                              PageRouteBuilder(
-                                pageBuilder: (_, __, ___) =>
-                                    const LoginScreen(),
-                                transitionsBuilder: (_, animation, __, child) =>
-                                    FadeTransition(
-                                      opacity: animation,
-                                      child: child,
+    return Scaffold(
+      backgroundColor: PrismColors.voidBlack,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Custom AppBar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.arrow_back_ios_new_rounded,
+                      color: Colors.white.withOpacity(0.8),
+                    ),
+                    onPressed: _currentPage > 0
+                        ? _previousPage
+                        : () => Navigator.of(context).pushReplacement(
+                            PageRouteBuilder(
+                              pageBuilder: (_, __, ___) => const LoginScreen(),
+                              transitionsBuilder: (_, animation, __, child) =>
+                                  FadeTransition(
+                                    opacity: animation,
+                                    child: child,
+                                  ),
+                            ),
+                          ),
+                  ),
+                  const Spacer(),
+                  // Progress Dots
+                  Row(
+                    children: List.generate(_totalPages, (index) {
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _currentPage >= index
+                              ? PrismColors.electricBlue
+                              : Colors.white.withOpacity(0.1),
+                          boxShadow: _currentPage >= index
+                              ? [
+                                  BoxShadow(
+                                    color: PrismColors.electricBlue.withOpacity(
+                                      0.5,
                                     ),
+                                    blurRadius: 4,
+                                  ),
+                                ]
+                              : null,
+                        ),
+                      );
+                    }),
+                  ),
+                  const SizedBox(width: 16),
+                ],
+              ),
+            ),
+
+            Expanded(
+              child: PageView(
+                controller: _pageController,
+                physics: const NeverScrollableScrollPhysics(),
+                onPageChanged: (page) => setState(() => _currentPage = page),
+                children: [
+                  _buildStepTemplate(
+                    key: const ValueKey('step1'),
+                    formKey: _step1Key,
+                    title: 'Claim Your Name',
+                    subtitle: 'Create a unique handle for your Prism identity.',
+                    fields: [
+                      TextFormField(
+                        controller: _usernameController,
+                        style: PrismTextStyles.bodyLarge,
+                        decoration: _glassInputDecoration(
+                          'Username',
+                          Icons.alternate_email,
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty)
+                            return 'Please enter a username';
+                          if (value.length < 3)
+                            return 'Username must be at least 3 characters';
+                          return null;
+                        },
+                      ),
+                    ],
+                    onNext: () {
+                      if (_step1Key.currentState!.validate()) _nextPage();
+                    },
+                  ),
+                  _buildStepTemplate(
+                    key: const ValueKey('step2'),
+                    formKey: _step2Key,
+                    title: 'Who Are You?',
+                    subtitle: 'So your friends know it\'s really you.',
+                    fields: [
+                      TextFormField(
+                        controller: _firstNameController,
+                        style: PrismTextStyles.bodyLarge,
+                        decoration: _glassInputDecoration(
+                          'First Name',
+                          Icons.person_outline,
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty)
+                            return 'Please enter your first name';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _lastNameController,
+                        style: PrismTextStyles.bodyLarge,
+                        decoration: _glassInputDecoration(
+                          'Last Name (Optional)',
+                          Icons.person_outline,
+                        ),
+                      ),
+                    ],
+                    onNext: () {
+                      if (_step2Key.currentState!.validate()) _nextPage();
+                    },
+                  ),
+                  _buildStepTemplate(
+                    key: const ValueKey('step3'),
+                    formKey: _step3Key,
+                    title: 'Contact Info',
+                    subtitle: 'For verification and keeping you in the loop.',
+                    fields: [
+                      TextFormField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        style: PrismTextStyles.bodyLarge,
+                        decoration: _glassInputDecoration(
+                          'Email Address',
+                          Icons.email_outlined,
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty)
+                            return 'Please enter your email';
+                          if (!value.contains('@') || !value.contains('.'))
+                            return 'Please enter a valid email';
+                          return null;
+                        },
+                      ),
+                    ],
+                    onNext: () {
+                      if (_step3Key.currentState!.validate()) _nextPage();
+                    },
+                  ),
+                  _buildStepTemplate(
+                    key: const ValueKey('step4'),
+                    formKey: _step4Key,
+                    title: 'Secure It',
+                    subtitle: 'Make it strong. Make it safe.',
+                    fields: [
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: _obscurePassword,
+                        style: PrismTextStyles.bodyLarge,
+                        decoration:
+                            _glassInputDecoration(
+                              'Password',
+                              Icons.lock_outline,
+                            ).copyWith(
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                  color: Colors.white54,
+                                ),
+                                onPressed: () => setState(
+                                  () => _obscurePassword = !_obscurePassword,
+                                ),
                               ),
                             ),
-                    ),
-                    const Spacer(),
-                    // Progress Dots
-                    Row(
-                      children: List.generate(_totalPages, (index) {
-                        return AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          margin: const EdgeInsets.symmetric(horizontal: 2),
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: _currentPage >= index
-                                ? PrismColors.electricBlue
-                                : Colors.white.withOpacity(0.1),
-                            boxShadow: _currentPage >= index
-                                ? [
-                                    BoxShadow(
-                                      color: PrismColors.electricBlue
-                                          .withOpacity(0.5),
-                                      blurRadius: 4,
-                                    ),
-                                  ]
-                                : null,
-                          ),
-                        );
-                      }),
-                    ),
-                    const SizedBox(width: 16),
-                  ],
-                ),
-              ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty)
+                            return 'Please enter a password';
+                          if (value.length < 6)
+                            return 'Password must be at least 6 characters';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _confirmPasswordController,
+                        obscureText: _obscureConfirmPassword,
+                        style: PrismTextStyles.bodyLarge,
+                        decoration:
+                            _glassInputDecoration(
+                              'Confirm Password',
+                              Icons.lock_outline,
+                            ).copyWith(
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscureConfirmPassword
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                  color: Colors.white54,
+                                ),
+                                onPressed: () => setState(
+                                  () => _obscureConfirmPassword =
+                                      !_obscureConfirmPassword,
+                                ),
+                              ),
+                            ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty)
+                            return 'Please confirm your password';
+                          if (value != _passwordController.text)
+                            return 'Passwords do not match';
+                          return null;
+                        },
+                      ),
+                    ],
+                    onNext: () {
+                      if (_step4Key.currentState!.validate()) _nextPage();
+                    },
+                  ),
 
-              Expanded(
-                child: PageView(
-                  controller: _pageController,
-                  physics: const NeverScrollableScrollPhysics(),
-                  onPageChanged: (page) => setState(() => _currentPage = page),
-                  children: [
-                    _buildStepTemplate(
-                      key: const ValueKey('step1'),
-                      formKey: _step1Key,
-                      title: 'Claim Your Name',
-                      subtitle:
-                          'Create a unique handle for your Prism identity.',
-                      fields: [
-                        TextFormField(
-                          controller: _usernameController,
-                          style: PrismTextStyles.bodyLarge,
-                          decoration: _glassInputDecoration(
-                            'Username',
-                            Icons.alternate_email,
-                          ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty)
-                              return 'Please enter a username';
-                            if (value.length < 3)
-                              return 'Username must be at least 3 characters';
-                            return null;
-                          },
-                        ),
-                      ],
-                      onNext: () {
-                        if (_step1Key.currentState!.validate()) _nextPage();
-                      },
-                    ),
-                    _buildStepTemplate(
-                      key: const ValueKey('step2'),
-                      formKey: _step2Key,
-                      title: 'Who Are You?',
-                      subtitle: 'So your friends know it\'s really you.',
-                      fields: [
-                        TextFormField(
-                          controller: _firstNameController,
-                          style: PrismTextStyles.bodyLarge,
-                          decoration: _glassInputDecoration(
-                            'First Name',
-                            Icons.person_outline,
-                          ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty)
-                              return 'Please enter your first name';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _lastNameController,
-                          style: PrismTextStyles.bodyLarge,
-                          decoration: _glassInputDecoration(
-                            'Last Name (Optional)',
-                            Icons.person_outline,
-                          ),
-                        ),
-                      ],
-                      onNext: () {
-                        if (_step2Key.currentState!.validate()) _nextPage();
-                      },
-                    ),
-                    _buildStepTemplate(
-                      key: const ValueKey('step3'),
-                      formKey: _step3Key,
-                      title: 'Contact Info',
-                      subtitle: 'For verification and keeping you in the loop.',
-                      fields: [
-                        TextFormField(
-                          controller: _emailController,
-                          keyboardType: TextInputType.emailAddress,
-                          style: PrismTextStyles.bodyLarge,
-                          decoration: _glassInputDecoration(
-                            'Email Address',
-                            Icons.email_outlined,
-                          ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty)
-                              return 'Please enter your email';
-                            if (!value.contains('@') || !value.contains('.'))
-                              return 'Please enter a valid email';
-                            return null;
-                          },
-                        ),
-                      ],
-                      onNext: () {
-                        if (_step3Key.currentState!.validate()) _nextPage();
-                      },
-                    ),
-                    _buildStepTemplate(
-                      key: const ValueKey('step4'),
-                      formKey: _step4Key,
-                      title: 'Secure It',
-                      subtitle: 'Make it strong. Make it safe.',
-                      fields: [
-                        TextFormField(
-                          controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          style: PrismTextStyles.bodyLarge,
-                          decoration:
-                              _glassInputDecoration(
-                                'Password',
-                                Icons.lock_outline,
-                              ).copyWith(
-                                suffixIcon: IconButton(
-                                  icon: Icon(
-                                    _obscurePassword
-                                        ? Icons.visibility_off
-                                        : Icons.visibility,
-                                    color: Colors.white54,
-                                  ),
-                                  onPressed: () => setState(
-                                    () => _obscurePassword = !_obscurePassword,
-                                  ),
+                  // Step 6: Face ID Recognition (Required)
+                  _buildStepTemplate(
+                    key: const ValueKey('step6'),
+                    formKey: _step6Key,
+                    title: 'Face ID Recognition',
+                    subtitle:
+                        'For secure face recognition. Required for account creation.',
+                    fields: [
+                      Center(
+                        child: GestureDetector(
+                          onTap: _startFaceIdScan,
+                          child:
+                              Container(
+                                width: MediaQuery.of(context).size.width * 0.45,
+                                height:
+                                    MediaQuery.of(context).size.width * 0.45,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: PrismColors.prismSignature,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: PrismColors.purple.withOpacity(
+                                        0.5,
+                                      ),
+                                      blurRadius: 30,
+                                      offset: const Offset(0, 10),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty)
-                              return 'Please enter a password';
-                            if (value.length < 6)
-                              return 'Password must be at least 6 characters';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _confirmPasswordController,
-                          obscureText: _obscureConfirmPassword,
-                          style: PrismTextStyles.bodyLarge,
-                          decoration:
-                              _glassInputDecoration(
-                                'Confirm Password',
-                                Icons.lock_outline,
-                              ).copyWith(
-                                suffixIcon: IconButton(
-                                  icon: Icon(
-                                    _obscureConfirmPassword
-                                        ? Icons.visibility_off
-                                        : Icons.visibility,
-                                    color: Colors.white54,
-                                  ),
-                                  onPressed: () => setState(
-                                    () => _obscureConfirmPassword =
-                                        !_obscureConfirmPassword,
-                                  ),
-                                ),
-                              ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty)
-                              return 'Please confirm your password';
-                            if (value != _passwordController.text)
-                              return 'Passwords do not match';
-                            return null;
-                          },
-                        ),
-                      ],
-                      onNext: () {
-                        if (_step4Key.currentState!.validate()) _nextPage();
-                      },
-                    ),
-                    // Step 5: Face ID Recognition (Required)
-                    _buildStepTemplate(
-                      key: const ValueKey('step5'),
-                      formKey: _step6Key,
-                      title: 'Face ID Recognition',
-                      subtitle:
-                          'For secure face recognition. Required for account creation.',
-                      fields: [
-                        Center(
-                          child: GestureDetector(
-                            onTap: _pickFaceIdImage,
-                            child:
-                                Container(
-                                  width:
-                                      MediaQuery.of(context).size.width * 0.45,
-                                  height:
-                                      MediaQuery.of(context).size.width * 0.45,
+                                padding: const EdgeInsets.all(4),
+                                child: Container(
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    gradient: PrismColors.prismSignature,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: PrismColors.purple.withOpacity(
-                                          0.5,
+                                    color: PrismColors.darkBase,
+                                  ),
+                                  child:
+                                      _faceIds != null && _faceIds!.isNotEmpty
+                                      ? const Icon(
+                                          Icons.check_circle_outline_rounded,
+                                          size: 80,
+                                          color: PrismColors.successGreen,
+                                        )
+                                      : const Icon(
+                                          Icons.face_retouching_natural_rounded,
+                                          size: 60,
+                                          color: Colors.white,
                                         ),
-                                        blurRadius: 30,
-                                        offset: const Offset(0, 10),
-                                      ),
-                                    ],
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: PrismColors.darkBase,
-                                      image: _faceIdImage != null
-                                          ? DecorationImage(
-                                              image: FileImage(_faceIdImage!),
-                                              fit: BoxFit.cover,
-                                            )
-                                          : null,
-                                    ),
-                                    child: _faceIdImage == null
-                                        ? const Icon(
-                                            Icons.camera_alt_rounded,
-                                            size: 50,
-                                            color: Colors.white,
-                                          )
-                                        : null,
-                                  ),
-                                ).animate().scale(
-                                  curve: Curves.elasticOut,
-                                  duration: 800.ms,
                                 ),
+                              ).animate().scale(
+                                curve: Curves.elasticOut,
+                                duration: 800.ms,
+                              ),
+                        ),
+                      ),
+                      if (_faceIds != null && _faceIds!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 20),
+                          child: Center(
+                            child: const Text(
+                              'Face ID Captured! ✨',
+                              style: TextStyle(color: PrismColors.successGreen),
+                            ).animate().fadeIn().moveY(begin: 10, end: 0),
                           ),
                         ),
-                        if (_faceIdImage != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 20),
-                            child: Center(
-                              child: const Text(
-                                'Face ID Captured! ✨',
-                                style: TextStyle(
-                                  color: PrismColors.successGreen,
-                                ),
-                              ).animate().fadeIn().moveY(begin: 10, end: 0),
-                            ),
+                      if (_faceIds == null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 20),
+                          child: Center(
+                            child: const Text(
+                              'Tap to start face scan',
+                              style: TextStyle(color: Colors.white60),
+                            ).animate().fadeIn(),
                           ),
-                      ],
-                      onNext: () async {
-                        if (_step6Key.currentState!.validate()) {
-                          await _handleFaceRevealNext();
-                        }
-                      },
-                      buttonText: 'Register',
-                    ),
-                    // Step 6: Profile Picture (Optional)
-                    SingleChildScrollView(
-                      key: const ValueKey('step6'),
-                      padding: const EdgeInsets.all(24.0),
-                      child: GlassCard(
-                        borderRadius: 30,
-                        child: Form(
-                          key: _step7Key,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              // Skip button aligned to the right
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: TextButton.icon(
-                                  onPressed: () async {
-                                    await _handleProfilePictureNext();
-                                  },
-                                  icon: const Icon(
-                                    Icons.skip_next_rounded,
-                                    color: Colors.white60,
-                                  ),
-                                  label: Text(
-                                    'Skip',
-                                    style: PrismTextStyles.bodyMedium.copyWith(
-                                      color: Colors.white60,
-                                    ),
-                                  ),
-                                ).animate().fadeIn(),
-                              ),
-
-                              Text(
-                                'Profile Picture',
-                                textAlign: TextAlign.center,
-                                style: PrismTextStyles.h2,
-                              ).animate().fadeIn().moveY(begin: 10, end: 0),
-
-                              const SizedBox(height: 8),
-
-                              Text(
-                                'Optional - Skip to use your Face ID photo as your profile picture.',
-                                textAlign: TextAlign.center,
-                                style: PrismTextStyles.bodyMedium.copyWith(
+                        ),
+                    ],
+                    onNext: () async {
+                      if (_faceIds != null && _faceIds!.isNotEmpty) {
+                        await _handleFaceRevealNext();
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Please complete Face ID scan'),
+                            backgroundColor: PrismColors.errorRed,
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    },
+                    buttonText: 'Register',
+                  ),
+                  // Step 7: Profile Picture (Optional)
+                  SingleChildScrollView(
+                    key: const ValueKey('step7'),
+                    padding: const EdgeInsets.all(24.0),
+                    child: GlassCard(
+                      borderRadius: 30,
+                      child: Form(
+                        key: _step7Key,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Skip button aligned to the right
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                onPressed: () async {
+                                  await _handleProfilePictureNext();
+                                },
+                                icon: const Icon(
+                                  Icons.skip_next_rounded,
                                   color: Colors.white60,
                                 ),
-                              ).animate().fadeIn(delay: 200.ms),
+                                label: Text(
+                                  'Skip',
+                                  style: PrismTextStyles.bodyMedium.copyWith(
+                                    color: Colors.white60,
+                                  ),
+                                ),
+                              ).animate().fadeIn(),
+                            ),
 
-                              const SizedBox(height: 32),
-                              Center(
-                                child: GestureDetector(
-                                  onTap: _pickProfilePicture,
-                                  child:
-                                      Container(
-                                        width:
-                                            MediaQuery.of(context).size.width *
-                                            0.45,
-                                        height:
-                                            MediaQuery.of(context).size.width *
-                                            0.45,
+                            Text(
+                              'Profile Picture',
+                              textAlign: TextAlign.center,
+                              style: PrismTextStyles.h2,
+                            ).animate().fadeIn().moveY(begin: 10, end: 0),
+
+                            const SizedBox(height: 8),
+
+                            Text(
+                              'Optional - Skip to use your Face ID photo as your profile picture.',
+                              textAlign: TextAlign.center,
+                              style: PrismTextStyles.bodyMedium.copyWith(
+                                color: Colors.white60,
+                              ),
+                            ).animate().fadeIn(delay: 200.ms),
+
+                            const SizedBox(height: 32),
+                            Center(
+                              child: GestureDetector(
+                                onTap: _pickProfilePicture,
+                                child:
+                                    Container(
+                                      width:
+                                          MediaQuery.of(context).size.width *
+                                          0.45,
+                                      height:
+                                          MediaQuery.of(context).size.width *
+                                          0.45,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        gradient: _profilePicImage != null
+                                            ? PrismColors.prismSignature
+                                            : LinearGradient(
+                                                colors: [
+                                                  PrismColors.electricBlue
+                                                      .withOpacity(0.3),
+                                                  PrismColors.purple
+                                                      .withOpacity(0.3),
+                                                ],
+                                              ),
+                                        boxShadow: _profilePicImage != null
+                                            ? [
+                                                BoxShadow(
+                                                  color: PrismColors
+                                                      .electricBlue
+                                                      .withOpacity(0.5),
+                                                  blurRadius: 30,
+                                                  offset: const Offset(0, 10),
+                                                ),
+                                              ]
+                                            : null,
+                                      ),
+                                      padding: const EdgeInsets.all(4),
+                                      child: Container(
                                         decoration: BoxDecoration(
                                           shape: BoxShape.circle,
-                                          gradient: _profilePicImage != null
-                                              ? PrismColors.prismSignature
-                                              : LinearGradient(
-                                                  colors: [
-                                                    PrismColors.electricBlue
-                                                        .withOpacity(0.3),
-                                                    PrismColors.purple
-                                                        .withOpacity(0.3),
-                                                  ],
-                                                ),
-                                          boxShadow: _profilePicImage != null
-                                              ? [
-                                                  BoxShadow(
-                                                    color: PrismColors
-                                                        .electricBlue
-                                                        .withOpacity(0.5),
-                                                    blurRadius: 30,
-                                                    offset: const Offset(0, 10),
+                                          color: PrismColors.darkBase,
+                                          image: _profilePicImage != null
+                                              ? DecorationImage(
+                                                  image: FileImage(
+                                                    _profilePicImage!,
                                                   ),
-                                                ]
-                                              : null,
-                                        ),
-                                        padding: const EdgeInsets.all(4),
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: PrismColors.darkBase,
-                                            image: _profilePicImage != null
-                                                ? DecorationImage(
-                                                    image: FileImage(
-                                                      _profilePicImage!,
-                                                    ),
-                                                    fit: BoxFit.cover,
-                                                  )
-                                                : null,
-                                          ),
-                                          child: _profilePicImage == null
-                                              ? const Icon(
-                                                  Icons
-                                                      .add_photo_alternate_rounded,
-                                                  size: 50,
-                                                  color: Colors.white54,
+                                                  fit: BoxFit.cover,
                                                 )
                                               : null,
                                         ),
-                                      ).animate().scale(
-                                        curve: Curves.elasticOut,
-                                        duration: 800.ms,
+                                        child: _profilePicImage == null
+                                            ? const Icon(
+                                                Icons
+                                                    .add_photo_alternate_rounded,
+                                                size: 50,
+                                                color: Colors.white54,
+                                              )
+                                            : null,
                                       ),
+                                    ).animate().scale(
+                                      curve: Curves.elasticOut,
+                                      duration: 800.ms,
+                                    ),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Center(
+                              child: Text(
+                                _profilePicImage == null
+                                    ? 'Tap to add a profile picture\nor skip to use Face ID photo'
+                                    : 'Looking good! 🎉',
+                                textAlign: TextAlign.center,
+                                style: PrismTextStyles.bodyMedium.copyWith(
+                                  color: _profilePicImage != null
+                                      ? PrismColors.successGreen
+                                      : Colors.white60,
                                 ),
-                              ),
-                              const SizedBox(height: 16),
-                              Center(
-                                child: Text(
-                                  _profilePicImage == null
-                                      ? 'Tap to add a profile picture\nor skip to use Face ID photo'
-                                      : 'Looking good! 🎉',
-                                  textAlign: TextAlign.center,
-                                  style: PrismTextStyles.bodyMedium.copyWith(
-                                    color: _profilePicImage != null
-                                        ? PrismColors.successGreen
-                                        : Colors.white60,
-                                  ),
-                                ).animate().fadeIn(),
-                              ),
-                              const SizedBox(height: 40),
+                              ).animate().fadeIn(),
+                            ),
+                            const SizedBox(height: 40),
 
-                              Consumer<AuthProvider>(
-                                builder: (context, authProvider, child) {
-                                  return GlassButton(
-                                    text: 'Start Exploring',
-                                    isLoading: authProvider.isLoading,
-                                    onPressed: authProvider.isLoading
-                                        ? null
-                                        : _handleProfilePictureNext,
-                                    isPrimary: true,
-                                    icon: Icons.rocket_launch_rounded,
-                                  );
-                                },
-                              ).animate().fadeIn(delay: 600.ms),
-                            ],
-                          ),
+                            Consumer<AuthProvider>(
+                              builder: (context, authProvider, child) {
+                                return GlassButton(
+                                  text: 'Start Exploring',
+                                  isLoading: authProvider.isLoading,
+                                  onPressed: authProvider.isLoading
+                                      ? null
+                                      : _handleProfilePictureNext,
+                                  isPrimary: true,
+                                  icon: Icons.rocket_launch_rounded,
+                                );
+                              },
+                            ).animate().fadeIn(delay: 600.ms),
+                          ],
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

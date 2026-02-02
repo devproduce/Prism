@@ -1,8 +1,8 @@
 import 'dart:io';
+import 'package:photo_manager/photo_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:image_picker/image_picker.dart';
@@ -25,11 +25,12 @@ import 'package:prism/screens/notification_screen.dart';
 import 'package:prism/widgets/prism_media_preview.dart';
 import 'package:prism/widgets/pin_dialog.dart';
 import 'package:prism/utils/error_handler.dart';
-import 'package:prism/utils/responsive_helper.dart';
 import 'package:prism/providers/local_gallery_provider.dart';
 import 'package:prism/widgets/album_card.dart';
-import 'package:prism/widgets/see_all_albums_card.dart';
 import 'package:prism/screens/local_album_view_screen.dart';
+import 'package:prism/screens/all_albums_screen.dart';
+import 'package:prism/widgets/section_header.dart';
+import 'package:prism/widgets/see_all_albums_card.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -46,11 +47,11 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isSelectionMode = false;
   final Set<String> _selectedImageIds = {};
   final ImagePicker _picker = ImagePicker(); // Added picker
-  bool _isDeviceAlbumsExpanded = false;
 
   // Album selection state
   bool _isAlbumSelectionMode = false;
   int? _selectedAlbumIndex;
+  final ScrollController _prismCloudScrollController = ScrollController();
 
   // Method to switch tabs from external screens
   void switchToTab(int index) {
@@ -92,6 +93,22 @@ class _HomeScreenState extends State<HomeScreen> {
         localGalleryProvider.requestPermissionAndFetch();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _prismCloudScrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollPrismCloudToEnd() {
+    if (_prismCloudScrollController.hasClients) {
+      _prismCloudScrollController.animateTo(
+        _prismCloudScrollController.position.maxScrollExtent,
+        duration: 800.ms,
+        curve: Curves.easeOutQuart,
+      );
+    }
   }
 
   Future<void> _checkContactsInBackground(AuthProvider authProvider) async {
@@ -226,10 +243,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildGlassNavBar() {
     return GlassCard(
       borderRadius: 40,
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      blurAmount: 20,
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+      blurAmount: 25,
       color: PrismColors.glassDark,
-      borderColor: PrismColors.white.withValues(alpha: 0.05),
+      borderColor: PrismColors.white.withValues(alpha: 0.08),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
@@ -326,23 +343,7 @@ class _HomeScreenState extends State<HomeScreen> {
     GalleryProvider galleryProvider,
     AuthProvider authProvider,
   ) {
-    // Responsive grid count
-    final screenWidth = MediaQuery.of(context).size.width;
-    final gridCrossAxisCount = ResponsiveHelper.galleryGridCount(context);
-    final gridSpacing = screenWidth < 360 ? 2.0 : 4.0;
-
-    if (galleryProvider.isLoading) {
-      // Show shimmer loading grid
-      return Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: ResponsiveHelper.horizontalPadding(context),
-        ),
-        child: ShimmerLayouts.galleryGrid(
-          itemCount: 9,
-          crossAxisCount: gridCrossAxisCount,
-        ),
-      );
-    }
+    // Global loading check removed to allow local albums to show instantly
 
     if (galleryProvider.error != null) {
       return EmptyStateWidget.error(
@@ -357,14 +358,11 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    final images = galleryProvider.allImages;
+    // Full screen empty state removed to show dashboard always
 
-    if (images.isEmpty) {
-      return EmptyStateWidget.noMedia(onAddMedia: _handleDirectShare);
-    }
-
-    // Get images grouped by month
-    final groupedImages = galleryProvider.getGroupedImagesByTab('All');
+    // Get images for Prism Cloud (Featured)
+    final allImages = galleryProvider.allImages;
+    final featuredImages = allImages.take(10).toList(); // Top 10 latest
 
     return RefreshIndicator(
       color: PrismColors.prismYellow,
@@ -381,180 +379,259 @@ class _HomeScreenState extends State<HomeScreen> {
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
+            // 1. Header with Greeting
             SliverAppBar(
               floating: true,
               backgroundColor: Colors.transparent,
               surfaceTintColor: Colors.transparent,
               automaticallyImplyLeading: false,
+              toolbarHeight: 70,
               title: _isSelectionMode
                   ? Text(
                       '${_selectedImageIds.length} Selected',
                       style: PrismTextStyles.h3,
                     )
-                  : Text('Your Prism', style: PrismTextStyles.h2),
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Text(
+                          'Your Prism',
+                          style: PrismTextStyles.h2.copyWith(
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                        Text(
+                          '${allImages.length} memories stored',
+                          style: PrismTextStyles.bodySmall.copyWith(
+                            color: PrismColors.secondaryText,
+                          ),
+                        ),
+                      ],
+                    ),
               actions: _isSelectionMode
                   ? _selectionActions(authProvider, galleryProvider)
                   : _defaultActions(),
             ),
 
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-            // Prism Cloud Section (First priority)
-            if (images.isEmpty)
-              // Empty Prism Cloud State
-              SliverToBoxAdapter(child: _buildPrismCloudEmptyState()),
-
-            if (images.isNotEmpty)
-              // Prism Cloud header
+            // 2. Featured / Prism Cloud Section (Horizontal)
+            if (galleryProvider.isLoading)
               SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.cloud_rounded,
-                        color: PrismColors.prismYellow,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Prism Cloud',
-                        style: PrismTextStyles.h3.copyWith(
-                          color: PrismColors.white,
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        '${images.length} items',
-                        style: PrismTextStyles.bodySmall.copyWith(
-                          color: PrismColors.secondaryText,
-                        ),
-                      ),
-                    ],
+                child: Container(
+                  height: 220,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: 4,
+                    separatorBuilder: (_, __) => const SizedBox(width: 12),
+                    itemBuilder: (_, __) => ShimmerLayouts.rect(
+                      width: 140,
+                      height: 220,
+                      borderRadius: 20,
+                    ),
+                  ),
+                ),
+              )
+            else ...[
+              SliverToBoxAdapter(
+                child: SectionHeader(
+                  title: 'Prism Cloud',
+                  subtitle: 'Recent Uploads',
+                  actionLabel: 'View All',
+                  actionIcon: Icons.arrow_forward_rounded,
+                  onActionTap: featuredImages.length >= 2
+                      ? _scrollPrismCloudToEnd
+                      : null,
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height: 220,
+                  child: ListView.separated(
+                    controller: _prismCloudScrollController,
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 8,
+                    ),
+                    itemCount: featuredImages.length + 1,
+                    separatorBuilder: (_, __) => const SizedBox(width: 12),
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        // Action Card: Upload
+                        return GestureDetector(
+                          onTap: _handleDirectShare,
+                          child: Container(
+                            width: 140,
+                            decoration: BoxDecoration(
+                              color: PrismColors.surfaceGray.withOpacity(0.5),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: PrismColors.prismYellow.withOpacity(0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: PrismColors.prismYellow.withOpacity(
+                                      0.1,
+                                    ),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.add_rounded,
+                                    color: PrismColors.prismYellow,
+                                    size: 32,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  "New Upload",
+                                  style: PrismTextStyles.bodyMedium.copyWith(
+                                    color: PrismColors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }
+
+                      final image = featuredImages[index - 1];
+                      final isSelected = _selectedImageIds.contains(
+                        image.image.id,
+                      );
+
+                      return GestureDetector(
+                        onTap: () {
+                          if (_isSelectionMode) {
+                            HapticFeedback.selectionClick();
+                            _toggleSelectionMode(image.image.id);
+                          } else {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ImageViewerScreen(
+                                  images: featuredImages,
+                                  initialIndex: index - 1,
+                                  isFromBin: false,
+                                  onShare: (file) async {
+                                    final sharingProvider =
+                                        Provider.of<SharingProvider>(
+                                          context,
+                                          listen: false,
+                                        );
+                                    sharingProvider.reset();
+                                    sharingProvider.addImages([file]);
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            const ShareUploadScreen(),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                        onLongPress: () {
+                          HapticFeedback.mediumImpact();
+                          _toggleSelectionMode(image.image.id);
+                        },
+                        child: Container(
+                          width: 160,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(20),
+                            border: isSelected
+                                ? Border.all(
+                                    color: PrismColors.prismYellow,
+                                    width: 3,
+                                  )
+                                : null,
+                            boxShadow: [
+                              if (!isSelected)
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.2),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 4),
+                                ),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(
+                              isSelected ? 17 : 20,
+                            ),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Hero(
+                                  tag: 'image_${image.image.id}',
+                                  child: PrismMediaPreview(
+                                    imageUrl: image.image.imageUrl,
+                                    mediaType: image.image.mediaType,
+                                    fit: BoxFit.cover,
+                                    placeholderColor: PrismColors.surfaceGray,
+                                  ),
+                                ),
+                                Positioned.fill(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: [
+                                          Colors.transparent,
+                                          Colors.black.withOpacity(0.6),
+                                        ],
+                                        stops: const [0.7, 1.0],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                if (isSelected)
+                                  Positioned.fill(
+                                    child: Container(
+                                      color: PrismColors.prismYellow.withValues(
+                                        alpha: 0.3,
+                                      ),
+                                      child: const Center(
+                                        child: Icon(
+                                          Icons.check_circle_rounded,
+                                          color: PrismColors.black,
+                                          size: 32,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ).animate().fadeIn(duration: 300.ms),
+                      );
+                    },
                   ),
                 ),
               ),
+            ],
 
-            // Month-grouped images
-            if (images.isNotEmpty)
-              ...groupedImages.entries.map((entry) {
-                return SliverMainAxisGroup(
-                  slivers: [
-                    // Month header
-                    
+            const SliverToBoxAdapter(child: SizedBox(height: 24)),
 
-                    // Images grid for this month
-                    SliverMasonryGrid.count(
-                      crossAxisCount: gridCrossAxisCount,
-                      mainAxisSpacing: gridSpacing,
-                      crossAxisSpacing: gridSpacing,
-                      childCount: entry.value.length,
-                      itemBuilder: (context, index) {
-                        final image = entry.value[index];
-                        final isSelected = _selectedImageIds.contains(
-                          image.image.id,
-                        );
+            // 3. Device Albums Section (Grid)
+            SliverToBoxAdapter(
+              child: SectionHeader(
+                title: 'Device Albums',
+                subtitle: 'On this phone',
+              ),
+            ),
 
-                        return GestureDetector(
-                          onLongPress: () {
-                            HapticFeedback.mediumImpact();
-                            _toggleSelectionMode(image.image.id);
-                          },
-                          onTap: () {
-                            if (_isSelectionMode) {
-                              HapticFeedback.selectionClick();
-                              _toggleSelectionMode(image.image.id);
-                            } else {
-                              // Open Viewer with Hero animation
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => ImageViewerScreen(
-                                    images: entry.value,
-                                    initialIndex: index,
-                                    isFromBin: false,
-                                    onShare: (file) async {
-                                      // Add to sharing provider and navigate to share screen
-                                      final sharingProvider =
-                                          Provider.of<SharingProvider>(
-                                            context,
-                                            listen: false,
-                                          );
-                                      sharingProvider.reset();
-                                      sharingProvider.addImages([file]);
-
-                                      // Navigate to share upload screen
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              const ShareUploadScreen(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              );
-                            }
-                          },
-                          child:
-                              Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(
-                                    8,
-                                  ), // Smaller radius for tighter grid
-                                  border: isSelected
-                                      ? Border.all(
-                                          color: PrismColors.prismYellow,
-                                          width: 3,
-                                        )
-                                      : null,
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: Stack(
-                                    fit: StackFit.passthrough,
-                                    children: [
-                                      Hero(
-                                        tag: 'image_${image.image.id}',
-                                        child: PrismMediaPreview(
-                                          imageUrl: image.image.imageUrl,
-                                          mediaType: image.image.mediaType,
-                                          fit: BoxFit.cover,
-                                          placeholderColor:
-                                              PrismColors.surfaceGray,
-                                        ),
-                                      ),
-                                      if (isSelected)
-                                        Positioned.fill(
-                                          child: Container(
-                                            color: PrismColors.prismYellow
-                                                .withValues(alpha: 0.3),
-                                            child: const Center(
-                                              child: Icon(
-                                                Icons.check_circle_rounded,
-                                                color: PrismColors.black,
-                                                size: 32,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ).animate().fadeIn(
-                                duration: 300.ms,
-                                delay: (30 * (index % 10)).ms,
-                              ),
-                        );
-                      },
-                    ),
-                  ],
-                );
-              }),
-
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
-            SliverToBoxAdapter(child: _buildDeviceAlbumsSection()),
+            _buildDeviceAlbumsSectionSliver(),
 
             const SliverToBoxAdapter(
               child: SizedBox(height: 100),
@@ -565,326 +642,215 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Build empty state for Prism Cloud
-  Widget _buildPrismCloudEmptyState() {
-    return Container(
-          margin: const EdgeInsets.only(bottom: 24),
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                PrismColors.surfaceGray.withValues(alpha: 0.5),
-                PrismColors.surfaceGray.withValues(alpha: 0.3),
-              ],
-            ),
-            border: Border.all(color: PrismColors.white.withValues(alpha: 0.1)),
-          ),
-          child: Column(
-            children: [
-              Icon(
-                Icons.cloud_upload_outlined,
-                size: 64,
-                color: PrismColors.prismYellow.withValues(alpha: 0.7),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Prism Cloud',
-                style: PrismTextStyles.h3.copyWith(color: PrismColors.white),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Share memories to store in Prism Cloud',
-                style: PrismTextStyles.bodyMedium.copyWith(
-                  color: PrismColors.secondaryText,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () => _handleDirectShare(),
-                icon: const Icon(Icons.add_rounded, size: 20),
-                label: const Text('Add Memories'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: PrismColors.prismYellow,
-                  foregroundColor: PrismColors.black,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        )
-        .animate()
-        .fadeIn(duration: 400.ms)
-        .scale(
-          begin: const Offset(0.95, 0.95),
-          end: const Offset(1, 1),
-          duration: 400.ms,
-        );
-  }
-
-  /// Build the Device Albums section with 2-column grid
-  Widget _buildDeviceAlbumsSection() {
+  // Refactored to return a SliverGrid directly for better scroll performance
+  Widget _buildDeviceAlbumsSectionSliver() {
     return Consumer<LocalGalleryProvider>(
       builder: (context, localGalleryProvider, child) {
         // Responsive calculations
         final screenWidth = MediaQuery.of(context).size.width;
-        final horizontalPadding = ResponsiveHelper.horizontalPadding(context);
 
-        // Calculate grid parameters based on screen width
         int crossAxisCount;
-        double cardWidth;
-        if (screenWidth < 360) {
+        if (screenWidth < 600) {
           crossAxisCount = 2;
-          cardWidth = (screenWidth - (horizontalPadding * 2) - 12) / 2;
-        } else if (screenWidth < 600) {
-          crossAxisCount = 2;
-          cardWidth = (screenWidth - (horizontalPadding * 2) - 12) / 2;
         } else {
           crossAxisCount = 3;
-          cardWidth = (screenWidth - (horizontalPadding * 2) - 24) / 3;
         }
-
-        final cardHeight = cardWidth * 1.15; // Slightly taller aspect ratio
 
         if (localGalleryProvider.isLoading &&
             localGalleryProvider.albums.isEmpty) {
-          // Show shimmer loading
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.photo_library_rounded,
-                    color: PrismColors.secondaryText,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Device Albums',
-                    style: PrismTextStyles.h3.copyWith(
-                      color: PrismColors.white,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: cardWidth / cardHeight,
-                ),
-                itemCount: 4,
-                itemBuilder: (context, index) => Container(
-                  decoration: BoxDecoration(
-                    color: PrismColors.surfaceGray,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-              ),
-            ],
+          return const SliverToBoxAdapter(
+            child: Center(child: CircularProgressIndicator()),
           );
         }
 
+        if (!localGalleryProvider.isPermissionChecked) {
+          return const SliverToBoxAdapter(child: SizedBox.shrink());
+        }
+
         if (!localGalleryProvider.hasPermission) {
-          // Show permission request
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.photo_library_rounded,
-                    color: PrismColors.secondaryText,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Device Albums',
-                    style: PrismTextStyles.h3.copyWith(
-                      color: PrismColors.white,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              GestureDetector(
-                onTap: () => localGalleryProvider.requestPermissionAndFetch(),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: PrismColors.surfaceGray,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: PrismColors.prismYellow.withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.lock_open_rounded,
-                        color: PrismColors.prismYellow,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Tap to allow access to your photos',
-                          style: PrismTextStyles.bodyMedium.copyWith(
-                            color: PrismColors.secondaryText,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+          return SliverToBoxAdapter(
+            child: _buildPermissionRequest(localGalleryProvider),
           );
         }
 
         if (localGalleryProvider.albums.isEmpty) {
-          return const SizedBox.shrink();
+          return const SliverToBoxAdapter(child: SizedBox.shrink());
         }
 
-        // Determine visible albums
-        final totalAlbums = localGalleryProvider.albums.length;
-        final maxInitialAlbums = 6;
-        final shouldShowSeeAll = totalAlbums > maxInitialAlbums;
+        final albums = localGalleryProvider.albums;
 
-        List<Widget> albumCards = [];
+        // Logic for View More
+        // Show max 3 albums + 1 View More IF total > 4
+        // If total <= 4, show all.
+        final bool showViewMore = albums.length > 4;
+        final int displayCount = showViewMore ? 4 : albums.length;
 
-        // Calculate number of albums to show
-        final albumsToShow = _isDeviceAlbumsExpanded || !shouldShowSeeAll
-            ? totalAlbums
-            : maxInitialAlbums;
-
-        // Build album cards
-        for (int i = 0; i < albumsToShow; i++) {
-          final albumInfo = localGalleryProvider.albums[i];
-          final isSelected = _isAlbumSelectionMode && _selectedAlbumIndex == i;
-          albumCards.add(
-            AlbumCard(
-              title: albumInfo.name,
-              assetCount: albumInfo.assetCount,
-              thumbnail: albumInfo.thumbnail,
-              width: cardWidth,
-              height: cardHeight,
-              isSelected: isSelected,
-              selectionMode: _isAlbumSelectionMode,
-              onTap: () {
-                if (_isAlbumSelectionMode) {
-                  // Toggle selection
-                  setState(() {
-                    if (_selectedAlbumIndex == i) {
-                      _selectedAlbumIndex = null;
-                      _isAlbumSelectionMode = false;
-                    } else {
-                      _selectedAlbumIndex = i;
-                    }
-                  });
-                } else {
-                  HapticFeedback.selectionClick();
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => LocalAlbumViewScreen(
-                        album: albumInfo.album,
-                        albumName: albumInfo.name,
-                        assetCount: albumInfo.assetCount,
-                      ),
-                    ),
-                  );
+        return SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          sliver: SliverGrid(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: crossAxisCount,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: 0.85,
+            ),
+            delegate: SliverChildBuilderDelegate((context, index) {
+              if (showViewMore && index == 3) {
+                // View More Card
+                // Get covers from next 4 albums (index 3, 4, 5, 6 if exist)
+                List<AssetEntity> nextCovers = [];
+                for (int i = 3; i < 7 && i < albums.length; i++) {
+                  if (albums[i].coverAsset != null) {
+                    nextCovers.add(albums[i].coverAsset!);
+                  }
                 }
-              },
-              onLongPress: () {
-                HapticFeedback.mediumImpact();
-                setState(() {
-                  _isAlbumSelectionMode = true;
-                  _selectedAlbumIndex = i;
-                });
-                // Show share dialog
-                _showAlbumShareDialog(albumInfo);
-              },
-            ),
-          );
-        }
 
-        // Add "See All" / "Show Less" card if needed
-        if (shouldShowSeeAll && !_isAlbumSelectionMode) {
-          albumCards.add(
-            SeeAllAlbumsCard(
-              isExpanded: _isDeviceAlbumsExpanded,
-              remainingCount: _isDeviceAlbumsExpanded
-                  ? 0
-                  : totalAlbums - maxInitialAlbums,
-              width: cardWidth,
-              height: cardHeight,
-              onTap: () {
-                setState(() {
-                  _isDeviceAlbumsExpanded = !_isDeviceAlbumsExpanded;
-                });
-              },
-            ),
-          );
-        }
+                return SeeAllAlbumsCard(
+                  covers: nextCovers,
+                  albumCount: albums.length,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const AllAlbumsScreen(),
+                      ),
+                    );
+                  },
+                );
+              }
 
-        // Show albums in grid
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(
-                  Icons.photo_library_rounded,
-                  color: PrismColors.prismYellow,
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Device Albums',
-                  style: PrismTextStyles.h3.copyWith(color: PrismColors.white),
-                ),
-                const Spacer(),
-                Text(
-                  '$totalAlbums albums',
-                  style: PrismTextStyles.bodySmall.copyWith(
-                    color: PrismColors.secondaryText,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            AnimatedSize(
-              duration: 300.ms,
-              curve: Curves.easeInOut,
-              child: GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: crossAxisCount,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: cardWidth / cardHeight,
-                children: albumCards,
-              ),
-            ),
-          ],
-        ).animate().fadeIn(duration: 400.ms);
+              final album = albums[index];
+              final isSelected =
+                  _isAlbumSelectionMode && _selectedAlbumIndex == index;
+
+              return AlbumCard(
+                title: album.name,
+                assetCount: album.assetCount,
+                coverAsset: album.coverAsset,
+                width: double.infinity,
+                height: double.infinity,
+                isSelected: isSelected,
+                selectionMode: _isAlbumSelectionMode,
+                onTap: () {
+                  if (_isAlbumSelectionMode) {
+                    setState(() {
+                      if (_selectedAlbumIndex == index) {
+                        _selectedAlbumIndex = null;
+                        _isAlbumSelectionMode = false;
+                      } else {
+                        _selectedAlbumIndex = index;
+                      }
+                    });
+                  } else {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => LocalAlbumViewScreen(
+                          album: album.album,
+                          albumName: album.name,
+                          assetCount: album.assetCount,
+                        ),
+                      ),
+                    );
+                  }
+                },
+                onLongPress: () {
+                  HapticFeedback.mediumImpact();
+                  setState(() {
+                    _isAlbumSelectionMode = true;
+                    _selectedAlbumIndex = index;
+                  });
+                  // Share dialog logic
+                  _showAlbumShareDialog(album);
+                },
+              );
+            }, childCount: displayCount),
+          ),
+        );
       },
     );
   }
+
+  Widget _buildPermissionRequest(LocalGalleryProvider provider) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: PrismColors.surfaceGray,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: PrismColors.white.withOpacity(0.1)),
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.photo_library_rounded,
+            color: PrismColors.secondaryText,
+            size: 48,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            "Access Your Photos",
+            style: PrismTextStyles.h3,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Allow access to your device's gallery to view and share your photos directly from Prism.",
+            style: PrismTextStyles.bodySmall.copyWith(
+              color: PrismColors.secondaryText,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          GestureDetector(
+            onTap: () async {
+              HapticFeedback.mediumImpact();
+              final success = await provider.requestPermissionAndFetch(
+                force: true,
+              );
+              if (!success && mounted) {
+                // If failed again, it might be permanently denied. Show option to open settings?
+                // For now just show a snackbar or the user can click again (which re-requests)
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              decoration: BoxDecoration(
+                color: PrismColors.prismYellow,
+                borderRadius: BorderRadius.circular(30),
+                boxShadow: [
+                  BoxShadow(
+                    color: PrismColors.prismYellow.withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.check_circle_rounded,
+                    color: PrismColors.black,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    "Allow Access",
+                    style: PrismTextStyles.button.copyWith(
+                      color: PrismColors.black,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Removed old _buildDeviceAlbumsSection as it is replaced by _buildDeviceAlbumsSectionSliver
 
   /// Show dialog for sharing an album with 15 image limit
   void _showAlbumShareDialog(AlbumInfo albumInfo) {
