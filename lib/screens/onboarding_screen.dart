@@ -22,21 +22,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final List<Map<String, String>> _pages = [
     {
       'image': 'assets/Images/onboarding1.png',
-      'title': 'Your Gallery,\nSmarter.',
+      'title': "Group photos shouldn’t feel like work.",
       'description':
-          'AI-powered organization for your chaotic gallery. Finding memories has never been this smooth.',
+          '',
     },
     {
       'image': 'assets/Images/onboarding2.png',
-      'title': 'Share in\nSeconds.',
+      'title': 'Trust built into every share.',
       'description':
-          'Instant, intelligent sharing with the people who matter most. No clutter, just vibes.',
+          '',
     },
     {
       'image': 'assets/Images/onboarding3.png',
-      'title': 'Private &\nProtected.',
+      'title': 'Finally, sharing done right.',
       'description':
-          'Your moments stay yours. Zero risk, 100% control over who sees what.',
+          '',
     },
   ];
 

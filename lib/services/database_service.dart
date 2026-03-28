@@ -20,9 +20,10 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
+      onOpen: _onOpen,
     );
   }
 
@@ -58,6 +59,14 @@ class DatabaseService {
         cached_at INTEGER NOT NULL
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS gallery_saves (
+        image_id TEXT PRIMARY KEY,
+        saved_at TEXT NOT NULL,
+        gallery_path TEXT NOT NULL
+      )
+    ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -90,6 +99,28 @@ class DatabaseService {
         )
       ''');
     }
+    if (oldVersion < 6) {
+      // gallery_saves was previously only in _createDB (fresh installs) but
+      // existing users at v5 never had it created. This ensures all devices get it.
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS gallery_saves (
+          image_id TEXT PRIMARY KEY,
+          saved_at TEXT NOT NULL,
+          gallery_path TEXT NOT NULL
+        )
+      ''');
+    }
+  }
+
+  /// Called every time the DB is opened — safety net for gallery_saves.
+  Future<void> _onOpen(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS gallery_saves (
+        image_id TEXT PRIMARY KEY,
+        saved_at TEXT NOT NULL,
+        gallery_path TEXT NOT NULL
+      )
+    ''');
   }
 
   /// Save user session to database
@@ -306,7 +337,11 @@ class DatabaseService {
     final db = await database;
     await db.delete('user_session');
     await db.delete('gallery_cache');
-    await db.delete('gallery_saves');
+    try {
+      await db.delete('gallery_saves');
+    } catch (_) {
+      // Table may not exist on older app versions before migration
+    }
   }
 
   // ==================== GALLERY SAVES TRACKING ====================
@@ -419,7 +454,11 @@ class DatabaseService {
   /// Clear all gallery saves
   Future<void> clearGallerySaves() async {
     final db = await database;
-    await db.delete('gallery_saves');
+    try {
+      await db.delete('gallery_saves');
+    } catch (_) {
+      // Table may not exist on older app versions before migration
+    }
   }
 
   /// Close database

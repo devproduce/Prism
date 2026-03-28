@@ -54,10 +54,16 @@ class AnimatedImageLoader extends StatelessWidget {
     }
 
     // Handle network image
+    // Use path-only as cache key so presigned URLs (which change query params
+    // each time) still hit the disk cache correctly.
+    final uri = Uri.tryParse(imageUrl!);
+    final cacheKey = uri != null ? uri.path : imageUrl!;
+
     return ClipRRect(
       borderRadius: radius,
       child: CachedNetworkImage(
         imageUrl: imageUrl!,
+        cacheKey: cacheKey,
         width: width,
         height: height,
         fit: fit,

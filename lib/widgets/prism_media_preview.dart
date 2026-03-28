@@ -127,9 +127,15 @@ class _PrismMediaPreviewState extends State<PrismMediaPreview> {
   }
 
   Widget _buildImagePreview() {
+    // Use path-only as cache key so presigned URLs (which change query params
+    // each time) still hit the disk cache correctly.
+    final uri = Uri.tryParse(widget.imageUrl);
+    final cacheKey = uri != null ? uri.path : widget.imageUrl;
+
     return CachedNetworkImage(
       imageUrl: widget.imageUrl,
-      httpHeaders: widget.httpHeaders, // Pass headers
+      cacheKey: cacheKey,
+      httpHeaders: widget.httpHeaders,
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
@@ -150,6 +156,12 @@ class _PrismMediaPreviewState extends State<PrismMediaPreview> {
           debugPrint(
             'ImageDecoder error detected - likely unsupported format (AVIF on Android <12, corrupted data, etc.)',
           );
+        }
+        // If we get a 403 (expired presigned URL), evict from cache so the
+        // next load fetches a fresh URL rather than replaying the stale one.
+        if (error.toString().contains('403') ||
+            error.toString().contains('Invalid statusCode: 403')) {
+          CachedNetworkImage.evictFromCache(cacheKey);
         }
       },
       placeholder: (context, url) => _buildPlaceholder(isLoading: true),

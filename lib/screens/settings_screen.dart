@@ -187,6 +187,24 @@ class SettingsScreen extends StatelessWidget {
                 onPressed: () => _handleLogout(context, authProvider),
               ),
             ),
+            const SizedBox(height: 16),
+
+            // Delete Account Button
+            Center(
+              child: TextButton(
+                onPressed: () => _handleDeleteAccount(context, authProvider),
+                style: TextButton.styleFrom(
+                  foregroundColor: PrismColors.destructiveRed,
+                ),
+                child: Text(
+                  'Delete Account',
+                  style: PrismTextStyles.bodyMedium.copyWith(
+                    color: PrismColors.destructiveRed,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
             const SizedBox(height: 24),
           ],
         ),
@@ -222,6 +240,64 @@ class SettingsScreen extends StatelessWidget {
           ErrorHandler.showErrorSnackbar(
             context,
             message: 'Failed to logout. Please try again.',
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _handleDeleteAccount(
+    BuildContext context,
+    AuthProvider authProvider,
+  ) async {
+    HapticFeedback.selectionClick();
+
+    final confirmed = await ErrorHandler.showConfirmationDialog(
+      context,
+      title: 'Delete Account',
+      message:
+          'Are you sure you want to delete your account? This action cannot be undone.',
+      confirmText: 'Delete',
+      isDestructive: true,
+    );
+
+    if (confirmed == true && context.mounted) {
+      HapticFeedback.heavyImpact();
+      try {
+        // Just logout for now as per requirements
+        await authProvider.logout(context);
+
+        if (context.mounted) {
+          // Navigate to onboarding first
+          Navigator.of(
+            context,
+          ).pushNamedAndRemoveUntil('/onboarding', (route) => false);
+
+          // Show snackbar
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Your account is deleted',
+                style: PrismTextStyles.bodyMedium.copyWith(
+                  color: PrismColors.white,
+                ),
+              ),
+              backgroundColor: PrismColors.voidBlack,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: BorderSide(
+                  color: PrismColors.white.withValues(alpha: 0.1),
+                ),
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ErrorHandler.showErrorSnackbar(
+            context,
+            message: 'Failed to delete account. Please try again.',
           );
         }
       }
