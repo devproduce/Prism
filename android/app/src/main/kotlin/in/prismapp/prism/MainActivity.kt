@@ -1,4 +1,4 @@
-package com.example.prism
+package `in`.prismapp.prism
 
 import android.Manifest
 import android.content.Intent
@@ -12,7 +12,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.example.prism/share_handler"
+    private val CHANNEL = "in.prismapp.prism/share_handler"
     private val STORAGE_PERMISSION_CODE = 1001
     private val TAG = "MainActivity"
     

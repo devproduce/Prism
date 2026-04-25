@@ -1,11 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class CvService {
-  static const String wsUrl = 'ws://prism-cv.ddns.net/ws/register_multi_views';
+  static const String wsUrl = 'ws://cv.prismapp.in/ws/register_multi_views';
 
   WebSocketChannel? _channel;
   final _statusController = StreamController<CvFeedback>.broadcast();
@@ -48,13 +47,22 @@ class CvService {
             debugPrint('❌ [CV SERVICE] Error parsing feedback: $e');
           }
         },
-        onError: (error) {
+        onError: (error, stackTrace) {
           debugPrint('❌ [CV SERVICE] WebSocket error: $error');
+          debugPrint('❌ [CV SERVICE] Stack trace: $stackTrace');
+          
+          if (error is WebSocketChannelException) {
+            debugPrint('❌ [CV SERVICE] Inner exception: ${error.inner}');
+          }
+          
+          // Also check if the URL itself might be wrong (ws:// vs wss://)
+          debugPrint('❌ [CV SERVICE] Failed to connect to URL: $wsUrl');
+          
           _isConnected = false;
           _statusController.addError(error);
         },
         onDone: () {
-          debugPrint('⚠️ [CV SERVICE] WebSocket connection closed');
+          debugPrint('⚠️ [CV SERVICE] WebSocket connection closed. Close Code: ${_channel?.closeCode}, Close Reason: ${_channel?.closeReason}');
           _isConnected = false;
         },
       );

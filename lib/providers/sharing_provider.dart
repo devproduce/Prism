@@ -14,9 +14,9 @@ class SharingProvider extends ChangeNotifier {
   // State
   List<File> _selectedImages = [];
   // Store mapping of image IDs to local file paths for fallback
-  Map<String, String> _imageIdToLocalPath = {};
+  final Map<String, String> _imageIdToLocalPath = {};
   String _description = '';
-  bool _autoClean = true;
+  bool _autoClean = false;
   bool _isUploading = false;
   bool _isProcessing = false;
   final Map<String, List<String>> _imageRecipientMap =
@@ -652,7 +652,7 @@ class SharingProvider extends ChangeNotifier {
     _pollingTimer?.cancel();
     _selectedImages.clear();
     _description = '';
-    _autoClean = true;
+    _autoClean = false;
     _isUploading = false;
     _isProcessing = false;
     _uploadProgress = 0.0;

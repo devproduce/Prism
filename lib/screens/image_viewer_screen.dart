@@ -19,6 +19,7 @@ class ImageViewerScreen extends StatefulWidget {
   final List<GalleryImage> images;
   final int initialIndex;
   final bool isFromBin;
+  final String heroTagPrefix;
   final Function(File)? onShare;
 
   const ImageViewerScreen({
@@ -26,6 +27,7 @@ class ImageViewerScreen extends StatefulWidget {
     required this.images,
     required this.initialIndex,
     this.isFromBin = false,
+    this.heroTagPrefix = 'image_',
     this.onShare,
   });
 
@@ -526,7 +528,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                     child: Transform.rotate(
                       angle: _rotationAngle,
                       child: Hero(
-                        tag: 'image_${image.image.id}',
+                        tag: '${widget.heroTagPrefix}${image.image.id}',
                         child: image.image.mediaType.startsWith('video/')
                             ? VideoPlayerWidget(
                                 key: ValueKey('video_${image.image.id}_$index'),

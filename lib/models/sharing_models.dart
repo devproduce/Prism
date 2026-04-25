@@ -83,7 +83,7 @@ class UnknownFace {
   factory UnknownFace.fromJson(Map<String, dynamic> json) {
     return UnknownFace(
       faceId: json['face_id'] as String,
-      imageUrl: json['image_url'] as String,
+      imageUrl: BatchImage._ensureAbsoluteUrl(json['image_url'] as String?) ?? '',
     );
   }
 }

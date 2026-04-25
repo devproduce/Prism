@@ -258,65 +258,7 @@ class _ShareUploadScreenState extends State<ShareUploadScreen> {
 
                         //const SizedBox(height: 24),
 
-                        // Auto Clean Toggle
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: PrismColors.surfaceGray,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: PrismColors.white.withValues(alpha: 0.1),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        const Icon(
-                                          Icons.auto_awesome,
-                                          color: PrismColors.prismYellow,
-                                          size: 20,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          'Auto Clean',
-                                          style: PrismTextStyles.bodyMedium
-                                              .copyWith(
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Only save photos with you or your favorite friends',
-                                      style: PrismTextStyles.bodySmall.copyWith(
-                                        color: PrismColors.secondaryText,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Switch(
-                                value: sharingProvider.autoClean,
-                                onChanged: (value) {
-                                  HapticFeedback.selectionClick();
-                                  sharingProvider.setAutoClean(value);
-                                },
-                                activeColor: PrismColors.prismYellow,
-                                activeTrackColor: PrismColors.prismYellow
-                                    .withValues(alpha: 0.3),
-                                inactiveThumbColor: PrismColors.secondaryText,
-                                inactiveTrackColor: PrismColors.inputGray,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 24),
+
 
                         // Image Grid Header
                         Row(

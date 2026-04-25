@@ -306,6 +306,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   images: allImages,
                   initialIndex: index,
                   isFromBin: false,
+                  heroTagPrefix: 'profile_post_',
                 ),
               ),
             );
@@ -354,20 +355,25 @@ class _ProfileScreenState extends State<ProfileScreen>
                   images: favoriteImages,
                   initialIndex: index,
                   isFromBin: false,
+                  heroTagPrefix: 'profile_favorite_',
                 ),
               ),
             );
           },
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: PrismMediaPreview(
+          child: Hero(
+            tag: 'profile_favorite_${image.image.id}',
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: PrismMediaPreview(
               imageUrl: image.image.imageUrl,
               mediaType: image.image.mediaType,
               fit: BoxFit.cover,
               placeholderColor: PrismColors.surfaceGray,
             ),
           ),
+          )
         );
+        
       },
     );
   }

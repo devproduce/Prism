@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/models/friend_model.dart';
+import 'package:prism/models/contact_sync_result.dart';
 import 'package:prism/screens/user_profile_screen.dart';
 import 'package:prism/screens/collection_detail_screen.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -15,6 +16,8 @@ import 'package:prism/widgets/prism_text_field.dart';
 import 'package:prism/widgets/empty_state_widget.dart';
 import 'package:prism/widgets/shimmer_placeholder.dart';
 import 'package:prism/utils/error_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class FriendsScreen extends StatefulWidget {
   const FriendsScreen({super.key});
@@ -23,15 +26,12 @@ class FriendsScreen extends StatefulWidget {
   State<FriendsScreen> createState() => _FriendsScreenState();
 }
 
-class _FriendsScreenState extends State<FriendsScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _FriendsScreenState extends State<FriendsScreen> {
   final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
 
     // Fetch friends data on load
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -49,7 +49,6 @@ class _FriendsScreenState extends State<FriendsScreen>
 
   @override
   void dispose() {
-    _tabController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -77,194 +76,265 @@ class _FriendsScreenState extends State<FriendsScreen>
               }
             },
           ),
-          const SizedBox(width: 8),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(60),
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            height: 44,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: PrismColors.surfaceGray,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: TabBar(
-                controller: _tabController,
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                padding: EdgeInsets.zero,
-                labelPadding: const EdgeInsets.symmetric(horizontal: 20),
-                indicatorSize: TabBarIndicatorSize.tab,
-                dividerColor: Colors.transparent,
-                indicator: BoxDecoration(
-                  color: PrismColors.inputGray,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: PrismColors.white.withValues(alpha: 0.1),
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.inbox_rounded, color: PrismColors.white),
+                onPressed: () => _showRequestsBottomSheet(context, friendsProvider, authProvider),
+              ),
+              if (friendsProvider.pendingRequests.isNotEmpty)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: PrismColors.destructiveRed,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Text(
+                      '${friendsProvider.pendingRequests.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
-                labelColor: PrismColors.prismYellow, // Active Yellow
-                unselectedLabelColor: PrismColors.secondaryText,
-                labelStyle: PrismTextStyles.bodyMedium.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-                unselectedLabelStyle: PrismTextStyles.bodyMedium,
-                tabs: const [
-                  Tab(text: 'Friends'),
-                  Tab(text: 'Add Friend'),
-                  Tab(text: 'Requests'),
-                  Tab(text: 'Sent'),
-                ],
-              ),
-            ),
+            ],
           ),
-        ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildFriendsTab(friendsProvider, authProvider),
-          _buildAddFriendTab(friendsProvider, authProvider),
-          _buildPendingRequestsTab(friendsProvider, authProvider),
-          _buildSentRequestsTab(friendsProvider, authProvider),
+          const SizedBox(width: 8),
         ],
       ),
-    );
-  }
-
-  // Friends Tab
-  Widget _buildFriendsTab(FriendsProvider provider, AuthProvider authProvider) {
-    if (provider.isLoading) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: ShimmerLayouts.listItems(count: 5),
-      );
-    }
-
-    if (provider.friends.isEmpty) {
-      return EmptyStateWidget.noFriends(
-        onFindFriends: () {
-          _tabController.animateTo(1);
-        },
-      );
-    }
-
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-      itemCount: provider.friends.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final friend = provider.friends[index];
-        return _buildFriendCard(friend);
-      },
-    );
-  }
-
-  // Add Friend Tab
-  Widget _buildAddFriendTab(
-    FriendsProvider provider,
-    AuthProvider authProvider,
-  ) {
-    return Column(
-      children: [
-        // Search Bar
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: PrismTextField(
-            controller: _searchController,
-            hintText: 'Search by username...',
-            prefixIcon: Icons.search_rounded,
-            suffixIcon: _searchController.text.isNotEmpty
-                ? IconButton(
-                    icon: const Icon(
-                      Icons.clear_rounded,
-                      color: PrismColors.secondaryText,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _searchController.clear();
-                        provider.clearSearchResults();
-                      });
-                    },
-                  )
-                : null,
-            onChanged: (value) {
-              setState(() {});
-              if (authProvider.currentUser != null) {
-                provider.searchUsers(value, authProvider.currentUser!.userId);
-              }
-            },
-            onSubmitted: (value) async {
-              if (value.isNotEmpty && authProvider.currentUser != null) {
-                final isPassword = await authProvider.verifyPassword(value);
-                if (mounted) {
+      body: Column(
+        children: [
+          // Search Bar
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: PrismTextField(
+              controller: _searchController,
+              hintText: 'Search by username...',
+              prefixIcon: Icons.search_rounded,
+              suffixIcon: _searchController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(
+                        Icons.clear_rounded,
+                        color: PrismColors.secondaryText,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _searchController.clear();
+                          friendsProvider.clearSearchResults();
+                        });
+                      },
+                    )
+                  : null,
+              onChanged: (value) {
+                setState(() {});
+                if (authProvider.currentUser != null) {
+                  friendsProvider.searchUsers(value, authProvider.currentUser!.userId);
+                }
+              },
+              onSubmitted: (value) async {
+                if (value.isNotEmpty && authProvider.currentUser != null) {
+                  final isPassword = await authProvider.verifyPassword(value);
+                  if (!context.mounted) return;
+                  
                   if (isPassword) {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (context) =>
-                            const CollectionDetailScreen(title: 'Archived'),
+                            CollectionDetailScreen(title: 'Archived'),
                       ),
                     );
                     _searchController.clear();
-                    provider.clearSearchResults();
+                    friendsProvider.clearSearchResults();
                   } else {
-                    provider.searchUsers(
+                    friendsProvider.searchUsers(
                       value,
                       authProvider.currentUser!.userId,
                     );
                   }
                 }
-              }
-            },
+              },
+            ),
           ),
-        ),
-
-        // Search Results
-        Expanded(
-          child: provider.isSearching
-              ? const Center(
-                  child: CircularProgressIndicator(
+          
+          Expanded(
+            child: _searchController.text.isNotEmpty
+                ? _buildSearchResults(friendsProvider, authProvider)
+                : RefreshIndicator(
                     color: PrismColors.prismYellow,
+                    backgroundColor: PrismColors.surfaceGray,
+                    onRefresh: () async {
+                      if (authProvider.currentUser != null) {
+                        await friendsProvider.refreshAll(authProvider.currentUser!.userId);
+                      }
+                    },
+                    child: CustomScrollView(
+                      slivers: [
+                        SliverToBoxAdapter(
+                          child: _buildDiscoverTopSection(friendsProvider, authProvider),
+                        ),
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                            child: Text(
+                              'YOUR FRIENDS',
+                              style: PrismTextStyles.bodySmall.copyWith(
+                                color: PrismColors.secondaryText,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                          ),
+                        ),
+                        _buildFriendsSliver(friendsProvider, authProvider),
+                        SliverToBoxAdapter(
+                          child: _buildDiscoverBottomSection(friendsProvider, authProvider),
+                        ),
+                        const SliverToBoxAdapter(child: SizedBox(height: 100)),
+                      ],
+                    ),
                   ),
-                )
-              : provider.searchResults.isEmpty &&
-                    _searchController.text.isNotEmpty
-              ? _buildEmptyState(
-                  'No users found',
-                  'Try a different username',
-                  Icons.search_off_rounded,
-                )
-              : _searchController.text.isEmpty
-              ? _buildEmptyState(
-                  'Search for users',
-                  'Find your friends on Prism',
-                  Icons.person_search_rounded,
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-                  itemCount: provider.searchResults.length,
-                  separatorBuilder: (ctx, i) => const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    return _buildSearchResultCard(
-                      provider.searchResults[index],
-                      provider,
-                      authProvider,
-                    );
-                  },
-                ),
-        ),
-      ],
+          ),
+        ],
+      ),
     );
+  }
+
+  void _showRequestsBottomSheet(BuildContext context, FriendsProvider friendsProvider, AuthProvider authProvider) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: PrismColors.surfaceGray,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.75,
+          minChildSize: 0.5,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (context, scrollController) {
+            return DefaultTabController(
+              length: 2,
+              child: Column(
+                children: [
+                  Container(
+                    margin: const EdgeInsets.symmetric(vertical: 12),
+                    height: 4,
+                    width: 40,
+                    decoration: BoxDecoration(
+                      color: PrismColors.white.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Text('Requests', style: PrismTextStyles.h3),
+                  ),
+                  TabBar(
+                    indicatorColor: PrismColors.prismYellow,
+                    labelColor: PrismColors.prismYellow,
+                    unselectedLabelColor: PrismColors.secondaryText,
+                    dividerColor: Colors.transparent,
+                    tabs: [
+                      Tab(text: 'Received (${friendsProvider.pendingRequests.length})'),
+                      Tab(text: 'Sent (${friendsProvider.sentRequests.length})'),
+                    ],
+                  ),
+                  Expanded(
+                    child: TabBarView(
+                      children: [
+                        _buildPendingRequestsTab(friendsProvider, authProvider, scrollController),
+                        _buildSentRequestsTab(friendsProvider, authProvider, scrollController),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // Friends Sliver
+  Widget _buildFriendsSliver(FriendsProvider provider, AuthProvider authProvider) {
+    if (provider.isLoading) {
+      return SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: ShimmerLayouts.listItems(count: 5),
+        ),
+      );
+    }
+
+    if (provider.friends.isEmpty) {
+      return SliverToBoxAdapter(
+        child: EmptyStateWidget.noFriends(
+          onFindFriends: () {
+            // No action needed as search is available above
+          },
+        ),
+      );
+    }
+
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            final friend = provider.friends[index];
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildFriendCard(friend),
+            );
+          },
+          childCount: provider.friends.length,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchResults(FriendsProvider provider, AuthProvider authProvider) {
+    return provider.isSearching
+        ? const Center(
+            child: CircularProgressIndicator(
+              color: PrismColors.prismYellow,
+            ),
+          )
+        : provider.searchResults.isEmpty
+            ? _buildEmptyState(
+                'No users found',
+                'Try a different username',
+                Icons.search_off_rounded,
+              )
+            : ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                itemCount: provider.searchResults.length,
+                separatorBuilder: (ctx, i) => const SizedBox(height: 12),
+                itemBuilder: (context, index) {
+                  return _buildSearchResultCard(
+                    provider.searchResults[index],
+                    provider,
+                    authProvider,
+                  );
+                },
+              );
   }
 
   // Pending Requests Tab
   Widget _buildPendingRequestsTab(
     FriendsProvider provider,
     AuthProvider authProvider,
+    ScrollController scrollController,
   ) {
     if (provider.isLoading) {
       return Padding(
@@ -281,7 +351,8 @@ class _FriendsScreenState extends State<FriendsScreen>
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+      controller: scrollController,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       itemCount: provider.pendingRequests.length,
       separatorBuilder: (ctx, i) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
@@ -294,10 +365,11 @@ class _FriendsScreenState extends State<FriendsScreen>
     );
   }
 
-  // Sent Requests Tab
+  // Sent Requests List
   Widget _buildSentRequestsTab(
     FriendsProvider provider,
     AuthProvider authProvider,
+    ScrollController scrollController,
   ) {
     if (provider.isLoading) {
       return Padding(
@@ -314,7 +386,8 @@ class _FriendsScreenState extends State<FriendsScreen>
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+      controller: scrollController,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       itemCount: provider.sentRequests.length,
       separatorBuilder: (ctx, i) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
@@ -574,19 +647,33 @@ class _FriendsScreenState extends State<FriendsScreen>
                   color: PrismColors.electricCyan,
                 ),
               )
-            : PrismButton(
-                text: 'Add',
-                width: 70,
+            : SizedBox(
                 height: 32,
-                type: PrismButtonType.primary,
-                onPressed: () async {
-                  if (authProvider.currentUser != null) {
-                    await provider.sendFriendRequest(
-                      authProvider.currentUser!.userId,
-                      user.username,
-                    );
-                  }
-                },
+                child: ElevatedButton(
+                  onPressed: () async {
+                    if (authProvider.currentUser != null) {
+                      await provider.sendFriendRequest(
+                        authProvider.currentUser!.userId,
+                        user.username,
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: PrismColors.prismYellow,
+                    foregroundColor: PrismColors.black,
+                    elevation: 0,
+                    shape: const StadiumBorder(),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                  ),
+                  child: const Text(
+                    'Add',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: PrismColors.black,
+                    ),
+                  ),
+                ),
               ),
         onTap: () {
           Navigator.push(
@@ -611,6 +698,17 @@ class _FriendsScreenState extends State<FriendsScreen>
     return PrismCard(
       padding: EdgeInsets.zero,
       child: ListTile(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => UserProfileScreen(
+                userId: request.userId,
+                username: request.username,
+              ),
+            ),
+          );
+        },
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: CircleAvatar(
           backgroundColor: PrismColors.inputGray,
@@ -635,10 +733,22 @@ class _FriendsScreenState extends State<FriendsScreen>
                 color: PrismColors.successGreen,
                 size: 32,
               ),
-              onPressed: () => provider.acceptFriendRequest(
-                request.friendshipId,
-                authProvider.currentUser!.userId,
-              ),
+              onPressed: () async {
+                final success = await provider.acceptFriendRequest(
+                  request.friendshipId,
+                  authProvider.currentUser!.userId,
+                );
+                if (!context.mounted) return;
+                if (!success && provider.error != null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: ${provider.error}')),
+                  );
+                } else if (success) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Friend request accepted!')),
+                  );
+                }
+              },
             ),
             IconButton(
               icon: const Icon(
@@ -646,10 +756,22 @@ class _FriendsScreenState extends State<FriendsScreen>
                 color: PrismColors.destructiveRed,
                 size: 32,
               ),
-              onPressed: () => provider.rejectFriendRequest(
-                request.friendshipId,
-                authProvider.currentUser!.userId,
-              ),
+              onPressed: () async {
+                final success = await provider.rejectFriendRequest(
+                  request.friendshipId,
+                  authProvider.currentUser!.userId,
+                );
+                if (!context.mounted) return;
+                if (!success && provider.error != null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: ${provider.error}')),
+                  );
+                } else if (success) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Friend request rejected!')),
+                  );
+                }
+              },
             ),
           ],
         ),
@@ -679,6 +801,409 @@ class _FriendsScreenState extends State<FriendsScreen>
         ),
       ),
     );
+  }
+
+  // Discover Section — V2 Contact-Based Social Discovery (Top Part)
+  Widget _buildDiscoverTopSection(
+    FriendsProvider provider,
+    AuthProvider authProvider,
+  ) {
+    final userId = authProvider.currentUser?.userId;
+    final result = provider.contactSyncResult;
+    final isSyncing = provider.isSyncingContacts;
+    final isLoadingRecs = provider.isLoadingRecommendations;
+
+    final bool showSyncBanner = !provider.hasSynced;
+    final bool showLoading = isLoadingRecs;
+    final bool showOnPlatform = result != null && result.onPlatform.isNotEmpty;
+    final bool showEmpty = result != null && result.isEmpty;
+
+    if (!showSyncBanner && !showLoading && !showOnPlatform && !showEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Sync Banner ──────────────────────────────────────────
+          if (!provider.hasSynced) ...[
+            PrismCard(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.contacts_rounded,
+                          color: PrismColors.prismYellow,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Find Friends from Contacts',
+                            style: PrismTextStyles.bodyLarge.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Sync your phonebook to find friends already on Prism and invite others.',
+                      style: PrismTextStyles.bodySmall.copyWith(
+                        color: PrismColors.secondaryText,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: isSyncing
+                          ? const Center(
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(vertical: 8),
+                                child: CircularProgressIndicator(
+                                  color: PrismColors.prismYellow,
+                                ),
+                              ),
+                            )
+                          : PrismButton(
+                              text: 'Sync Contacts',
+                              type: PrismButtonType.primary,
+                              icon: Icons.sync_rounded,
+                              onPressed: userId == null
+                                  ? null
+                                  : () async {
+                                      final res = await provider
+                                          .syncAndGetRecommendations(userId);
+                                      if (!mounted) return;
+                                      
+                                      if (res == null) {
+                                        ErrorHandler.showErrorSnackbar(
+                                          context,
+                                          message:
+                                              'Contacts permission denied. Enable it in Settings.',
+                                        );
+                                      }
+                                    },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+
+          // ── People You May Know ─────────────────────────────────
+          if (isLoadingRecs)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(32),
+                child: CircularProgressIndicator(color: PrismColors.prismYellow),
+              ),
+            )
+          else if (result != null) ...[
+            if (result.onPlatform.isNotEmpty) ...[
+              _buildDiscoverSectionHeader(
+                'PEOPLE YOU MAY KNOW',
+                Icons.people_rounded,
+              ),
+              const SizedBox(height: 10),
+              ...result.onPlatform.map(
+                (user) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _buildOnPlatformCard(user, provider, authProvider),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (result.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 20),
+                child: Center(
+                  child: Column(
+                    children: [
+                      const Icon(
+                        Icons.people_outline_rounded,
+                        color: PrismColors.secondaryText,
+                        size: 48,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'No suggestions yet',
+                        style: PrismTextStyles.bodyLarge.copyWith(
+                          color: PrismColors.secondaryText,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Re-sync after more of your contacts join Prism',
+                        style: PrismTextStyles.bodySmall.copyWith(
+                          color: PrismColors.secondaryText,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Discover Section — V2 Contact-Based Social Discovery (Bottom Part)
+  Widget _buildDiscoverBottomSection(
+    FriendsProvider provider,
+    AuthProvider authProvider,
+  ) {
+    final result = provider.contactSyncResult;
+    final isLoadingRecs = provider.isLoadingRecommendations;
+
+    if (isLoadingRecs || result == null || result.notOnPlatform.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildDiscoverSectionHeader(
+            'INVITE TO PRISM',
+            Icons.mail_outline_rounded,
+          ),
+          const SizedBox(height: 10),
+          ...result.notOnPlatform.map(
+            (contact) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _buildInviteCard(contact, authProvider),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiscoverSectionHeader(String title, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: PrismColors.secondaryText),
+        const SizedBox(width: 6),
+        Text(
+          title,
+          style: PrismTextStyles.bodySmall.copyWith(
+            color: PrismColors.secondaryText,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.2,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOnPlatformCard(
+    OnPlatformUser user,
+    FriendsProvider provider,
+    AuthProvider authProvider,
+  ) {
+    final isFriend = provider.friends.any((f) => f.username == user.username);
+    final isPending = provider.sentRequests.any(
+      (r) => r.username == user.username,
+    );
+
+    return PrismCard(
+      padding: EdgeInsets.zero,
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: CircleAvatar(
+          backgroundColor: PrismColors.inputGray,
+          backgroundImage: user.profilePictureUrl.isNotEmpty
+              ? CachedNetworkImageProvider(user.profilePictureUrl)
+              : null,
+          child: user.profilePictureUrl.isEmpty
+              ? Text(
+                  user.username[0].toUpperCase(),
+                  style: const TextStyle(color: PrismColors.white),
+                )
+              : null,
+        ),
+        title: Text('@${user.username}', style: PrismTextStyles.bodyLarge),
+        subtitle: user.mutualContactCount > 0
+            ? Row(
+                children: [
+                  const Icon(
+                    Icons.people_outline_rounded,
+                    size: 13,
+                    color: PrismColors.secondaryText,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${user.mutualContactCount} mutual contact${user.mutualContactCount > 1 ? 's' : ''}',
+                    style: PrismTextStyles.bodySmall.copyWith(
+                      color: PrismColors.secondaryText,
+                    ),
+                  ),
+                ],
+              )
+            : null,
+        trailing: isFriend
+            ? const Icon(
+                Icons.check_circle_rounded,
+                color: PrismColors.successGreen,
+              )
+            : isPending
+            ? Text(
+                'Sent',
+                style: PrismTextStyles.bodySmall.copyWith(
+                  color: PrismColors.electricCyan,
+                ),
+              )
+            : SizedBox(
+                height: 32,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    if (authProvider.currentUser != null) {
+                      await provider.sendFriendRequest(
+                        authProvider.currentUser!.userId,
+                        user.username,
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: PrismColors.prismYellow,
+                    foregroundColor: PrismColors.black,
+                    elevation: 0,
+                    shape: const StadiumBorder(),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                  ),
+                  child: Text(
+                    'Add',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: PrismColors.black,
+                    ),
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildInviteCard(NotOnPlatformContact contact, AuthProvider authProvider) {
+    return PrismCard(
+      padding: EdgeInsets.zero,
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: CircleAvatar(
+          backgroundColor: PrismColors.inputGray,
+          child: Text(
+            contact.displayName.isNotEmpty
+                ? contact.displayName[0].toUpperCase()
+                : '?',
+            style: const TextStyle(
+              color: PrismColors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        title: Text(contact.displayName, style: PrismTextStyles.bodyLarge),
+        subtitle: Text(
+          'Not on Prism yet',
+          style: PrismTextStyles.bodySmall.copyWith(
+            color: PrismColors.secondaryText,
+          ),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // WhatsApp invite
+            if (contact.whatsappLink.isNotEmpty)
+              _buildInviteButton(
+                color: const Color(0xFF25D366),
+                iconWidget: const FaIcon(FontAwesomeIcons.whatsapp, size: 16, color: Color(0xFF25D366)),
+                onTap: () {
+                  final username = authProvider.currentUser?.username ?? 'Your friend';
+                  final message = "$username is on Prism , why dont you try it out with a link attached there www.prismapp.in";
+                  final encodedMessage = Uri.encodeComponent(message);
+                  
+                  String finalUrl = contact.whatsappLink;
+                  if (finalUrl.contains('?')) {
+                    // Strip any existing query parameters (like an old text= parameter)
+                    finalUrl = finalUrl.split('?').first;
+                  }
+                  finalUrl = '$finalUrl?text=$encodedMessage';
+                  
+                  _launchUrl(finalUrl);
+                },
+              ),
+            if (contact.whatsappLink.isNotEmpty && contact.smsLink.isNotEmpty)
+              const SizedBox(width: 8),
+            // SMS invite
+            if (contact.smsLink.isNotEmpty)
+              _buildInviteButton(
+                color: PrismColors.electricBlue,
+                iconWidget: const Icon(Icons.sms_rounded, size: 16, color: PrismColors.electricBlue),
+                onTap: () {
+                  final username = authProvider.currentUser?.username ?? 'Your friend';
+                  final message = "$username is on Prism , why dont you try it out with a link attached there www.prismapp.in";
+                  final encodedMessage = Uri.encodeComponent(message);
+                  
+                  String finalUrl = contact.smsLink;
+                  if (finalUrl.contains('?')) {
+                    finalUrl = finalUrl.split('?').first;
+                  }
+                  
+                  // SMS uses 'body' parameter instead of 'text'
+                  finalUrl = '$finalUrl?body=$encodedMessage';
+                  
+                  _launchUrl(finalUrl);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInviteButton({
+    required Color color,
+    required Widget iconWidget,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          shape: BoxShape.circle,
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+        ),
+        child: iconWidget,
+      ),
+    );
+  }
+
+  Future<void> _launchUrl(String url) async {
+    try {
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      debugPrint('[FriendsScreen] Could not launch URL: $url — $e');
+    }
   }
 
   // Handle Toggle Keep Status (Existing Logic kept)

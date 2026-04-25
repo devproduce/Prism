@@ -249,44 +249,7 @@ class _ProcessingScreenState extends State<ProcessingScreen>
                     padding: const EdgeInsets.all(24),
                     child: Column(
                       children: [
-                        // Auto-clean Mock Toggle (Visual only matching page12)
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Auto-clean',
-                                  style: PrismTextStyles.bodyLarge.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                Text(
-                                  'Remove irrelevant photos',
-                                  style: PrismTextStyles.bodySmall.copyWith(
-                                    color: PrismColors.secondaryText,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            Switch(
-                              value: sharingProvider.autoClean,
-                              onChanged: (v) {
-                                HapticFeedback.selectionClick();
-                                sharingProvider.setAutoClean(v);
-                              },
-                              activeColor: PrismColors.prismYellow,
-                              activeTrackColor: PrismColors.prismYellow
-                                  .withValues(alpha: 0.3),
-                              inactiveThumbColor: PrismColors.secondaryText,
-                              inactiveTrackColor: PrismColors.white.withValues(
-                                alpha: 0.1,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 24),
+
                         Row(
                           children: [
                             Expanded(

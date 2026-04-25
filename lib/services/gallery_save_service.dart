@@ -129,7 +129,7 @@ class GallerySaveService {
         }
       }
 
-      final filePath = '${downloadDir.path}/${imageId}$extension';
+      final filePath = '${downloadDir.path}/$imageId$extension';
       final file = File(filePath);
 
       // Download with timeout

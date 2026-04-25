@@ -1,3 +1,5 @@
+import 'package:prism/utils/constants.dart';
+
 class GalleryImage {
   final ImageData image;
   final List<FaceData> faces;
@@ -66,7 +68,7 @@ class ImageData {
       return ImageData(
         id: json['id']?.toString() ?? '',
         storagePath: json['storage_path']?.toString() ?? '',
-        imageUrl: json['image_url']?.toString() ?? '',
+        imageUrl: _ensureAbsoluteUrl(json['image_url']?.toString()),
         takenAt: json['taken_at'] != null
             ? DateTime.tryParse(json['taken_at'].toString())
             : null,
@@ -93,6 +95,14 @@ class ImageData {
       'height': height,
       'metadata': metadata,
     };
+  }
+
+  // Helper to ensure URLs are absolute for new cloud providers
+  static String _ensureAbsoluteUrl(String? url) {
+    if (url == null || url.isEmpty) return '';
+    if (url.startsWith('http')) return url;
+    if (url.startsWith('/')) return '${ApiConstants.baseUrl}$url';
+    return '${ApiConstants.baseUrl}/$url';
   }
 
   // Helper to determine media type from URL extension

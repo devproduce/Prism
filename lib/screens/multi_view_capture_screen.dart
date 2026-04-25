@@ -29,8 +29,8 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
 
   bool _isComplete = false;
   List<String>? _faceIds; // Face IDs from backend
-  Map<int, Uint8List> _capturedFrames = {}; // Store local frames for display
-  bool _isSaving = false;
+  final Map<int, Uint8List> _capturedFrames = {}; // Store local frames for display
+  final bool _isSaving = false;
 
   // 3-View Progress Tracking (Simplified)
   // We assume the server guides the user: Center -> Left -> Right (or similar)

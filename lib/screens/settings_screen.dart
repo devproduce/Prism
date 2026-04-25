@@ -60,6 +60,15 @@ class SettingsScreen extends StatelessWidget {
                       height: 1,
                     ),
                   ),
+                  // V2: Phone Number tile
+                  _buildPhoneNumberTile(context, authProvider),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Divider(
+                      color: PrismColors.white.withValues(alpha: 0.1),
+                      height: 1,
+                    ),
+                  ),
                   _buildSettingsTile(
                     context,
                     icon: Icons.block_rounded,
@@ -70,23 +79,7 @@ class SettingsScreen extends StatelessWidget {
                       Navigator.pushNamed(context, '/blocked_users');
                     },
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Divider(
-                      color: PrismColors.white.withValues(alpha: 0.1),
-                      height: 1,
-                    ),
-                  ),
-                  _buildSettingsTile(
-                    context,
-                    icon: Icons.visibility_off_rounded,
-                    title: 'Keep Users',
-                    subtitle: 'Manage kept users',
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      Navigator.pushNamed(context, '/keep_users');
-                    },
-                  ),
+
                 ],
               ),
             ),
@@ -329,6 +322,237 @@ class SettingsScreen extends StatelessWidget {
         );
       }
     }
+  }
+
+  Widget _buildPhoneNumberTile(
+    BuildContext context,
+    AuthProvider authProvider,
+  ) {
+    final hasWarning = authProvider.phoneSyncWarning;
+    final currentPhone = authProvider.currentUser?.phoneNumber;
+    final currentCode = authProvider.currentUser?.countryCode;
+    final subtitle = (currentCode != null && currentPhone != null)
+        ? '$currentCode $currentPhone'
+        : hasWarning
+        ? 'Tap to fix — couldn\'t be verified'
+        : 'Not set';
+
+    return InkWell(
+      onTap: () => _showPhoneEditSheet(context, authProvider),
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: PrismColors.voidBlack,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: hasWarning
+                      ? PrismColors.warningYellow.withValues(alpha: 0.6)
+                      : PrismColors.white.withValues(alpha: 0.1),
+                ),
+              ),
+              child: Icon(
+                Icons.phone_outlined,
+                color: hasWarning
+                    ? PrismColors.warningYellow
+                    : PrismColors.prismYellow,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text('Phone Number', style: PrismTextStyles.bodyLarge),
+                      if (hasWarning) ...[
+                        const SizedBox(width: 6),
+                        const Icon(
+                          Icons.warning_amber_rounded,
+                          color: PrismColors.warningYellow,
+                          size: 16,
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: PrismTextStyles.bodySmall.copyWith(
+                      color: hasWarning
+                          ? PrismColors.warningYellow
+                          : PrismColors.secondaryText,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: PrismColors.secondaryText,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showPhoneEditSheet(BuildContext context, AuthProvider authProvider) {
+    final codeCtrl = TextEditingController(
+      text: authProvider.currentUser?.countryCode ?? '91',
+    );
+    final phoneCtrl = TextEditingController(
+      text: authProvider.currentUser?.phoneNumber ?? '',
+    );
+    final formKey = GlobalKey<FormState>();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: PrismColors.darkCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          left: 24,
+          right: 24,
+          top: 24,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+        ),
+        child: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Update Phone Number', style: PrismTextStyles.h3),
+              const SizedBox(height: 4),
+              Text(
+                'Used for contact-based friend discovery.',
+                style: PrismTextStyles.bodySmall.copyWith(
+                  color: PrismColors.secondaryText,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 90,
+                    child: TextFormField(
+                      controller: codeCtrl,
+                      keyboardType: TextInputType.number,
+                      style: PrismTextStyles.bodyLarge,
+                      decoration: InputDecoration(
+                        labelText: '+Code',
+                        labelStyle: const TextStyle(color: Colors.white54),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.05),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(
+                            color: Colors.white.withOpacity(0.1),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(
+                            color: Colors.white.withOpacity(0.1),
+                          ),
+                        ),
+                      ),
+                      validator: (v) {
+                        if (v == null || v.isEmpty) return 'Required';
+                        if (int.tryParse(v.replaceAll('+', '')) == null) {
+                          return 'Digits';
+                        }
+                        return null;
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: phoneCtrl,
+                      keyboardType: TextInputType.phone,
+                      style: PrismTextStyles.bodyLarge,
+                      decoration: InputDecoration(
+                        labelText: 'Phone Number',
+                        labelStyle: const TextStyle(color: Colors.white54),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.05),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(
+                            color: Colors.white.withOpacity(0.1),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(
+                            color: Colors.white.withOpacity(0.1),
+                          ),
+                        ),
+                      ),
+                      validator: (v) {
+                        if (v == null || v.isEmpty) return 'Required';
+                        final digits = v.replaceAll(RegExp(r'[^\d]'), '');
+                        if (digits.length < 7) return 'Too short';
+                        return null;
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () async {
+                    if (!formKey.currentState!.validate()) return;
+                    Navigator.pop(ctx);
+                    await authProvider.updateProfile(
+                      username: authProvider.currentUser!.username,
+                      firstName: authProvider.currentUser!.firstName,
+                      countryCode: codeCtrl.text.replaceAll('+', '').trim(),
+                      phoneNumber: phoneCtrl.text
+                          .replaceAll(RegExp(r'[^\d]'), ''),
+                    );
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Phone number updated!'),
+                          backgroundColor: PrismColors.successGreen,
+                          behavior: SnackBarBehavior.floating,
+                          duration: Duration(seconds: 3),
+                        ),
+                      );
+                    }
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: PrismColors.prismYellow,
+                    foregroundColor: PrismColors.black,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text('Save', style: PrismTextStyles.bodyLarge),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildSectionHeader(String title) {

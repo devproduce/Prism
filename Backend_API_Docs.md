@@ -21,13 +21,15 @@ The API implements strict error handling to prevent runtime crashes:
 Register a new user with a profile photo.
 
 **Request (Multipart/Form-Data):**
-*   `username` (str): User's display name.
-*   `email` (str): User's email address.
-*   `password` (str): User's password.
-*   `first_name` (str): User's first name.
-*   `last_name` (str, optional): User's last name.
+*   `username` (str, required): User's display name.
+*   `password` (str, required): User's password (min 6 chars).
+*   `country_code` (str, required): Phone country code (e.g. `+91`).
+*   `phone_number` (str, required): User's phone number.
 *   `image` (File): Profile photo file.
 *   `face_ids` (str, optional): JSON stringified list of face IDs from multi-view registration.
+*   `email` (str, optional): User's email address. *(V1 field, hidden from frontend, kept nullable in DB)*
+*   `first_name` (str, optional): User's first name. *(V1 field, hidden from frontend)*
+*   `last_name` (str, optional): User's last name. *(V1 field, hidden from frontend)*
 
 **Response:**
 *   Returns the created user object with details:
@@ -35,16 +37,28 @@ Register a new user with a profile photo.
     {
       "user_id": "uuid",
       "username": "jdoe",
-      "email": "jdoe@example.com",
-      "first_name": "John",
-      "last_name": "Doe",
+      "country_code": "+91",
+      "phone_number": "9876543210",
       "profile_pic_id": "uuid",
       "face_id": "uuid",
       "image_id": "uuid",
+      "phone_synced": true,
       "message": "User registered successfully"
     }
     ```
-*   The `profile_pic_id` points to a default SVG avatar based on the user's first name initial (A-Z).
+*   The `phone_synced` flag indicates if the phone number was successfully normalized and synced to the recommendation engine. If `false`, the user is still registered but won't appear in contact lists until they update their phone profile.
+*   The `profile_pic_id` points to a default SVG avatar based on the user's username initial (fallback to first_name initial if provided, then '#').
+
+**Business Logic:**
+*   **Multi-View Mode (Recommended):** If `face_ids` are provided:
+    *   **Skips** uploading the `image` file (saves storage/bandwidth).
+    *   **Skips** creating a new face record from the `image` (prevents redundant 4th face).
+    *   Links the provided `face_ids` (from CV service) to the new user.
+    *   Sets `profile_pic_id` to the **Default Avatar** (SVG) provided by the system.
+*   **Legacy Mode:** If `face_ids` are NOT provided:
+    *   Uploads the `image` to R2.
+    *    Sends the image to CV service to detect and create a SINGLE face record.
+    *   Sets `profile_pic_id` to this uploaded image.
 
 
 
@@ -79,26 +93,27 @@ Internal endpoint called by the CV service to save face descriptors captured dur
 ### Login
 **POST** `/auth/login`
 
-Authenticate a user with username or email.
+Authenticate a user with username.
 
 **Request (JSON):**
 ```json
 {
-  "identifier": "username OR user@example.com",
+  "identifier": "username",
   "password": "password123"
 }
 ```
 
+> **Note (V2):** Login is now username-only. Email login has been removed. The backend no longer checks for `@` in the identifier — it always queries by `username`.
+
 **Response:**
-*   Returns user details including profile information needed for frontend state:
+*   Returns user details needed for frontend state:
     ```json
     {
       "user_id": "uuid",
       "username": "jdoe",
-      "email": "jdoe@example.com",
-      "first_name": "John",
-      "last_name": "Doe",
-      "profile_pic_id": "uuid-or-null"
+      "profile_pic_id": "uuid-or-null",
+      "account_status": "active",
+      "scheduled_deletion_at": null
     }
     ```
 *   The `profile_pic_id` field is critical for displaying user avatars in notifications and UI components.
@@ -106,11 +121,13 @@ Authenticate a user with username or email.
 ### Check Availability
 **GET** `/auth/check-availability`
 
-Check if a username or email is available for registration. Used for real-time validation during signup.
+Check if a username is available for registration. Used for real-time validation during signup.
+
+> **Note (V2):** Email availability check has been removed. Only `type=username` is supported.
 
 **Query Parameters:**
-*   `type` (str): Either `"username"` or `"email"`.
-*   `value` (str): The username or email to check.
+*   `type` (str): Must be `"username"`.
+*   `value` (str): The username to check.
 
 **Response (JSON):**
 ```json
@@ -120,7 +137,7 @@ Check if a username or email is available for registration. Used for real-time v
 ```
 
 **Implementation:**
-*   Queries `users` table using indexed lookups (`get_user_by_username`, `get_user_by_email`).
+*   Queries `users` table using indexed lookup (`get_user_by_username`).
 *   Returns `false` if the value exists, `true` if available.
 *   Debounced on frontend (500ms) to minimize server load.
 
@@ -225,7 +242,7 @@ Upload a profile picture without CV processing (avatar only, not face ID).
 *   `image` (File): Profile picture file.
 
 **Business Logic:**
-*   Uploads image to S3 root directory.
+*   Uploads image to Cloudflare R2 root directory.
 *   Creates `images` table record.
 *   Updates `users.profile_pic_id` with new image ID.
 *   **Does not** trigger CV face detection or update biometric data.
@@ -312,6 +329,79 @@ Add multiple contacts in a single request for efficient syncing.
 - Ideal for syncing phone contacts when user has hundreds of contacts
 
 
+### Request Account Deletion
+**DELETE** `/auth/delete-account`
+
+Initiate the account deletion process.
+
+**Request (JSON):**
+```json
+{
+  "user_id": "uuid",
+  "password": "user_password",
+  "reason": "not_using",
+  "feedback": "Optional feedback text"
+}
+```
+
+**Response (JSON):**
+```json
+{
+  "message": "Account scheduled for deletion",
+  "scheduled_deletion_at": "2024-02-25T10:30:00Z"
+}
+```
+
+**Business Logic:**
+- Verifies password (strict security requirement).
+- Sets `account_status` to `deletion_pending`.
+- Sets `scheduled_deletion_at` to **15 days** from now.
+- User is immediately logged out (frontend handles token clearance).
+
+### Cancel Deletion
+**POST** `/auth/cancel-deletion`
+
+Cancel a pending deletion request and restore the account.
+
+**Request (JSON):**
+```json
+{
+  "user_id": "uuid",
+  "password": "user_password"
+}
+```
+
+**Response (JSON):**
+```json
+{
+  "message": "Deletion cancelled. Welcome back!",
+  "account_status": "active"
+}
+```
+
+**Business Logic:**
+- Verifies password.
+- Resets `account_status` to `active`.
+- Clears `scheduled_deletion_at` and `deletion_requested_at`.
+
+## Account Deletion Logic (`process_pending_deletions.py`)
+
+A cron job (`backend/testing_scripts/process_pending_deletions.py`) runs periodically to process accounts whose grace period has expired.
+
+**Workflow:**
+1. **Query:** Finds users where `account_status = 'deletion_pending'` AND `scheduled_deletion_at <= NOW()`.
+2. **Move Media:** Moves all user files (images, videos, registrations) from the live `prism-media` bucket to a cold storage bucket `deleted-users-prism-media`.
+3. **Anonymize:** Updates the `users` table to redact PII:
+    - `username` -> `deleted_{short_id}`
+    - `email` -> `deleted_{short_id}@deleted.prism`
+    - `password` -> Random SHA256 hash
+    - `first_name` -> "Deleted"
+    - `last_name` -> "User"
+    - `profile_pic_id` -> `NULL`
+4. **Finalize:** Sets `account_status` to `deleted`.
+
+This "Soft Delete + Anonymization" approach preserves database integrity (foreign keys in `friendships`, `batch_shares` remain valid) while strictly respecting user privacy and right-to-be-forgotten.
+
 ## Friends (`/friends`)
 
 ### Search Friends
@@ -376,6 +466,100 @@ Reject/Decline a received friend request.
 }
 ```
 
+### Sync Contacts & Friend Recommendations
+**POST** `/contacts/sync`
+
+Sync user's phone contacts to the platform. Normalizes phone numbers, stores them in `phone_registry` and `contact_uploads`, and returns friend recommendations immediately.
+
+**Request (JSON - `ContactSyncRequest`):**
+```json
+{
+  "user_id": "uuid",
+  "contacts": [
+    { "display_name": "Rahul Sharma", "country_code": "91", "raw_phone": "98765 43210" },
+    { "display_name": "Priya Patel", "country_code": "91", "raw_phone": "8765432109" }
+  ]
+}
+```
+
+**Response (JSON - `ContactSyncResponse`):**
+```json
+{
+  "on_platform": [
+    { 
+      "user_id": "uuid", 
+      "username": "rahul_s", 
+      "first_name": "Rahul",
+      "last_name": "Sharma",
+      "profile_pic_id": "...", 
+      "contact_name": "Rahul Sharma",
+      "mutual_contact_count": 2 
+    }
+  ],
+  "not_on_platform": [
+    { 
+      "display_name": "Priya Patel", 
+      "e164": "+918765432109", 
+      "whatsapp_link": "https://wa.me/...",
+      "sms_link": "sms:+918765432109?body=..."
+    }
+  ]
+}
+```
+
+**Business Logic:**
+*   Saves and normalizes contacts to `phone_registry` and links user ID in `contact_uploads`.
+*   **Deduplication:** The backend automatically deduplicates contacts by E.164 within the request. If multiple entries for the same number exist, only the first one (with its `display_name`) is processed.
+*   Calls SQL functions to cross-reference against `users` table via `contact_uploads`.
+*   Returns two lists: `on_platform` (contacts who are registered users) and `not_on_platform` (contacts not on Prism → show "Invite").
+*   **Safety:** Non-normalizable numbers are skipped. The `contact_count` in logs represents unique, valid E.164 numbers synced.
+
+### Get Sync Status
+**GET** `/contacts/sync-status`
+
+Get the current contact sync status for a user.
+
+**Query Parameters:**
+*   `user_id` (str): ID of the requesting user.
+
+**Response (JSON - `SyncStatusResponse`):**
+```json
+{
+  "permission_status": "granted",
+  "last_synced_at": "2024-03-20T10:00:00Z",
+  "contact_count": 142
+}
+```
+
+### Get Friend Recommendations
+**GET** `/contacts/recommendations`
+
+Get persistent friend recommendations based on previously synced contacts. Unlike `sync` (which saves + returns), this is a **read-only** endpoint that re-derives recommendations from stored data.
+
+**Query Parameters:**
+*   `user_id` (str): ID of the requesting user.
+
+**Response (JSON):**
+```json
+{
+  "on_platform": [
+    { "id": "uuid", "username": "rahul_s", "profile_pic_id": "...", "mutual_contact_count": 2 }
+  ],
+  "not_on_platform": [
+    { "display_name": "Priya Patel", "formatted_phone": "+918765432109", "whatsapp_link": "https://wa.me/..." }
+  ]
+}
+```
+
+**Business Logic:**
+*   Uses `get_on_platform_recommendations` and `get_off_platform_recommendations` SQL procedures.
+*   **Excludes** users who are already friends, have pending requests (sent or received).
+*   Returns only truly "new" suggestions — users on the platform who the user hasn't connected with yet.
+*   Automatically picks up new users if contacts eventually join Prism.
+
+### Test Seed Dummy Contact Script
+A utility script lives at `backend/seed_dummy_friends.py`. It allows backend developers to instantly scaffold 4 dummy users and mock a contact sync timeline for visual flow testing without needing the frontend.
+
 ## Images (`/images`)
 
 ### Upload Images (Batch)
@@ -435,7 +619,7 @@ Returns an array of gallery items, each containing:
 ```
 
 **Implementation Notes:**
-- Uses **presigned URLs** from S3 for secure image access
+- Uses **presigned URLs** from Cloudflare R2 for secure image access
 - Includes EXIF metadata (taken_at, dimensions) extracted during upload
 - Bulk fetches faces to avoid N+1 queries
 
@@ -755,7 +939,7 @@ Mark all notifications as read for the current user.
 
 ## Notification Service Logic
 
-The `NotificationService` handles the creation and retrieval of user notifications.
+The `NotificationService` handles the creation and retrieval of user notifications, as well as real-time push dispatch via Firebase Cloud Messaging (FCM).
 
 **Key Features:**
 - **Hybrid Fetching:** `get_user_notifications` combines persisted notifications (from `notifications` table) with live pending friend requests (from `friendships` table) to provide a unified activity feed.
@@ -764,6 +948,36 @@ The `NotificationService` handles the creation and retrieval of user notificatio
     - Batch Shared (`batch_shared`)
     - Batch Received (`batch_received`)
 - **Smart Filtering:** The service filters out duplicate "friend request received" notifications if a live pending request already exists, preventing clutter.
+- **FCM Push Delivery:** When a notification is created, the service automatically triggers an asynchronous background task to fetch all FCM device tokens for the recipient (`fcm_tokens` table) and dispatches a push notification via the `firebase-admin` HTTP v1 API.
+
+### FCM Device Registration
+**POST** `/notifications/device/register`
+
+Register a client FCM token to the user for push notifications.
+
+**Request (JSON):**
+```json
+{
+  "user_id": "uuid",
+  "fcm_token": "token_string",
+  "device_type": "web" // or ios, android
+}
+```
+
+### Test FCM Push
+**POST** `/notifications/test/push`
+
+Test push notification delivery.
+
+**Request (JSON):**
+```json
+{
+  "user_id": "uuid",
+  "title": "Test Title",
+  "body": "Test Body",
+  "data": {"type": "test"}
+}
+```
 
 ---
 
@@ -915,3 +1129,15 @@ Submit feedback from landing page or dashboard.
 | user_agent | TEXT | Browser/client info |
 | created_at | TIMESTAMPTZ | Submission timestamp |
 | metadata | JSONB | Additional context |
+
+### Contact System V2 (Phone Registry)
+**Overview:** Replaced the legacy `user_contacts` table with a robust E.164-compliant registry to support mutual contact counting, deduplication, and retroactive linking when contacts eventually join Prism.
+
+**Key Changes:**
+- **`phone_registry`:** Canonical storage for E.164 normalized phone numbers.
+- **`contact_uploads`:** Tracks which user uploaded which phone number.
+- **`contact_sync_log`:** Tracks permission status (granted, denied, never_asked).
+- **`users.phone_e164`:** New column for O(1) JOINs against the registry.
+- **Supabase RPCs:** `get_on_platform_recommendations` and `get_off_platform_contacts` for complex mutual friend calculations.
+- **`phone_utils.py`:** Handles E.164 normalization via the `phonenumbers` library and generates WhatsApp/SMS invite deep links.
+- **Phone Normalization Hook:** Automatically normalizes and upserts the user's phone to the registry on signup and profile update.

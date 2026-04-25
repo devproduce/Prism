@@ -1,20 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:prism/api/api_client.dart';
 import 'package:prism/models/friend_model.dart';
+import 'package:prism/models/contact_sync_result.dart';
+import 'package:prism/services/contact_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class FriendsProvider with ChangeNotifier {
   final ApiClient _apiClient = ApiClient();
+  final ContactService _contactService = ContactService();
 
   List<Friend> _friends = [];
   List<FriendRequest> _pendingRequests = [];
   List<FriendRequest> _sentRequests = [];
   List<Friend> _searchResults = [];
 
+  // V2 Discovery state
+  ContactSyncResult? _contactSyncResult;
+  bool _isLoadingRecommendations = false;
+  bool _isSyncingContacts = false;
+  DateTime? _lastSyncedAt;
+  bool _hasSynced = false;
+
   bool _isLoading = false;
   bool _isSearching = false;
   String? _error;
 
-  // Getters
+  // Getters — existing
   List<Friend> get friends => _friends;
   List<FriendRequest> get pendingRequests => _pendingRequests;
   List<FriendRequest> get sentRequests => _sentRequests;
@@ -22,6 +33,13 @@ class FriendsProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isSearching => _isSearching;
   String? get error => _error;
+
+  // Getters — V2 discovery
+  ContactSyncResult? get contactSyncResult => _contactSyncResult;
+  bool get isLoadingRecommendations => _isLoadingRecommendations;
+  bool get isSyncingContacts => _isSyncingContacts;
+  DateTime? get lastSyncedAt => _lastSyncedAt;
+  bool get hasSynced => _hasSynced;
 
   // Set loading state
   void _setLoading(bool value) {
@@ -256,7 +274,10 @@ class FriendsProvider with ChangeNotifier {
 
   /// Refresh all friend data (now handled by single fetchFriends call)
   Future<void> refreshAll(String userId) async {
-    await fetchFriends(userId);
+    await Future.wait([
+      fetchFriends(userId),
+      loadRecommendations(userId),
+    ]);
   }
 
   /// Toggle keep status for auto clean
@@ -370,6 +391,71 @@ class FriendsProvider with ChangeNotifier {
     } catch (e) {
       _setError('Failed to unfriend user: ${e.toString()}');
       return false;
+    }
+  }
+  // ==================== V2 CONTACT DISCOVERY METHODS ====================
+
+  /// Load cached recommendations from backend (no phonebook re-read)
+  Future<void> loadRecommendations(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _hasSynced = prefs.getBool('contacts_synced_$userId') ?? false;
+      notifyListeners();
+      
+      if (!_hasSynced) return;
+
+      _isLoadingRecommendations = true;
+      _setError(null);
+      notifyListeners();
+
+      final result = await _contactService.getRecommendations(userId);
+      if (result != null) {
+        _contactSyncResult = result;
+      }
+    } catch (e) {
+      _setError('Failed to load recommendations: ${e.toString()}');
+    } finally {
+      _isLoadingRecommendations = false;
+      notifyListeners();
+    }
+  }
+
+  /// Full sync: reads phonebook → POST /contacts/sync → updates discovery lists
+  Future<ContactSyncResult?> syncAndGetRecommendations(String userId) async {
+    try {
+      _isSyncingContacts = true;
+      _setError(null);
+      notifyListeners();
+
+      final result = await _contactService.requestPermissionAndSyncContacts(
+        userId,
+      );
+
+      if (result != null) {
+        _contactSyncResult = result;
+        _lastSyncedAt = DateTime.now();
+        
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('contacts_synced_$userId', true);
+        _hasSynced = true;
+      }
+
+      return result;
+    } catch (e) {
+      _setError('Failed to sync contacts: ${e.toString()}');
+      return null;
+    } finally {
+      _isSyncingContacts = false;
+      notifyListeners();
+    }
+  }
+
+  /// Tell backend about permission state change
+  Future<void> updateSyncStatus(String userId, String status) async {
+    try {
+      await _contactService.updateSyncStatus(userId, status);
+    } catch (e) {
+      debugPrint('[FriendsProvider] Error updating sync status: $e');
     }
   }
 }

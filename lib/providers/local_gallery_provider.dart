@@ -18,7 +18,7 @@ class AlbumInfo {
 /// Uses photo_manager to access the device's media library.
 class LocalGalleryProvider with ChangeNotifier {
   List<AlbumInfo> _albums = [];
-  Map<String, List<AssetEntity>> _albumAssets = {};
+  final Map<String, List<AssetEntity>> _albumAssets = {};
   bool _isLoading = false;
   bool _hasPermission = false;
   String? _error;

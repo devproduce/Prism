@@ -102,6 +102,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                                     images: entry.value,
                                     initialIndex: index,
                                     isFromBin: widget.title == 'Bin',
+                                    heroTagPrefix: 'collection_${widget.title}_',
                                   ),
                                 ),
                               );

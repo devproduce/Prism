@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 /// Manages share intents from other apps and saving images to device gallery
 class ShareHandlerService {
   static const MethodChannel _channel = MethodChannel(
-    'com.example.prism/share_handler',
+    'in.prismapp.prism/share_handler',
   );
 
   // Callback for immediate deep link notifications from native

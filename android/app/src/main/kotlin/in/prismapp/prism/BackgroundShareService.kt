@@ -1,4 +1,4 @@
-package com.example.prism
+package `in`.prismapp.prism
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -52,8 +52,8 @@ class BackgroundShareService : Service() {
         private const val PREFS_NAME = "FlutterSharedPreferences"
         private const val KEY_PROCESSING_BATCH_ID = "flutter.processing_batch_id"
         private const val KEY_IS_PROCESSING = "flutter.is_processing"
-        
-        const val ACTION_START_SHARE = "com.example.prism.ACTION_START_SHARE"
+
+        const val ACTION_START_SHARE = "in.prismapp.prism.ACTION_START_SHARE"
         const val EXTRA_FILE_PATHS = "file_paths"
         const val EXTRA_AUTH_TOKEN = "auth_token"
         const val EXTRA_USER_ID = "user_id"
@@ -176,7 +176,7 @@ class BackgroundShareService : Service() {
                 
                 // Parse batch ID from response
                 val jsonResponse = gson.fromJson(responseBody, JsonObject::class.java)
-                val batchId = jsonResponse.get("batch_id")?.asString
+                val batchId = jsonResponse.get("batch_id")?.asString ?: jsonResponse.get("id")?.asString
                 
                 if (batchId != null) {
                     currentBatchId = batchId

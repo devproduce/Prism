@@ -436,8 +436,8 @@ class _HomeScreenState extends State<HomeScreen> {
             else ...[
               SliverToBoxAdapter(
                 child: SectionHeader(
-                  title: 'Prism Cloud',
-                  subtitle: 'Recent Uploads',
+                  title: 'Your Memories',
+                  //subtitle: 'Safely in the cloud',
                   actionLabel: 'View All',
                   actionIcon: Icons.arrow_forward_rounded,
                   onActionTap: featuredImages.length >= 2
@@ -520,6 +520,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   images: featuredImages,
                                   initialIndex: index - 1,
                                   isFromBin: false,
+                                  heroTagPrefix: 'home_image_',
                                   onShare: (file) async {
                                     final sharingProvider =
                                         Provider.of<SharingProvider>(
@@ -572,7 +573,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               fit: StackFit.expand,
                               children: [
                                 Hero(
-                                  tag: 'image_${image.image.id}',
+                                  tag: 'home_image_${image.image.id}',
                                   child: PrismMediaPreview(
                                     imageUrl: image.image.imageUrl,
                                     mediaType: image.image.mediaType,
@@ -621,7 +622,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
 
-            const SliverToBoxAdapter(child: SizedBox(height: 24)),
+            const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
             // 3. Device Albums Section (Grid)
             SliverToBoxAdapter(

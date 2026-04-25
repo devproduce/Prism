@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:prism/utils/constants.dart';
 import 'package:prism/models/user_model.dart';
 import 'package:prism/models/auth_response.dart';
+import 'package:prism/models/contact_sync_result.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -53,51 +54,135 @@ class ApiClient {
       try {
         return json.decode(response.body);
       } catch (e) {
-        // If JSON parsing fails, return the raw body
         print('Failed to parse JSON response: ${response.body}');
         throw ApiException('Invalid response format from server');
       }
     } else {
-      // Try to parse error response as JSON
-      try {
-        final errorBody = response.body.isNotEmpty
-            ? json.decode(response.body)
-            : {'detail': 'Unknown error'};
-        final errorMessage =
-            errorBody['detail'] ?? errorBody['message'] ?? 'Request failed';
-        throw ApiException(errorMessage, response.statusCode);
-      } catch (e) {
-        // If error response is not JSON, use the raw text
-        final errorMessage = response.body.isNotEmpty
-            ? response.body
-            : 'Request failed with status ${response.statusCode}';
-        throw ApiException(errorMessage, response.statusCode);
+      // Extract a clean, human-readable message from the error response.
+      // Never expose raw JSON to the user.
+      final message = _extractErrorMessage(response.body, response.statusCode);
+      throw ApiException(message, response.statusCode);
+    }
+  }
+
+  /// Safely extracts a human-readable error message from a backend response body.
+  /// Checks multiple common error field names and falls back gracefully.
+  static String _extractErrorMessage(String body, int statusCode) {
+    if (body.isEmpty) {
+      return _statusCodeFallback(statusCode);
+    }
+
+    try {
+      final decoded = json.decode(body);
+      if (decoded is Map) {
+        // Check the most common backend error fields in priority order
+        for (final key in ['detail', 'message', 'error', 'msg']) {
+          final value = decoded[key];
+          if (value != null && value.toString().isNotEmpty) {
+            return value.toString();
+          }
+        }
+        // Django-style field validation errors: {"username": ["This field is required."]}
+        final firstKey = decoded.keys.first;
+        final firstValue = decoded[firstKey];
+        if (firstValue is List && firstValue.isNotEmpty) {
+          return firstValue.first.toString();
+        }
+        if (firstValue is String && firstValue.isNotEmpty) {
+          return firstValue;
+        }
+      } else if (decoded is String && decoded.isNotEmpty) {
+        return decoded;
+      } else if (decoded is List && decoded.isNotEmpty) {
+        return decoded.first.toString();
       }
+    } catch (_) {
+      // Body is not JSON — if it's short plain text, use it directly
+      if (body.length < 200 && !body.trimLeft().startsWith('<')) {
+        return body.trim();
+      }
+    }
+
+    return _statusCodeFallback(statusCode);
+  }
+
+  static String _statusCodeFallback(int statusCode) {
+    switch (statusCode) {
+      case 400: return 'Invalid request. Please check your input.';
+      case 401: return 'Your session has expired. Please log in again.';
+      case 403: return 'You do not have permission to perform this action.';
+      case 404: return 'The requested resource was not found.';
+      case 409: return 'A conflict occurred. Please try again.';
+      case 429: return 'Too many requests. Please wait a moment and try again.';
+      case 500: return 'Something went wrong on our end. Please try again later.';
+      case 502:
+      case 503:
+      case 504: return 'Server is temporarily unavailable. Please try again.';
+      default:  return 'An error occurred. Please try again.';
     }
   }
 
   // ==================== AUTH ENDPOINTS ====================
 
-  /// Register a new user
+  /// Register device token for FCM
+  Future<void> registerDeviceToken({
+    required String userId,
+    required String deviceId,
+    required String fcmToken,
+    required String platform,
+  }) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/notifications/device/register');
+      final response = await _client.post(
+        uri,
+        headers: _getHeaders(),
+        body: json.encode({
+          'user_id': userId,
+          'device_id': deviceId,
+          'fcm_token': fcmToken,
+          'platform': platform,
+        }),
+      );
+
+      _handleResponse(response);
+    } catch (e) {
+      debugPrint('Error in registerDeviceToken API: $e');
+      throw ApiException('Failed to register device token: $e');
+    }
+  }
+
+  /// Register a new user (V2 — phone-first)
   /// POST /auth/register
+  /// phone fields are mandatory; email & firstName are optional
   Future<AuthResponse> register({
     required String username,
-    required String email,
     required String password,
-    required String firstName,
+    required String countryCode,
+    required String phoneNumber,
+    String? email,
+    String? firstName,
     String? lastName,
-    File? profileImage, // Changed to optional
-    List<String>? faceIds, // Optional face IDs from multi-view registration
+    File? profileImage,
+    List<String>? faceIds,
   }) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.register}');
       final request = http.MultipartRequest('POST', uri);
 
-      // Add form fields
+      // Mandatory fields
       request.fields['username'] = username;
-      request.fields['email'] = email;
       request.fields['password'] = password;
-      request.fields['first_name'] = firstName;
+      // Strip leading '+' — backend expects numeric country code e.g. "91"
+      request.fields['country_code'] = countryCode.replaceAll('+', '').trim();
+      request.fields['phone_number'] = phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
+
+      // Optional fields
+      if (email != null && email.isNotEmpty) {
+        request.fields['email'] = email;
+      }
+      if (firstName != null && firstName.isNotEmpty) {
+        request.fields['first_name'] = firstName;
+      }
       if (lastName != null && lastName.isNotEmpty) {
         request.fields['last_name'] = lastName;
       }
@@ -1091,6 +1176,89 @@ class ApiClient {
       debugPrint('❌ [ApiClient] Confirm share error: $e');
       if (e is ApiException) rethrow;
       throw ApiException('Failed to confirm share: ${e.toString()}');
+    }
+  }
+
+  // ==================== V2 CONTACT DISCOVERY ENDPOINTS ====================
+
+  /// Bulk upload phonebook for contact matching
+  /// POST /contacts/sync
+  /// Returns on_platform (Prism users) and not_on_platform (invite targets)
+  Future<ContactSyncResult> syncContacts({
+    required String userId,
+    required List<Map<String, String>> contacts,
+  }) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/contacts/sync');
+      final response = await _client.post(
+        uri,
+        headers: _getHeaders(),
+        body: json.encode({'user_id': userId, 'contacts': contacts}),
+      );
+
+      final data = _handleResponse(response);
+      return ContactSyncResult.fromJson(data as Map<String, dynamic>);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Contact sync failed: ${e.toString()}');
+    }
+  }
+
+  /// Fetch latest friend suggestions (cached by backend from last sync)
+  /// GET /contacts/recommendations?user_id=...
+  Future<ContactSyncResult> getContactRecommendations({
+    required String userId,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/contacts/recommendations',
+      ).replace(queryParameters: {'user_id': userId});
+
+      final response = await _client.get(uri, headers: _getHeaders());
+      final data = _handleResponse(response);
+      return ContactSyncResult.fromJson(data as Map<String, dynamic>);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to get recommendations: ${e.toString()}');
+    }
+  }
+
+  /// Check if user has already granted contacts permission
+  /// GET /contacts/sync-status?user_id=...
+  Future<Map<String, dynamic>> getContactSyncStatus({
+    required String userId,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/contacts/sync-status',
+      ).replace(queryParameters: {'user_id': userId});
+
+      final response = await _client.get(uri, headers: _getHeaders());
+      final data = _handleResponse(response);
+      return data as Map<String, dynamic>;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to get sync status: ${e.toString()}');
+    }
+  }
+
+  /// Update contacts permission state
+  /// PATCH /contacts/sync-status
+  Future<void> updateContactSyncStatus({
+    required String userId,
+    required String status, // e.g. 'granted', 'denied'
+  }) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/contacts/sync-status');
+      final response = await _client.patch(
+        uri,
+        headers: _getHeaders(),
+        body: json.encode({'user_id': userId, 'status': status}),
+      );
+      _handleResponse(response);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to update sync status: ${e.toString()}');
     }
   }
 

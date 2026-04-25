@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:sms_autofill/sms_autofill.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/widgets/glass_widgets.dart';
@@ -11,6 +12,7 @@ import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/screens/login_screen.dart';
 import 'package:prism/screens/home_screen.dart';
 import 'package:prism/screens/multi_view_capture_screen.dart';
+import 'package:prism/utils/error_handler.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -22,10 +24,12 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
-  final int _totalPages = 6; // Updated from 7 to 6 -- Removed Vibe Check
+  final int _totalPages = 7; // Step: Username, Phone, Name, Email, Password, FaceID, ProfilePic
 
   // Form controllers
   final _usernameController = TextEditingController();
+  final _countryCodeController = TextEditingController(text: '91');
+  final _phoneNumberController = TextEditingController();
   final _firstNameController = TextEditingController();
   final _lastNameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -33,16 +37,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _confirmPasswordController = TextEditingController();
 
   // Form keys
-  final _step1Key = GlobalKey<FormState>();
-  final _step2Key = GlobalKey<FormState>();
-  final _step3Key = GlobalKey<FormState>();
-  final _step4Key = GlobalKey<FormState>();
+  final _step1Key = GlobalKey<FormState>(); // Username
+  final _step2Key = GlobalKey<FormState>(); // Phone
+  final _step3Key = GlobalKey<FormState>(); // Name (optional)
+  final _step4Key = GlobalKey<FormState>(); // Email (optional)
+  final _step5Key = GlobalKey<FormState>(); // Password
+  final _step6Key = GlobalKey<FormState>(); // Face ID
+  final _step7Key = GlobalKey<FormState>(); // Profile Pic
 
-  final _step6Key = GlobalKey<FormState>();
-  final _step7Key = GlobalKey<FormState>();
-
-  List<String>? _faceIds; // Face IDs from multi-view capture
-  File? _profilePicImage; // For profile display (optional)
+  List<String>? _faceIds;
+  File? _profilePicImage;
 
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
@@ -51,12 +55,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void dispose() {
     _pageController.dispose();
     _usernameController.dispose();
+    _countryCodeController.dispose();
+    _phoneNumberController.dispose();
     _firstNameController.dispose();
     _lastNameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-
     super.dispose();
   }
 
@@ -77,6 +82,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
         duration: const Duration(milliseconds: 400),
         curve: Curves.easeOutCubic,
       );
+    }
+  }
+
+  Future<void> _fetchPhoneNumber() async {
+    try {
+      final hint = await SmsAutoFill().hint;
+      if (hint != null && hint.isNotEmpty && mounted) {
+        String digitsOnly = hint.replaceAll(RegExp(r'[^\d+]'), '');
+        if (digitsOnly.startsWith('+')) {
+          if (digitsOnly.startsWith('+91') && digitsOnly.length > 3) {
+            _countryCodeController.text = '91';
+            _phoneNumberController.text = digitsOnly.substring(3);
+          } else if (digitsOnly.startsWith('+1') && digitsOnly.length > 2) {
+            _countryCodeController.text = '1';
+            _phoneNumberController.text = digitsOnly.substring(2);
+          } else if (digitsOnly.startsWith('+44') && digitsOnly.length > 3) {
+            _countryCodeController.text = '44';
+            _phoneNumberController.text = digitsOnly.substring(3);
+          } else {
+            // If unknown country code, put everything in phone number field
+            _phoneNumberController.text = digitsOnly;
+          }
+        } else {
+           _phoneNumberController.text = digitsOnly;
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch phone number hint: $e');
     }
   }
 
@@ -155,54 +188,50 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  /// Handle registration on Face Reveal screen (Step 6)
+  /// Handle registration on Face ID screen (Step 6)
   Future<void> _handleFaceRevealNext() async {
     if (_faceIds == null || _faceIds!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please complete Face ID scan'),
-          backgroundColor: PrismColors.errorRed,
-          behavior: SnackBarBehavior.floating,
-        ),
+      ErrorHandler.showErrorSnackbar(
+        context,
+        message: 'Please complete the Face ID scan to continue.',
       );
       return;
     }
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-
-    // Clear database before registration to remove old user data
     await authProvider.clearDatabaseBeforeRegistration();
 
-    final firstName = _firstNameController.text.trim();
-    final lastName = _lastNameController.text.trim().isEmpty
-        ? null
-        : _lastNameController.text.trim();
-
-    // Register with face IDs
-    // Note: profileImage is null here, as it's optional now
-    // User can add profile picture in the next step
     final success = await authProvider.register(
       username: _usernameController.text.trim(),
-      email: _emailController.text.trim(),
       password: _passwordController.text,
-      firstName: firstName,
-      lastName: lastName,
-      profileImage: _profilePicImage, // Use captured face image if available
-      faceIds: _faceIds, // Pass the captured face IDs
+      countryCode: _countryCodeController.text.trim(),
+      phoneNumber: _phoneNumberController.text.trim(),
+      email: _emailController.text.trim().isEmpty
+          ? null
+          : _emailController.text.trim(),
+      firstName: _firstNameController.text.trim().isEmpty
+          ? null
+          : _firstNameController.text.trim(),
+      lastName: _lastNameController.text.trim().isEmpty
+          ? null
+          : _lastNameController.text.trim(),
+      profileImage: _profilePicImage,
+      faceIds: _faceIds,
     );
 
     if (success && mounted) {
-      // Proceed to profile picture screen
-      if (mounted) {
-        _nextPage();
+      if (authProvider.phoneSyncWarning) {
+        ErrorHandler.showInfoSnackbar(
+          context,
+          message: 'Phone number couldn\'t be verified. Update it in Settings to appear in contact searches.',
+          duration: const Duration(seconds: 6),
+        );
       }
+      _nextPage();
     } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(authProvider.error ?? 'Registration failed'),
-          backgroundColor: PrismColors.errorRed,
-          behavior: SnackBarBehavior.floating,
-        ),
+      ErrorHandler.showErrorSnackbar(
+        context,
+        message: authProvider.error ?? 'Registration failed. Please try again.',
       );
     }
   }
@@ -217,20 +246,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _profilePicImage!,
       );
       if (!profilePicSuccess && mounted) {
-        // Show warning but don't block navigation
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              authProvider.error ?? 'Failed to upload profile picture',
-            ),
-            backgroundColor: PrismColors.warningYellow,
-            behavior: SnackBarBehavior.floating,
-            action: SnackBarAction(
-              label: 'OK',
-              textColor: Colors.white,
-              onPressed: () {},
-            ),
-          ),
+        ErrorHandler.showInfoSnackbar(
+          context,
+          message: authProvider.error ?? 'Profile picture upload failed. You can update it later in Settings.',
         );
       }
     }
@@ -251,11 +269,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  InputDecoration _glassInputDecoration(String hint, IconData icon) {
+  InputDecoration _glassInputDecoration(String hint, [IconData? icon]) {
     return InputDecoration(
       labelText: hint,
       labelStyle: PrismTextStyles.bodyMedium.copyWith(color: Colors.white54),
-      prefixIcon: Icon(icon, color: PrismColors.electricBlue),
+      prefixIcon: icon != null ? Icon(icon, color: PrismColors.electricBlue) : null,
       filled: true,
       fillColor: Colors.white.withOpacity(0.05),
       border: OutlineInputBorder(
@@ -343,7 +361,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
               child: PageView(
                 controller: _pageController,
                 physics: const NeverScrollableScrollPhysics(),
-                onPageChanged: (page) => setState(() => _currentPage = page),
+                onPageChanged: (page) {
+                  setState(() => _currentPage = page);
+                  if (page == 1) {
+                    _fetchPhoneNumber();
+                  }
+                },
                 children: [
                   _buildStepTemplate(
                     key: const ValueKey('step1'),
@@ -359,10 +382,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           Icons.alternate_email,
                         ),
                         validator: (value) {
-                          if (value == null || value.isEmpty)
+                          if (value == null || value.isEmpty) {
                             return 'Please enter a username';
-                          if (value.length < 3)
+                          }
+                          if (value.length < 3) {
                             return 'Username must be at least 3 characters';
+                          }
                           return null;
                         },
                       ),
@@ -371,24 +396,92 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       if (_step1Key.currentState!.validate()) _nextPage();
                     },
                   ),
+                  // Step 2: Phone Number (MANDATORY - V2)
                   _buildStepTemplate(
                     key: const ValueKey('step2'),
                     formKey: _step2Key,
+                    title: 'Your Phone Number',
+                    subtitle: 'Used to find friends from your contacts.',
+                    fields: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Country code field
+                          SizedBox(
+                            width: 65, // Reduced width
+                            child: TextFormField(
+                              controller: _countryCodeController,
+                              keyboardType: TextInputType.number,
+                              style: PrismTextStyles.bodyLarge,
+                              decoration: _glassInputDecoration('').copyWith(
+                                hintText: '91',
+                                prefixText: '+',
+                                prefixStyle: PrismTextStyles.bodyLarge.copyWith(color: Colors.white),
+                                hintStyle: PrismTextStyles.bodyLarge.copyWith(color: Colors.white54),
+                                floatingLabelBehavior: FloatingLabelBehavior.never,
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Required';
+                                }
+                                final digits = value.replaceAll('+', '').trim();
+                                if (digits.isEmpty ||
+                                    int.tryParse(digits) == null) {
+                                  return 'Digits only';
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          // Phone number field
+                          Expanded(
+                            child: TextFormField(
+                              controller: _phoneNumberController,
+                              keyboardType: TextInputType.phone,
+                              style: PrismTextStyles.bodyLarge,
+                              decoration: _glassInputDecoration(
+                                'Phone Number',
+                                Icons.phone_outlined,
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Please enter your phone number';
+                                }
+                                final digits = value.replaceAll(
+                                  RegExp(r'[^\d]'),
+                                  '',
+                                );
+                                if (digits.length < 7 || digits.length > 15) {
+                                  return 'Enter a valid phone number';
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    onNext: () {
+                      if (_step2Key.currentState!.validate()) _nextPage();
+                    },
+                  ),
+                  // Step 3: Name (Optional)
+                  _buildStepTemplate(
+                    key: const ValueKey('step3'),
+                    formKey: _step3Key,
                     title: 'Who Are You?',
-                    subtitle: 'So your friends know it\'s really you.',
+                    subtitle:
+                        'Optional — helps friends recognize you.',
                     fields: [
                       TextFormField(
                         controller: _firstNameController,
                         style: PrismTextStyles.bodyLarge,
                         decoration: _glassInputDecoration(
-                          'First Name',
+                          'First Name (Optional)',
                           Icons.person_outline,
                         ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty)
-                            return 'Please enter your first name';
-                          return null;
-                        },
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
@@ -401,39 +494,43 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                     ],
                     onNext: () {
-                      if (_step2Key.currentState!.validate()) _nextPage();
+                      if (_step3Key.currentState!.validate()) _nextPage();
                     },
                   ),
+                  // Step 4: Email (Optional)
                   _buildStepTemplate(
-                    key: const ValueKey('step3'),
-                    formKey: _step3Key,
-                    title: 'Contact Info',
-                    subtitle: 'For verification and keeping you in the loop.',
+                    key: const ValueKey('step4'),
+                    formKey: _step4Key,
+                    title: 'Email Address',
+                    subtitle:
+                        'Optional — for account recovery only.',
                     fields: [
                       TextFormField(
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
                         style: PrismTextStyles.bodyLarge,
                         decoration: _glassInputDecoration(
-                          'Email Address',
+                          'Email Address (Optional)',
                           Icons.email_outlined,
                         ),
                         validator: (value) {
-                          if (value == null || value.isEmpty)
-                            return 'Please enter your email';
-                          if (!value.contains('@') || !value.contains('.'))
+                          if (value != null &&
+                              value.isNotEmpty &&
+                              (!value.contains('@') || !value.contains('.'))) {
                             return 'Please enter a valid email';
+                          }
                           return null;
                         },
                       ),
                     ],
                     onNext: () {
-                      if (_step3Key.currentState!.validate()) _nextPage();
+                      if (_step4Key.currentState!.validate()) _nextPage();
                     },
                   ),
+                  // Step 5: Password
                   _buildStepTemplate(
-                    key: const ValueKey('step4'),
-                    formKey: _step4Key,
+                    key: const ValueKey('step5'),
+                    formKey: _step5Key,
                     title: 'Secure It',
                     subtitle: 'Make it strong. Make it safe.',
                     fields: [
@@ -459,10 +556,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                             ),
                         validator: (value) {
-                          if (value == null || value.isEmpty)
+                          if (value == null || value.isEmpty) {
                             return 'Please enter a password';
-                          if (value.length < 6)
+                          }
+                          if (value.length < 6) {
                             return 'Password must be at least 6 characters';
+                          }
                           return null;
                         },
                       ),
@@ -490,16 +589,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                             ),
                         validator: (value) {
-                          if (value == null || value.isEmpty)
+                          if (value == null || value.isEmpty) {
                             return 'Please confirm your password';
-                          if (value != _passwordController.text)
+                          }
+                          if (value != _passwordController.text) {
                             return 'Passwords do not match';
+                          }
                           return null;
                         },
                       ),
                     ],
                     onNext: () {
-                      if (_step4Key.currentState!.validate()) _nextPage();
+                      if (_step5Key.currentState!.validate()) _nextPage();
                     },
                   ),
 
@@ -582,12 +683,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       if (_faceIds != null && _faceIds!.isNotEmpty) {
                         await _handleFaceRevealNext();
                       } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Please complete Face ID scan'),
-                            backgroundColor: PrismColors.errorRed,
-                            behavior: SnackBarBehavior.floating,
-                          ),
+                        ErrorHandler.showErrorSnackbar(
+                          context,
+                          message: 'Please complete the Face ID scan to continue.',
                         );
                       }
                     },

@@ -527,9 +527,8 @@ class GalleryProvider with ChangeNotifier {
     for (final image in _images) {
       // Only save images that are not in bin and have valid URLs
       if (!image.galleryMeta.bin &&
-          image.image.imageUrl != null &&
-          image.image.imageUrl!.isNotEmpty) {
-        imagesToSave.add({'id': image.image.id, 'url': image.image.imageUrl!});
+          image.image.imageUrl.isNotEmpty) {
+        imagesToSave.add({'id': image.image.id, 'url': image.image.imageUrl});
       }
     }
 

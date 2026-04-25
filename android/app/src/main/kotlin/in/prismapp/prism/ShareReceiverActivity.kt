@@ -1,4 +1,4 @@
-package com.example.prism
+package `in`.prismapp.prism
 
 import android.app.Activity
 import android.content.Context

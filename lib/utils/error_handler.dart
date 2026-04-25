@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:prism/api/api_client.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 
@@ -14,6 +15,10 @@ class ErrorHandler {
       return 'An unexpected error occurred';
     }
 
+    // ApiException already carries a clean, extracted message from _handleResponse
+    if (error is ApiException) {
+      return error.message.isNotEmpty ? error.message : 'An error occurred. Please try again.';
+    }
     final errorString = error.toString().toLowerCase();
 
     // Network errors

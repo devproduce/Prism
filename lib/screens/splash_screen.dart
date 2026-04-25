@@ -146,88 +146,27 @@ class _SplashScreenState extends State<SplashScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
 
-    // Responsive logo size (15% of screen width, clamped)
-    final logoSize = (screenWidth * 0.3).clamp(80.0, 160.0);
-
-    // Responsive font sizes
-    final titleFontSize = (screenWidth * 0.12).clamp(36.0, 56.0);
-    final subtitleFontSize = (screenWidth * 0.04).clamp(12.0, 18.0);
-
-    // Responsive spacing
-    final logoToTitleSpacing = screenHeight * 0.04;
-    final titleToSubtitleSpacing = screenHeight * 0.02;
+    // Responsive logo size (larger for center display)
+    final logoSize = (screenWidth * 0.5).clamp(180.0, 300.0);
 
     return Scaffold(
       backgroundColor: PrismColors.voidBlack,
       body: Center(
         child: _hasError
             ? _buildErrorState(screenWidth)
-            : Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Logo
-                  Image.asset(
-                        'assets/Images/Prism Logo.png',
-                        width: logoSize,
-                        height: logoSize,
-                        color: PrismColors.white,
-                        errorBuilder: (context, error, stackTrace) {
-                          // Fallback icon if image fails to load
-                          return Icon(
-                            Icons.auto_awesome,
-                            size: logoSize,
-                            color: PrismColors.white,
-                          );
-                        },
-                      )
-                      .animate()
-                      .fade(duration: 800.ms, curve: Curves.easeOutCubic)
-                      .scale(
-                        begin: const Offset(0.8, 0.8),
-                        end: const Offset(1, 1),
-                        duration: 800.ms,
-                        curve: Curves.easeOutBack,
-                      ),
-
-                  SizedBox(height: logoToTitleSpacing),
-
-                  // Title
-                  Text(
-                    'Prism',
-                    style: PrismTextStyles.h1.copyWith(
-                      fontSize: titleFontSize,
-                      letterSpacing: -1,
+            : Center(
+                child: Image.asset(
+                  'assets/Images/Prism Logo.png',
+                  width: logoSize,
+                  height: logoSize,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Icon(
+                      Icons.auto_awesome,
+                      size: logoSize,
                       color: PrismColors.white,
-                      shadows: [
-                        BoxShadow(
-                          color: PrismColors.prismYellow.withValues(alpha: 0.4),
-                          blurRadius: 30,
-                          offset: const Offset(0, 0),
-                        ),
-                      ],
-                    ),
-                  ).animate().fade(
-                    delay: 200.ms,
-                    duration: 800.ms,
-                    curve: Curves.easeOutCubic,
-                  ),
-
-                  SizedBox(height: titleToSubtitleSpacing),
-
-                  // Subtitle
-                  Text(
-                    'Your Gallery, Smarter.',
-                    style: PrismTextStyles.bodyLarge.copyWith(
-                      fontSize: subtitleFontSize,
-                      color: PrismColors.secondaryText,
-                      letterSpacing: 2,
-                    ),
-                  ).animate().fade(
-                    delay: 400.ms,
-                    duration: 800.ms,
-                    curve: Curves.easeOutCubic,
-                  ),
-                ],
+                    );
+                  },
+                ).animate().fade(duration: 1000.ms, curve: Curves.easeOut),
               ),
       ),
     );

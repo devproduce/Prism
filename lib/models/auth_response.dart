@@ -4,8 +4,14 @@ class AuthResponse {
   final UserModel user;
   final String message;
   final String? token; // Auth token from backend (if provided)
+  final bool? phoneSynced; // V2: false = phone number was malformed
 
-  AuthResponse({required this.user, required this.message, this.token});
+  AuthResponse({
+    required this.user,
+    required this.message,
+    this.token,
+    this.phoneSynced,
+  });
 
   factory AuthResponse.fromJson(Map<String, dynamic> json) {
     // Check if user data is nested under 'user' key
@@ -18,6 +24,7 @@ class AuthResponse {
       user: UserModel.fromJson(userData),
       message: json['message'] ?? 'Success',
       token: json['access_token'] ?? json['token'], // Try both field names
+      phoneSynced: json['phone_synced'] as bool?,
     );
   }
 
@@ -26,6 +33,7 @@ class AuthResponse {
       ...user.toJson(),
       'message': message,
       if (token != null) 'token': token,
+      if (phoneSynced != null) 'phone_synced': phoneSynced,
     };
   }
 }

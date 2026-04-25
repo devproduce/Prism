@@ -1,5 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:prism/utils/constants.dart';
+import 'package:prism/utils/error_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:prism/api/api_client.dart';
@@ -7,6 +9,7 @@ import 'package:prism/models/user_model.dart';
 import 'package:prism/services/database_service.dart';
 import 'package:prism/services/contact_service.dart';
 import 'package:prism/providers/profile_provider.dart';
+import 'package:prism/services/notification_service.dart';
 
 // SharedPreferences keys for native Android access
 // These must match the keys used in BackgroundShareService.kt
@@ -25,12 +28,16 @@ class AuthProvider with ChangeNotifier {
   bool _isAuthenticated = false;
   bool _contactsSynced = false;
 
+  bool _phoneSyncWarning = false;
+
   // Getters
   UserModel? get currentUser => _currentUser;
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get isAuthenticated => _isAuthenticated;
   bool get contactsSynced => _contactsSynced;
+  /// True when the backend could not normalize the phone number on registration.
+  bool get phoneSyncWarning => _phoneSyncWarning;
   ApiClient get apiClient => _apiClient;
   String? get token => _apiClient.token;
 
@@ -77,6 +84,9 @@ class AuthProvider with ChangeNotifier {
           // Ensure credentials are in SharedPreferences for native Android share receiver
           await _saveCredentialsForNativeAccess();
 
+          // Register FCM token
+          NotificationService.registerDeviceToken(user.userId);
+
           notifyListeners();
         }
       }
@@ -85,24 +95,29 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  /// Register a new user
+  /// Register a new user (V2 — phone-first)
   Future<bool> register({
     required String username,
-    required String email,
     required String password,
-    required String firstName,
+    required String countryCode,
+    required String phoneNumber,
+    String? email,
+    String? firstName,
     String? lastName,
     File? profileImage,
-    List<String>? faceIds, // Optional face IDs from multi-view registration
+    List<String>? faceIds,
   }) async {
     try {
       _setLoading(true);
       _setError(null);
+      _phoneSyncWarning = false;
 
       final response = await _apiClient.register(
         username: username,
-        email: email,
         password: password,
+        countryCode: countryCode,
+        phoneNumber: phoneNumber,
+        email: email,
         firstName: firstName,
         lastName: lastName,
         profileImage: profileImage,
@@ -112,23 +127,52 @@ class AuthProvider with ChangeNotifier {
       _currentUser = response.user;
       final token = response.token;
 
+      // Check phone_synced flag
+      if (response.phoneSynced == false) {
+        _phoneSyncWarning = true;
+        debugPrint('⚠️ phone_synced=false: phone number could not be verified');
+      }
+
       debugPrint(
         'Registration Response - UserID: "${_currentUser?.userId}", Token: "${token ?? 'null'}"',
       );
 
-      // FAILSAFE: If registration response didn't return a valid userId OR a valid token, try to login automatically
-      // This is crucial because some backends don't return the full session on register, or parsing might fail.
+      // FAILSAFE: If registration response didn't return a valid userId OR a valid token,
+      // try to login automatically using the phone number.
       bool needsAutoLogin = _currentUser?.userId.isEmpty ?? true;
       if (!needsAutoLogin && (token == null || token.isEmpty)) {
         debugPrint(
-          '⚠️ Registration successful but NO TOKEN returned. Forcing auto-login to establish session.',
+          '⚠️ Registration successful but NO TOKEN returned. Forcing auto-login.',
         );
         needsAutoLogin = true;
       }
 
       if (needsAutoLogin) {
         debugPrint('🔄 Initiating Auto-Login Sequence...');
-        return await login(identifier: email, password: password);
+        
+        // Save the full registration user data before login potentially wipes it
+        final registeredUser = _currentUser;
+        
+        // Try login with username (phone login not yet supported on login endpoint)
+        final loginSuccess = await login(identifier: username, password: password);
+        
+        // If login succeeded but wiped our data (e.g. getCurrentUser failed), restore it!
+        if (loginSuccess && registeredUser != null) {
+           _currentUser = _currentUser?.copyWith(
+             firstName: (_currentUser?.firstName.isEmpty ?? true) ? registeredUser.firstName : null,
+             lastName: _currentUser?.lastName ?? registeredUser.lastName,
+             phoneNumber: _currentUser?.phoneNumber ?? registeredUser.phoneNumber,
+             countryCode: _currentUser?.countryCode ?? registeredUser.countryCode,
+             email: (_currentUser?.email.isEmpty ?? true) ? registeredUser.email : null,
+             // In case username also got wiped somehow
+             username: (_currentUser?.username.isEmpty ?? true) ? registeredUser.username : null,
+           ) ?? registeredUser;
+           
+           // Ensure the database has the merged data
+           await _databaseService.updateUserSession(_currentUser!);
+        }
+        
+        return loginSuccess;
       }
 
       _isAuthenticated = true;
@@ -152,8 +196,10 @@ class AuthProvider with ChangeNotifier {
         await _databaseService.updateUserSession(freshUser);
       } catch (e) {
         debugPrint('Warning: Could not fetch fresh profile: $e');
-        // Continue with registration even if profile fetch fails
       }
+
+      // Register FCM token
+      NotificationService.registerDeviceToken(response.user.userId);
 
       _setLoading(false);
 
@@ -163,11 +209,12 @@ class AuthProvider with ChangeNotifier {
       _setLoading(false);
       return false;
     } catch (e) {
-      _setError('An unexpected error occurred: ${e.toString()}');
+      _setError(ErrorHandler.getErrorMessage(e));
       _setLoading(false);
       return false;
     }
   }
+
 
   /// Login user
   Future<bool> login({
@@ -213,6 +260,9 @@ class AuthProvider with ChangeNotifier {
       // Check if contacts have been synced
       _contactsSynced = await _databaseService.hasContactsSynced();
 
+      // Register FCM token
+      NotificationService.registerDeviceToken(response.user.userId);
+
       _setLoading(false);
 
       return true;
@@ -221,7 +271,7 @@ class AuthProvider with ChangeNotifier {
       _setLoading(false);
       return false;
     } catch (e) {
-      _setError('An unexpected error occurred: ${e.toString()}');
+      _setError(ErrorHandler.getErrorMessage(e));
       _setLoading(false);
       return false;
     }
@@ -257,7 +307,7 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  /// Sync contacts to backend
+  /// Sync contacts to backend (V2 bulk sync)
   Future<bool> syncContacts() async {
     if (_currentUser == null) {
       _setError('No user logged in');
@@ -265,9 +315,12 @@ class AuthProvider with ChangeNotifier {
     }
 
     try {
-      final success = await _contactService.requestPermissionAndSyncContacts(
+      final result = await _contactService.requestPermissionAndSyncContacts(
         _currentUser!.userId,
       );
+
+      // result is null if permission was denied; non-null means sync succeeded
+      final success = result != null;
 
       if (success) {
         await _databaseService.markContactsSynced();
@@ -368,8 +421,8 @@ class AuthProvider with ChangeNotifier {
 
       await prefs.setString(
         kPrefBaseUrl,
-        'http://43.204.227.62',
-      ); // Match ApiConstants.baseUrl
+        ApiConstants.baseUrl,
+      );
 
       debugPrint(
         '✅ Saved credentials for native Android access (userId: ${_currentUser!.userId})',

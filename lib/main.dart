@@ -7,7 +7,6 @@ import 'package:prism/screens/splash_screen.dart';
 import 'package:prism/screens/settings_screen.dart';
 import 'package:prism/screens/edit_profile_screen.dart';
 import 'package:prism/screens/blocked_users_screen.dart';
-import 'package:prism/screens/keep_users_screen.dart';
 import 'package:prism/screens/help_support_screen.dart';
 import 'package:prism/services/background_share_handler.dart';
 import 'package:prism/screens/privacy_policy_screen.dart';
@@ -22,6 +21,7 @@ import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/providers/notifications_provider.dart';
 import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/providers/theme_provider.dart';
+import 'package:prism/services/notification_service.dart';
 import 'package:prism/services/local_notification_service.dart';
 import 'package:prism/services/share_handler_service.dart';
 import 'package:prism/screens/confirm_sharing_screen.dart';
@@ -32,7 +32,10 @@ import 'package:prism/utils/globals.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize notifications
+  // Initialize FCM notifications
+  await NotificationService.initialize();
+
+  // Initialize local notifications
   await LocalNotificationService().initialize(navigatorKey);
 
   // Set system UI overlay style
@@ -190,7 +193,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               '/onboarding': (context) => const OnboardingScreen(),
               '/profile': (context) => const EditProfileScreen(),
               '/blocked_users': (context) => const BlockedUsersScreen(),
-              '/keep_users': (context) => const KeepUsersScreen(),
               '/help_support': (context) => const HelpSupportScreen(),
               '/confirm_share': (context) {
                 final args =
