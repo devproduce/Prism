@@ -204,7 +204,9 @@ Future<void> registerDeviceToken() async {
 
   // Handle intra-app token rotations automatically
   FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
-    apiClient.post('/notifications/device/register', data: { /* UPSERT logic on backend catches it */ });
+    if (deviceId != null) {
+      apiClient.post('/notifications/device/register', data: { /* UPSERT logic on backend catches it */ });
+    }
   });
 }
 ```

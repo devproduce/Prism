@@ -30,11 +30,13 @@ class ContactSyncResult {
 
 /// A Prism user found via phonebook matching
 class OnPlatformUser {
+  final String userId;
   final String username;
   final String? profilePicId;
   final int mutualContactCount;
 
   OnPlatformUser({
+    required this.userId,
     required this.username,
     this.profilePicId,
     required this.mutualContactCount,
@@ -42,6 +44,7 @@ class OnPlatformUser {
 
   factory OnPlatformUser.fromJson(Map<String, dynamic> json) {
     return OnPlatformUser(
+      userId: json['user_id'] ?? json['id'] ?? '',
       username: json['username'] ?? '',
       profilePicId: json['profile_pic_id'] as String?,
       mutualContactCount: (json['mutual_contact_count'] as num?)?.toInt() ?? 0,

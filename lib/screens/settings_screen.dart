@@ -245,56 +245,106 @@ class SettingsScreen extends StatelessWidget {
   ) async {
     HapticFeedback.selectionClick();
 
-    final confirmed = await ErrorHandler.showConfirmationDialog(
-      context,
-      title: 'Delete Account',
-      message:
-          'Are you sure you want to delete your account? This action cannot be undone.',
-      confirmText: 'Delete',
-      isDestructive: true,
+    final passwordController = TextEditingController();
+    final reasonController = TextEditingController();
+    bool isLoading = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: PrismColors.surfaceGray,
+              title: Text('Delete Account', style: PrismTextStyles.h3),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Are you sure you want to delete your account? This action cannot be undone. Please enter your password and a reason to confirm.',
+                    style: PrismTextStyles.bodyMedium.copyWith(color: PrismColors.secondaryText),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: true,
+                    style: PrismTextStyles.bodyLarge,
+                    decoration: InputDecoration(
+                      hintText: 'Password',
+                      hintStyle: PrismTextStyles.bodyMedium.copyWith(color: PrismColors.secondaryText),
+                      filled: true,
+                      fillColor: PrismColors.inputGray,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: reasonController,
+                    style: PrismTextStyles.bodyLarge,
+                    decoration: InputDecoration(
+                      hintText: 'Reason (e.g. not_using)',
+                      hintStyle: PrismTextStyles.bodyMedium.copyWith(color: PrismColors.secondaryText),
+                      filled: true,
+                      fillColor: PrismColors.inputGray,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isLoading ? null : () => Navigator.pop(dialogContext),
+                  child: Text('Cancel', style: PrismTextStyles.button.copyWith(color: PrismColors.secondaryText)),
+                ),
+                PrismButton(
+                  text: 'Delete',
+                  isLoading: isLoading,
+                  type: PrismButtonType.destructive,
+                  onPressed: () async {
+                    if (passwordController.text.isEmpty || reasonController.text.isEmpty) {
+                      ErrorHandler.showErrorSnackbar(context, message: 'Password and reason are required');
+                      return;
+                    }
+                    setState(() => isLoading = true);
+                    try {
+                      await authProvider.deleteAccount(
+                        password: passwordController.text,
+                        reason: reasonController.text,
+                        context: context,
+                      );
+                      if (context.mounted) {
+                        Navigator.pop(dialogContext); // Close dialog
+                        Navigator.of(context).pushNamedAndRemoveUntil('/onboarding', (route) => false);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Account scheduled for deletion',
+                              style: PrismTextStyles.bodyMedium.copyWith(color: PrismColors.white),
+                            ),
+                            backgroundColor: PrismColors.voidBlack,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ErrorHandler.showErrorSnackbar(
+                          context,
+                          message: ErrorHandler.getErrorMessage(e),
+                        );
+                      }
+                    } finally {
+                      if (context.mounted) setState(() => isLoading = false);
+                    }
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
-
-    if (confirmed == true && context.mounted) {
-      HapticFeedback.heavyImpact();
-      try {
-        // Just logout for now as per requirements
-        await authProvider.logout(context);
-
-        if (context.mounted) {
-          // Navigate to onboarding first
-          Navigator.of(
-            context,
-          ).pushNamedAndRemoveUntil('/onboarding', (route) => false);
-
-          // Show snackbar
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Your account is deleted',
-                style: PrismTextStyles.bodyMedium.copyWith(
-                  color: PrismColors.white,
-                ),
-              ),
-              backgroundColor: PrismColors.voidBlack,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-                side: BorderSide(
-                  color: PrismColors.white.withValues(alpha: 0.1),
-                ),
-              ),
-            ),
-          );
-        }
-      } catch (e) {
-        if (context.mounted) {
-          ErrorHandler.showErrorSnackbar(
-            context,
-            message: 'Failed to delete account. Please try again.',
-          );
-        }
-      }
-    }
   }
 
   Future<void> _launchEmail(BuildContext context) async {
@@ -452,7 +502,7 @@ class SettingsScreen extends StatelessWidget {
                       keyboardType: TextInputType.number,
                       style: PrismTextStyles.bodyLarge,
                       decoration: InputDecoration(
-                        labelText: '+Code',
+                        labelText: 'Code',
                         labelStyle: const TextStyle(color: Colors.white54),
                         filled: true,
                         fillColor: Colors.white.withOpacity(0.05),

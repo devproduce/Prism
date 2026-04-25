@@ -24,7 +24,7 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
-  final int _totalPages = 7; // Step: Username, Phone, Name, Email, Password, FaceID, ProfilePic
+  final int _totalPages = 5; // Step: Username, Phone, Password, FaceID, ProfilePic
 
   // Form controllers
   final _usernameController = TextEditingController();
@@ -467,69 +467,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       if (_step2Key.currentState!.validate()) _nextPage();
                     },
                   ),
-                  // Step 3: Name (Optional)
+                  // Step 3: Password
                   _buildStepTemplate(
                     key: const ValueKey('step3'),
-                    formKey: _step3Key,
-                    title: 'Who Are You?',
-                    subtitle:
-                        'Optional — helps friends recognize you.',
-                    fields: [
-                      TextFormField(
-                        controller: _firstNameController,
-                        style: PrismTextStyles.bodyLarge,
-                        decoration: _glassInputDecoration(
-                          'First Name (Optional)',
-                          Icons.person_outline,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _lastNameController,
-                        style: PrismTextStyles.bodyLarge,
-                        decoration: _glassInputDecoration(
-                          'Last Name (Optional)',
-                          Icons.person_outline,
-                        ),
-                      ),
-                    ],
-                    onNext: () {
-                      if (_step3Key.currentState!.validate()) _nextPage();
-                    },
-                  ),
-                  // Step 4: Email (Optional)
-                  _buildStepTemplate(
-                    key: const ValueKey('step4'),
-                    formKey: _step4Key,
-                    title: 'Email Address',
-                    subtitle:
-                        'Optional — for account recovery only.',
-                    fields: [
-                      TextFormField(
-                        controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
-                        style: PrismTextStyles.bodyLarge,
-                        decoration: _glassInputDecoration(
-                          'Email Address (Optional)',
-                          Icons.email_outlined,
-                        ),
-                        validator: (value) {
-                          if (value != null &&
-                              value.isNotEmpty &&
-                              (!value.contains('@') || !value.contains('.'))) {
-                            return 'Please enter a valid email';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
-                    onNext: () {
-                      if (_step4Key.currentState!.validate()) _nextPage();
-                    },
-                  ),
-                  // Step 5: Password
-                  _buildStepTemplate(
-                    key: const ValueKey('step5'),
                     formKey: _step5Key,
                     title: 'Secure It',
                     subtitle: 'Make it strong. Make it safe.',
@@ -604,9 +544,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     },
                   ),
 
-                  // Step 6: Face ID Recognition (Required)
+                  // Step 4: Face ID Recognition (Required)
                   _buildStepTemplate(
-                    key: const ValueKey('step6'),
+                    key: const ValueKey('step4'),
                     formKey: _step6Key,
                     title: 'Face ID Recognition',
                     subtitle:
@@ -691,9 +631,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     },
                     buttonText: 'Register',
                   ),
-                  // Step 7: Profile Picture (Optional)
+                  // Step 5: Profile Picture (Optional)
                   SingleChildScrollView(
-                    key: const ValueKey('step7'),
+                    key: const ValueKey('step5'),
                     padding: const EdgeInsets.all(24.0),
                     child: GlassCard(
                       borderRadius: 30,

@@ -67,14 +67,12 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   }
 
   GalleryImage get currentImage {
-    // Protect against out-of-bounds access
-    if (_currentIndex < 0 || _currentIndex >= _localImages.length) {
-      // Return a dummy image if index is invalid (should not happen in normal flow)
-      throw StateError(
-        'Invalid current index: $_currentIndex (list length: ${_localImages.length})',
-      );
+    if (_localImages.isEmpty) {
+      throw StateError('Cannot get current image: list is empty');
     }
-    return _localImages[_currentIndex];
+    // Protect against out-of-bounds access by clamping the index
+    final safeIndex = _currentIndex.clamp(0, _localImages.length - 1);
+    return _localImages[safeIndex];
   }
 
   void _updateCurrentImage(GalleryImage updatedImage) {

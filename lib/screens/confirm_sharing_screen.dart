@@ -61,7 +61,7 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
         _showError(sharingProvider.error ?? 'Failed to load batch');
         // Navigate back to home
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
+          MaterialPageRoute(builder: (context) => HomeScreen(key: HomeScreen.homeScreenKey)),
         );
       }
 
@@ -115,7 +115,7 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
         HapticFeedback.heavyImpact();
 
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
+          MaterialPageRoute(builder: (context) => HomeScreen(key: HomeScreen.homeScreenKey)),
           (route) => false,
         );
       } else if (mounted) {
@@ -485,7 +485,7 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
                               sharingProvider.cancel();
                               Navigator.of(context).pushAndRemoveUntil(
                                 MaterialPageRoute(
-                                  builder: (context) => const HomeScreen(),
+                                  builder: (context) => HomeScreen(key: HomeScreen.homeScreenKey),
                                 ),
                                 (route) => false,
                               );

@@ -261,6 +261,52 @@ class ApiClient {
     }
   }
 
+  /// Forgot password
+  /// POST /auth/forgot-password
+  Future<void> forgotPassword(String email) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/auth/forgot-password');
+      final response = await _client.post(
+        uri,
+        headers: _getHeaders(),
+        body: json.encode({'email': email}),
+      );
+
+      _handleResponse(response);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to send reset link: ${e.toString()}');
+    }
+  }
+
+  /// Delete account
+  /// DELETE /auth/delete-account
+  Future<void> deleteAccount({
+    required String userId,
+    required String password,
+    required String reason,
+    String? feedback,
+  }) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/auth/delete-account');
+      final response = await _client.delete(
+        uri,
+        headers: _getHeaders(),
+        body: json.encode({
+          'user_id': userId,
+          'password': password,
+          'reason': reason,
+          if (feedback != null && feedback.isNotEmpty) 'feedback': feedback,
+        }),
+      );
+
+      _handleResponse(response);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to delete account: ${e.toString()}');
+    }
+  }
+
   /// Check username or email availability
   /// GET /auth/check-availability
   Future<bool> checkAvailability({

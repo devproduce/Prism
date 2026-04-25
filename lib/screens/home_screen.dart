@@ -413,7 +413,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   : _defaultActions(),
             ),
 
-            const SliverToBoxAdapter(child: SizedBox(height: 8)),
+            //const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
             // 2. Featured / Prism Cloud Section (Horizontal)
             if (galleryProvider.isLoading)

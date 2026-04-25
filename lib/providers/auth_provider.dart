@@ -307,6 +307,50 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+  /// Forgot password
+  Future<void> forgotPassword(String email) async {
+    try {
+      _setLoading(true);
+      _setError(null);
+
+      await _apiClient.forgotPassword(email);
+    } catch (e) {
+      _setError(e.toString());
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Delete account
+  Future<void> deleteAccount({
+    required String password,
+    required String reason,
+    String? feedback,
+    required BuildContext context,
+  }) async {
+    if (_currentUser == null) throw Exception('User not logged in');
+
+    try {
+      _setLoading(true);
+      _setError(null);
+
+      await _apiClient.deleteAccount(
+        userId: _currentUser!.userId,
+        password: password,
+        reason: reason,
+        feedback: feedback,
+      );
+
+      await logout(context);
+    } catch (e) {
+      _setError(e.toString());
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
   /// Sync contacts to backend (V2 bulk sync)
   Future<bool> syncContacts() async {
     if (_currentUser == null) {

@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/widgets/prism_card.dart';
 import 'package:prism/widgets/prism_button.dart';
 import 'package:prism/utils/error_handler.dart';
+import 'package:provider/provider.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -31,17 +33,27 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     HapticFeedback.mediumImpact();
     setState(() => _isLoading = true);
 
-    // TODO: Implement forgot password API call
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      await authProvider.forgotPassword(_emailController.text);
 
-    if (mounted) {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
 
-      ErrorHandler.showSuccessSnackbar(
-        context,
-        message: 'Password reset link sent to your email',
-      );
-      Navigator.pop(context);
+        ErrorHandler.showSuccessSnackbar(
+          context,
+          message: 'Password reset link sent to your email',
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ErrorHandler.showErrorSnackbar(
+          context,
+          message: ErrorHandler.getErrorMessage(e),
+        );
+      }
     }
   }
 

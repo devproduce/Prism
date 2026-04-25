@@ -1021,9 +1021,23 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
     return PrismCard(
       padding: EdgeInsets.zero,
-      child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => UserProfileScreen(
+                userId: user.userId,
+                username: user.username,
+              ),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: CircleAvatar(
           backgroundColor: PrismColors.inputGray,
           backgroundImage: user.profilePictureUrl.isNotEmpty
@@ -1095,6 +1109,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
                   ),
                 ),
               ),
+        ),
       ),
     );
   }
