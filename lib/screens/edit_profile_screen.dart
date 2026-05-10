@@ -26,8 +26,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _usernameController;
   late TextEditingController _firstNameController;
   late TextEditingController _lastNameController;
-  late TextEditingController _pronounsController;
   late TextEditingController _bioController;
+
+  final List<String> _pronounOptions = [
+    'he/him',
+    'she/her',
+    'they/them',
+    'he/they',
+    'she/they',
+    'it/its',
+    'any pronouns',
+    'prefer not to say',
+  ];
+  String? _selectedPronoun;
   late TextEditingController _phoneController;
   late TextEditingController _countryCodeController;
 
@@ -47,8 +58,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _usernameController = TextEditingController(text: user?.username ?? '');
     _firstNameController = TextEditingController(text: user?.firstName ?? '');
     _lastNameController = TextEditingController(text: user?.lastName ?? '');
-    _pronounsController = TextEditingController(text: user?.pronouns ?? '');
     _bioController = TextEditingController(text: user?.bio ?? '');
+    
+    _selectedPronoun = user?.pronouns;
+    if (_selectedPronoun != null && _selectedPronoun!.isNotEmpty && !_pronounOptions.contains(_selectedPronoun)) {
+      _pronounOptions.add(_selectedPronoun!);
+    } else if (_selectedPronoun?.isEmpty ?? true) {
+      _selectedPronoun = null;
+    }
     _phoneController = TextEditingController(text: user?.phoneNumber ?? '');
     _countryCodeController = TextEditingController(
       text: user?.countryCode ?? '',
@@ -60,7 +77,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _usernameController.dispose();
     _firstNameController.dispose();
     _lastNameController.dispose();
-    _pronounsController.dispose();
     _bioController.dispose();
     _phoneController.dispose();
     _countryCodeController.dispose();
@@ -187,9 +203,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         lastName: _lastNameController.text.trim().isEmpty
             ? null
             : _lastNameController.text.trim(),
-        pronouns: _pronounsController.text.trim().isEmpty
-            ? null
-            : _pronounsController.text.trim(),
+        pronouns: _selectedPronoun == 'prefer not to say' ? '' : (_selectedPronoun ?? ''),
         bio: _bioController.text.trim().isEmpty
             ? null
             : _bioController.text.trim(),
@@ -425,10 +439,33 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
                     // Pronouns Field
                     _buildLabel('Pronouns'),
-                    PrismTextField(
-                      controller: _pronounsController,
-                      hintText: 'e.g., she/her, he/him',
-                      prefixIcon: Icons.person_outline,
+                    DropdownButtonFormField<String>(
+                      value: _selectedPronoun,
+                      decoration: InputDecoration(
+                        hintText: 'Select your pronouns',
+                        hintStyle: PrismTextStyles.bodyLarge.copyWith(color: PrismColors.secondaryText),
+                        prefixIcon: const Icon(Icons.person_outline, color: PrismColors.electricBlue),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.05),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      dropdownColor: PrismColors.surfaceGray,
+                      style: PrismTextStyles.bodyLarge,
+                      icon: const Icon(Icons.arrow_drop_down, color: PrismColors.white),
+                      items: _pronounOptions.map((pronoun) {
+                        return DropdownMenuItem<String>(
+                          value: pronoun,
+                          child: Text(pronoun),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedPronoun = value;
+                        });
+                      },
                     ),
 
                     const SizedBox(height: 16),
@@ -467,48 +504,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       ],
                     ),
 
-                    const SizedBox(height: 16),
-
-                    // Email (Read-only)
-                    _buildLabel('Email', isReadOnly: true),
-                    TextFormField(
-                      // Keep as TextFormField for specific read-only style or use PrismTextField with readOnly
-                      initialValue: user?.email,
-                      readOnly: true,
-                      enabled: false,
-                      style: PrismTextStyles.bodyMedium.copyWith(
-                        color: PrismColors.secondaryText,
-                      ),
-                      decoration: InputDecoration(
-                        filled: true,
-                        fillColor: PrismColors.inputGray.withValues(alpha: 0.5),
-                        prefixIcon: const Icon(
-                          Icons.email_outlined,
-                          color: PrismColors.secondaryText,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 16,
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8.0, left: 4.0),
-                      child: Text(
-                        'Email cannot be changed',
-                        style: PrismTextStyles.bodySmall.copyWith(
-                          fontSize: 12,
-                          color: PrismColors.secondaryText,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-                    //_buildArchivedPostsButton(),
                     const SizedBox(height: 32),
                   ],
                 ),

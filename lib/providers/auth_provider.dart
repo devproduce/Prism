@@ -41,6 +41,11 @@ class AuthProvider with ChangeNotifier {
   ApiClient get apiClient => _apiClient;
   String? get token => _apiClient.token;
 
+  /// Check username availability
+  Future<bool> checkUsernameAvailability(String username) async {
+    return await _apiClient.checkUsernameAvailability(username);
+  }
+
   // Set loading state
   void _setLoading(bool value) {
     _isLoading = value;
@@ -368,6 +373,9 @@ class AuthProvider with ChangeNotifier {
 
       if (success) {
         await _databaseService.markContactsSynced();
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('contacts_synced_${_currentUser!.userId}', true);
+        
         _contactsSynced = true;
         notifyListeners();
       }
@@ -390,6 +398,8 @@ class AuthProvider with ChangeNotifier {
       if (hasContacts) {
         _contactsSynced = true;
         await _databaseService.markContactsSynced();
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('contacts_synced_${_currentUser!.userId}', true);
         notifyListeners();
       }
       return hasContacts;

@@ -221,10 +221,16 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                       size: 40,
                     ),
                     const SizedBox(height: 12),
-                    Text(
-                      'We\'d Love to Hear From You!',
-                      style: PrismTextStyles.h2.copyWith(fontSize: 20),
-                      textAlign: TextAlign.center,
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        'We\'d Love to Hear From You!',
+                        style: PrismTextStyles.h2.copyWith(
+                          fontSize: (screenWidth * 0.055).clamp(16.0, 24.0),
+                        ),
+                        maxLines: 1,
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Text(

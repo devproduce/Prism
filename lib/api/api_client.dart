@@ -124,6 +124,27 @@ class ApiClient {
 
   // ==================== AUTH ENDPOINTS ====================
 
+  /// Check if username is available
+  Future<bool> checkUsernameAvailability(String username) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/auth/check-availability?type=username&value=$username');
+      final response = await _client.get(
+        uri,
+        headers: _getHeaders(),
+      );
+      
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final data = json.decode(response.body);
+        return data['available'] == true;
+      } else {
+        return false;
+      }
+    } catch (e) {
+      debugPrint('Error checking username availability: $e');
+      return false; // Fail safe
+    }
+  }
+
   /// Register device token for FCM
   Future<void> registerDeviceToken({
     required String userId,

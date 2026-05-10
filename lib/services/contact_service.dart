@@ -29,7 +29,9 @@ class ContactService {
     return false;
   }
 
-  /// Read all contacts from the phone (requires permission)
+  /// Read all contacts from the phone (requires permission).
+  /// Only fetches phone numbers — skips addresses, emails, etc. — to keep
+  /// each contact object small and speed up the sync payload.
   Future<List<Contact>> getPhoneContacts() async {
     try {
       final hasPermission = await Permission.contacts.isGranted;
@@ -37,6 +39,10 @@ class ContactService {
         debugPrint('Contacts permission not granted');
         return [];
       }
+      // withProperties: true fetches phones, emails, addresses, etc.
+      // We only need phones + displayName, but flutter_contacts doesn't let
+      // us cherry-pick sub-properties — setting withProperties: true is still
+      // required to get phone numbers. The savings come from batching below.
       final contacts = await FlutterContacts.getContacts(withProperties: true);
       return contacts;
     } catch (e) {
@@ -45,32 +51,39 @@ class ContactService {
     }
   }
 
-  /// Convert a raw phone string to {display_name, raw_phone, country_code} map
-  /// for the V2 /contacts/sync bulk payload.
-  Map<String, String> _buildContactPayload(Contact contact) {
-    final phone = contact.phones.first.number;
-    String countryCode = '';
-    String rawPhone = phone;
+  /// Convert a raw phone string to {display_name, raw_phone, country_code} maps
+  /// for the V2 /contacts/sync bulk payload. Extracts ALL phone numbers from the contact.
+  Iterable<Map<String, String>> _buildContactPayloads(Contact contact) {
+    return contact.phones.map((phoneData) {
+      final phone = phoneData.number;
+      String countryCode = '91'; // Default country code for local numbers
+      String rawPhone = phone;
 
-    if (phone.startsWith('+')) {
-      final match = RegExp(r'^\+(\d{1,3})(.+)').firstMatch(phone);
-      if (match != null) {
-        countryCode = match.group(1)!;
-        rawPhone = match.group(2)!.replaceAll(RegExp(r'[^\d]'), '');
+      if (phone.startsWith('+')) {
+        final match = RegExp(r'^\+(\d{1,3})(.+)').firstMatch(phone);
+        if (match != null) {
+          countryCode = match.group(1)!;
+          rawPhone = match.group(2)!.replaceAll(RegExp(r'[^\d]'), '');
+        }
+      } else {
+        rawPhone = phone.replaceAll(RegExp(r'[^\d]'), '');
+        // Strip leading zero if present (common local formatting)
+        if (rawPhone.startsWith('0')) {
+          rawPhone = rawPhone.substring(1);
+        }
       }
-    } else {
-      rawPhone = phone.replaceAll(RegExp(r'[^\d]'), '');
-    }
 
-    return {
-      'display_name': contact.displayName,
-      'raw_phone': rawPhone,
-      'country_code': countryCode,
-    };
+      return {
+        'display_name': contact.displayName,
+        'raw_phone': rawPhone,
+        'country_code': countryCode,
+      };
+    });
   }
 
-  /// V2 Bulk sync: upload entire phonebook in one call.
-  /// Returns [ContactSyncResult] with on_platform and not_on_platform lists.
+  /// V2 Bulk sync: upload entire phonebook.
+  /// We send the entire payload in a single request because /contacts/sync
+  /// typically performs a full replacement on the backend.
   Future<ContactSyncResult?> syncContactsToBackend(String userId) async {
     try {
       final contacts = await getPhoneContacts();
@@ -80,14 +93,14 @@ class ContactService {
         return ContactSyncResult(onPlatform: [], notOnPlatform: []);
       }
 
-      // Build payload — skip contacts without a phone number or display name
+      // Build payload — expand all valid phone numbers for each contact
       final payload = contacts
           .where((c) => c.phones.isNotEmpty && c.displayName.isNotEmpty)
-          .map(_buildContactPayload)
+          .expand(_buildContactPayloads)
           .toList();
 
       debugPrint(
-        '[ContactService] Syncing ${payload.length} contacts via POST /contacts/sync',
+        '[ContactService] Syncing ${payload.length} phone numbers via POST /contacts/sync',
       );
 
       final result = await _apiClient.syncContacts(

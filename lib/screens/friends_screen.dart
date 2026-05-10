@@ -28,6 +28,8 @@ class FriendsScreen extends StatefulWidget {
 
 class _FriendsScreenState extends State<FriendsScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _inviteSearchController = TextEditingController();
+  String _inviteSearchQuery = '';
 
   @override
   void initState() {
@@ -49,6 +51,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
   @override
   void dispose() {
+    _inviteSearchController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -175,10 +178,16 @@ class _FriendsScreenState extends State<FriendsScreen> {
                       }
                     },
                     child: CustomScrollView(
+                      // AlwaysScrollableScrollPhysics ensures pull-to-refresh
+                      // works even when content is shorter than the viewport.
+                      physics: const AlwaysScrollableScrollPhysics(),
                       slivers: [
+                        // ── Sync banner + People You May Know ────────────────
                         SliverToBoxAdapter(
-                          child: _buildDiscoverTopSection(friendsProvider, authProvider),
+                          child: _buildDiscoverHeader(friendsProvider, authProvider),
                         ),
+                        _buildOnPlatformSliver(friendsProvider, authProvider),
+                        // ── YOUR FRIENDS label ────────────────────────────────
                         SliverToBoxAdapter(
                           child: Padding(
                             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -192,10 +201,14 @@ class _FriendsScreenState extends State<FriendsScreen> {
                             ),
                           ),
                         ),
+                        // ── Friends list ─────────────────────────────────────
                         _buildFriendsSliver(friendsProvider, authProvider),
+                        // ── Invite to Prism header + search ──────────────────
                         SliverToBoxAdapter(
-                          child: _buildDiscoverBottomSection(friendsProvider, authProvider),
+                          child: _buildInviteHeader(friendsProvider),
                         ),
+                        // ── Invite contacts list ──────────────────────────────
+                        _buildInviteSliver(friendsProvider, authProvider),
                         const SliverToBoxAdapter(child: SizedBox(height: 100)),
                       ],
                     ),
@@ -493,107 +506,95 @@ class _FriendsScreenState extends State<FriendsScreen> {
             color: PrismColors.secondaryText,
           ),
         ),
-        trailing: IconButton(
+        trailing: PopupMenuButton<String>(
           icon: const Icon(
             Icons.more_vert_rounded,
             color: PrismColors.secondaryText,
           ),
-          onPressed: () {
-            final RenderBox box = context.findRenderObject() as RenderBox;
-            final Offset position = box.localToGlobal(Offset.zero);
-            showMenu<String>(
-              context: context,
-              position: RelativeRect.fromLTRB(
-                position.dx + 250,
-                position.dy,
-                0,
-                0,
-              ),
-              color: PrismColors.surfaceGray,
-              items: [
-                PopupMenuItem(
-                  value: 'keep',
-                  child: Row(
-                    children: [
-                      Icon(
-                        isKept ? Icons.star_border_rounded : Icons.star_rounded,
-                        color: PrismColors.white,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        isKept ? 'Un-favorite' : 'Favorite',
-                        style: const TextStyle(color: PrismColors.white),
-                      ),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'block',
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.block,
-                        color: PrismColors.destructiveRed,
-                        size: 18,
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'Block',
-                        style: TextStyle(color: PrismColors.destructiveRed),
-                      ),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'remove',
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.person_remove,
-                        color: PrismColors.secondaryText,
-                        size: 18,
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'Remove',
-                        style: TextStyle(color: PrismColors.secondaryText),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ).then((value) async {
-              if (authProvider.currentUser == null || value == null) return;
-              switch (value) {
-                case 'keep':
-                  await _handleToggleKeep(
-                    friend.userId,
-                    authProvider.currentUser!.userId,
-                    isKept,
-                    friend.displayName,
-                    friendsProvider,
-                  );
-                  break;
-                case 'block':
-                  await _handleBlockUser(
-                    friend.userId,
-                    authProvider.currentUser!.userId,
-                    friend.displayName,
-                    friendsProvider,
-                  );
-                  break;
-                case 'remove':
-                  await _handleRemoveFriend(
-                    friend.userId,
-                    authProvider.currentUser!.userId,
-                    friend.displayName,
-                    friendsProvider,
-                  );
-                  break;
-              }
-            });
+          color: PrismColors.surfaceGray,
+          onSelected: (value) async {
+            if (authProvider.currentUser == null) return;
+            switch (value) {
+              case 'keep':
+                await _handleToggleKeep(
+                  friend.userId,
+                  authProvider.currentUser!.userId,
+                  isKept,
+                  friend.displayName,
+                  friendsProvider,
+                );
+                break;
+              case 'block':
+                await _handleBlockUser(
+                  friend.userId,
+                  authProvider.currentUser!.userId,
+                  friend.displayName,
+                  friendsProvider,
+                );
+                break;
+              case 'remove':
+                await _handleRemoveFriend(
+                  friend.userId,
+                  authProvider.currentUser!.userId,
+                  friend.displayName,
+                  friendsProvider,
+                );
+                break;
+            }
           },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: 'keep',
+              child: Row(
+                children: [
+                  Icon(
+                    isKept ? Icons.star_border_rounded : Icons.star_rounded,
+                    color: PrismColors.white,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    isKept ? 'Un-favorite' : 'Favorite',
+                    style: const TextStyle(color: PrismColors.white),
+                  ),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'block',
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.block,
+                    color: PrismColors.destructiveRed,
+                    size: 18,
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Block',
+                    style: TextStyle(color: PrismColors.destructiveRed),
+                  ),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'remove',
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.person_remove,
+                    color: PrismColors.secondaryText,
+                    size: 18,
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Remove',
+                    style: TextStyle(color: PrismColors.secondaryText),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
         onTap: () {
           Navigator.push(
@@ -803,8 +804,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
     );
   }
 
-  // Discover Section — V2 Contact-Based Social Discovery (Top Part)
-  Widget _buildDiscoverTopSection(
+  // ── Sync banner + "People You May Know" section header (non-list parts) ──
+  Widget _buildDiscoverHeader(
     FriendsProvider provider,
     AuthProvider authProvider,
   ) {
@@ -813,17 +814,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
     final isSyncing = provider.isSyncingContacts;
     final isLoadingRecs = provider.isLoadingRecommendations;
 
-    final bool showSyncBanner = !provider.hasSynced;
-    final bool showLoading = isLoadingRecs;
-    final bool showOnPlatform = result != null && result.onPlatform.isNotEmpty;
-    final bool showEmpty = result != null && result.isEmpty;
-
-    if (!showSyncBanner && !showLoading && !showOnPlatform && !showEmpty) {
-      return const SizedBox.shrink();
-    }
-
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -882,7 +874,6 @@ class _FriendsScreenState extends State<FriendsScreen> {
                                       final res = await provider
                                           .syncAndGetRecommendations(userId);
                                       if (!mounted) return;
-                                      
                                       if (res == null) {
                                         ErrorHandler.showErrorSnackbar(
                                           context,
@@ -900,7 +891,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
             const SizedBox(height: 20),
           ],
 
-          // ── People You May Know ─────────────────────────────────
+          // ── Loading / empty state ────────────────────────────────
           if (isLoadingRecs)
             const Center(
               child: Padding(
@@ -909,23 +900,11 @@ class _FriendsScreenState extends State<FriendsScreen> {
               ),
             )
           else if (result != null) ...[
-            if (result.onPlatform.isNotEmpty) ...[
-              _buildDiscoverSectionHeader(
-                'PEOPLE YOU MAY KNOW',
-                Icons.people_rounded,
-              ),
-              const SizedBox(height: 10),
-              ...result.onPlatform.map(
-                (user) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _buildOnPlatformCard(user, provider, authProvider),
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
+            if (result.onPlatform.isNotEmpty)
+              _buildDiscoverSectionHeader('PEOPLE YOU MAY KNOW', Icons.people_rounded),
             if (result.isEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 20),
+                padding: const EdgeInsets.symmetric(vertical: 20),
                 child: Center(
                   child: Column(
                     children: [
@@ -959,11 +938,33 @@ class _FriendsScreenState extends State<FriendsScreen> {
     );
   }
 
-  // Discover Section — V2 Contact-Based Social Discovery (Bottom Part)
-  Widget _buildDiscoverBottomSection(
+  /// "People You May Know" sliver — uses SliverChildListDelegate so Flutter
+  /// knows the exact scroll extent and can lazily dispose off-screen renders.
+  Widget _buildOnPlatformSliver(
     FriendsProvider provider,
     AuthProvider authProvider,
   ) {
+    final result = provider.contactSyncResult;
+    if (result == null || result.onPlatform.isEmpty) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      sliver: SliverList(
+        delegate: SliverChildListDelegate(
+          result.onPlatform.map((user) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _buildOnPlatformCard(user, provider, authProvider),
+          )).toList(),
+          addRepaintBoundaries: true,
+        ),
+      ),
+    );
+  }
+
+  // ── "Invite to Prism" section header + search bar (non-list parts) ────────
+  Widget _buildInviteHeader(FriendsProvider provider) {
     final result = provider.contactSyncResult;
     final isLoadingRecs = provider.isLoadingRecommendations;
 
@@ -972,22 +973,103 @@ class _FriendsScreenState extends State<FriendsScreen> {
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildDiscoverSectionHeader(
-            'INVITE TO PRISM',
-            Icons.mail_outline_rounded,
-          ),
+          _buildDiscoverSectionHeader('INVITE TO PRISM', Icons.mail_outline_rounded),
           const SizedBox(height: 10),
-          ...result.notOnPlatform.map(
-            (contact) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _buildInviteCard(contact, authProvider),
+          TextField(
+            controller: _inviteSearchController,
+            style: PrismTextStyles.bodyMedium,
+            onChanged: (value) {
+              setState(() {
+                _inviteSearchQuery = value;
+              });
+            },
+            decoration: InputDecoration(
+              hintText: 'Search contacts...',
+              hintStyle: PrismTextStyles.bodyMedium.copyWith(
+                color: PrismColors.secondaryText,
+              ),
+              prefixIcon: const Icon(
+                Icons.search_rounded,
+                color: PrismColors.secondaryText,
+              ),
+              filled: true,
+              fillColor: PrismColors.inputGray,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+              suffixIcon: _inviteSearchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: PrismColors.secondaryText,
+                      ),
+                      onPressed: () {
+                        _inviteSearchController.clear();
+                        setState(() => _inviteSearchQuery = '');
+                      },
+                    )
+                  : null,
             ),
           ),
+          const SizedBox(height: 8),
         ],
+      ),
+    );
+  }
+
+  /// "Invite to Prism" sliver — uses SliverChildListDelegate so all contacts
+  /// are present in the widget tree (correct scroll extent) while Flutter
+  /// lazily disposes their render objects when off-screen.
+  Widget _buildInviteSliver(
+    FriendsProvider provider,
+    AuthProvider authProvider,
+  ) {
+    final result = provider.contactSyncResult;
+    final isLoadingRecs = provider.isLoadingRecommendations;
+
+    if (isLoadingRecs || result == null || result.notOnPlatform.isEmpty) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
+    final inviteTargets = result.notOnPlatform
+        .where((c) => c.displayName
+            .toLowerCase()
+            .contains(_inviteSearchQuery.toLowerCase()))
+        .toList();
+
+    if (inviteTargets.isEmpty) {
+      return const SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
+          child: Center(
+            child: Text(
+              'No contacts found',
+              style: TextStyle(color: PrismColors.secondaryText),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      sliver: SliverList(
+        delegate: SliverChildListDelegate(
+          inviteTargets.map((contact) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _buildInviteCard(contact, authProvider),
+          )).toList(),
+          addRepaintBoundaries: true,
+        ),
       ),
     );
   }

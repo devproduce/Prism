@@ -6,6 +6,8 @@ import 'package:provider/provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:showcaseview/showcaseview.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/widgets/glass_widgets.dart';
@@ -13,6 +15,7 @@ import 'package:prism/widgets/empty_state_widget.dart';
 import 'package:prism/widgets/shimmer_placeholder.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/gallery_provider.dart';
+import 'package:prism/providers/profile_provider.dart';
 import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/providers/notifications_provider.dart';
 import 'package:prism/screens/share_upload_screen.dart';
@@ -48,6 +51,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final Set<String> _selectedImageIds = {};
   final ImagePicker _picker = ImagePicker(); // Added picker
 
+  // Tutorial keys
+  final GlobalKey _uploadKey = GlobalKey();
+  final GlobalKey _friendsKey = GlobalKey();
+  bool _checkedTutorial = false;
+
   // Album selection state
   bool _isAlbumSelectionMode = false;
   int? _selectedAlbumIndex;
@@ -65,7 +73,10 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    ShowcaseView.register(
+      blurValue: 1,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final galleryProvider = Provider.of<GalleryProvider>(
         context,
@@ -75,15 +86,22 @@ class _HomeScreenState extends State<HomeScreen> {
         context,
         listen: false,
       );
+      final profileProvider = Provider.of<ProfileProvider>(
+        context,
+        listen: false,
+      );
 
       if (authProvider.currentUser != null) {
+        // Seed ProfileProvider with the authenticated user's data immediately
+        // so the profile screen is populated right away (before any network fetch).
+        if (profileProvider.currentUser == null) {
+          profileProvider.initializeWithUser(authProvider.currentUser!);
+        }
+
         galleryProvider.fetchGallery(userId: authProvider.currentUser!.userId);
         notificationsProvider.fetchNotifications(
           authProvider.currentUser!.userId,
         );
-
-        // Check backend contacts in background (non-blocking)
-        _checkContactsInBackground(authProvider);
 
         // Load local device albums
         final localGalleryProvider = Provider.of<LocalGalleryProvider>(
@@ -91,6 +109,19 @@ class _HomeScreenState extends State<HomeScreen> {
           listen: false,
         );
         localGalleryProvider.requestPermissionAndFetch();
+      }
+
+      if (!_checkedTutorial && mounted) {
+        _checkedTutorial = true;
+        final prefs = await SharedPreferences.getInstance();
+        final seen = prefs.getBool('hasSeenTutorial') ?? false;
+        if (!seen && mounted) {
+          ShowcaseView.get().startShowCase([
+            _uploadKey,
+            _friendsKey,
+          ]);
+          await prefs.setBool('hasSeenTutorial', true);
+        }
       }
     });
   }
@@ -113,17 +144,94 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _checkContactsInBackground(AuthProvider authProvider) async {
     try {
+      final userId = authProvider.currentUser?.userId;
+      if (userId == null) return;
+      
+      final prefs = await SharedPreferences.getInstance();
+      final hasPrompted = prefs.getBool('hasPromptedContactSync_$userId') ?? false;
+
       final hasBackendContacts = await authProvider.checkBackendContacts();
 
-      // Only show sync dialog if user has no contacts synced
-      if (mounted && !authProvider.contactsSynced && !hasBackendContacts) {
-        // Optional: Show a bottom sheet or banner to sync contacts
-        // For now, keeping it silent as contact sync can be done from settings
+      // Only show sync dialog if user has no contacts synced and we haven't prompted before
+      if (!authProvider.contactsSynced && !hasBackendContacts && !hasPrompted) {
+        // Show contact sync dialog automatically on first launch if not synced
+        await Future.delayed(const Duration(seconds: 1));
+        if (mounted) {
+          await prefs.setBool('hasPromptedContactSync_$userId', true);
+          showDialog(
+            context: context,
+            barrierDismissible: true,
+            builder: (context) => _buildContactSyncFirstPrompt(context, authProvider),
+          );
+        }
       }
     } catch (e) {
       // Silent fail - contact check is not critical
       debugPrint('Background contact check failed: $e');
     }
+  }
+
+  Widget _buildContactSyncFirstPrompt(BuildContext context, AuthProvider authProvider) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = screenWidth < 360;
+    
+    return Dialog(
+      backgroundColor: PrismColors.darkCard,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: EdgeInsets.all(isSmallScreen ? 16.0 : 24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.contacts, size: isSmallScreen ? 48 : 64, color: PrismColors.electricBlue),
+            SizedBox(height: isSmallScreen ? 12 : 16),
+            Text(
+              'Find Your Friends',
+              style: TextStyle(color: Colors.white, fontSize: isSmallScreen ? 20 : 24, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: isSmallScreen ? 12 : 16),
+            Text(
+              'Sync your phone contacts to automatically find and connect with your friends on Prism.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70, fontSize: isSmallScreen ? 14 : 16),
+            ),
+            SizedBox(height: isSmallScreen ? 16 : 24),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                    },
+                    child: Text('Not Now', style: TextStyle(color: Colors.white54, fontSize: isSmallScreen ? 14 : 16)),
+                  ),
+                ),
+                SizedBox(width: isSmallScreen ? 8 : 16),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: PrismColors.electricBlue,
+                      padding: EdgeInsets.symmetric(vertical: isSmallScreen ? 10 : 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await authProvider.syncContacts();
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Contacts synced successfully!', style: TextStyle(color: Colors.white)), backgroundColor: Colors.green),
+                        );
+                      }
+                    },
+                    child: Text('Sync Contacts', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: isSmallScreen ? 14 : 16)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _toggleSelectionMode(String imageId) {
@@ -262,7 +370,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _navItem(int index, IconData icon, String label) {
     final isSelected = _currentNavIndex == index;
-    return GestureDetector(
+    Widget child = GestureDetector(
       onTap: () {
         HapticFeedback.selectionClick();
         if (_isSelectionMode) _exitSelectionMode();
@@ -290,11 +398,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 .scale(begin: const Offset(1, 1), end: const Offset(1.1, 1.1)),
       ),
     );
+
+    if (index == 3) {
+      return Showcase(
+        key: _friendsKey,
+        title: 'Friends',
+        description: 'Find and add friends here to start sharing securely.',
+        targetShapeBorder: const CircleBorder(),
+        tooltipBackgroundColor: PrismColors.glassDark,
+        textColor: Colors.white,
+        child: child,
+      );
+    }
+    return child;
   }
 
   Widget _floatingShareButton() {
     final isSelected = _currentNavIndex == 2;
-    return GestureDetector(
+    Widget child = GestureDetector(
       onTap: () {
         HapticFeedback.mediumImpact();
         if (_isSelectionMode) _exitSelectionMode();
@@ -336,6 +457,16 @@ class _HomeScreenState extends State<HomeScreen> {
               )
               .animate(target: isSelected ? 1 : 0) // Animate selection
               .scale(begin: const Offset(1, 1), end: const Offset(1.05, 1.05)),
+    );
+
+    return Showcase(
+      key: _uploadKey,
+      title: 'Upload Moments',
+      description: 'Tap here to capture or upload a new photo to share!',
+      targetShapeBorder: const CircleBorder(),
+      tooltipBackgroundColor: PrismColors.glassDark,
+      textColor: Colors.white,
+      child: child,
     );
   }
 

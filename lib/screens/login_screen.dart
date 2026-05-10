@@ -311,7 +311,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ).animate().fadeIn(delay: 500.ms),
 
-                          SizedBox(height: inputToInputSpacing),
+                          //SizedBox(height: inputToInputSpacing),
 
                           // Login Button
                           Consumer<AuthProvider>(

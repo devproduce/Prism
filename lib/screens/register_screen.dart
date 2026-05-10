@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:image_picker/image_picker.dart';
@@ -51,8 +52,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
 
+  bool _isCheckingUsername = false;
+  bool? _isUsernameAvailable;
+  Timer? _usernameDebounce;
+
   @override
   void dispose() {
+    _usernameDebounce?.cancel();
     _pageController.dispose();
     _usernameController.dispose();
     _countryCodeController.dispose();
@@ -83,6 +89,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
         curve: Curves.easeOutCubic,
       );
     }
+  }
+
+  void _onUsernameChanged(String value) {
+    if (_usernameDebounce?.isActive ?? false) _usernameDebounce!.cancel();
+    if (value.trim().length < 3) {
+      if (mounted) setState(() { _isUsernameAvailable = null; _isCheckingUsername = false; });
+      return;
+    }
+    
+    if (mounted) setState(() { _isCheckingUsername = true; _isUsernameAvailable = null; });
+    
+    _usernameDebounce = Timer(const Duration(milliseconds: 500), () async {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final isAvailable = await authProvider.checkUsernameAvailability(value.trim());
+      if (mounted && _usernameController.text.trim() == value.trim()) {
+        setState(() {
+          _isCheckingUsername = false;
+          _isUsernameAvailable = isAvailable;
+        });
+      }
+    });
   }
 
   Future<void> _fetchPhoneNumber() async {
@@ -377,23 +404,66 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       TextFormField(
                         controller: _usernameController,
                         style: PrismTextStyles.bodyLarge,
+                        onChanged: _onUsernameChanged,
                         decoration: _glassInputDecoration(
                           'Username',
                           Icons.alternate_email,
+                        ).copyWith(
+                          suffixIcon: _usernameController.text.trim().length >= 3
+                              ? (_isCheckingUsername
+                                  ? const Padding(
+                                      padding: EdgeInsets.all(12),
+                                      child: SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor: AlwaysStoppedAnimation<Color>(PrismColors.electricBlue),
+                                        ),
+                                      ),
+                                    )
+                                  : (_isUsernameAvailable != null
+                                      ? (_isUsernameAvailable!
+                                          ? const Icon(Icons.check_circle, color: Colors.green)
+                                          : const Icon(Icons.cancel, color: Colors.red))
+                                      : null))
+                              : null,
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
                             return 'Please enter a username';
                           }
-                          if (value.length < 3) {
+                          if (value.trim().length < 3) {
                             return 'Username must be at least 3 characters';
+                          }
+                          if (_isUsernameAvailable == false) {
+                            return 'Username is already taken';
                           }
                           return null;
                         },
                       ),
                     ],
-                    onNext: () {
-                      if (_step1Key.currentState!.validate()) _nextPage();
+                    onNext: () async {
+                      if (_step1Key.currentState!.validate()) {
+                        if (_isCheckingUsername) {
+                          ErrorHandler.showInfoSnackbar(context, message: 'Checking username availability...');
+                        } else if (_isUsernameAvailable == true) {
+                          _nextPage();
+                        } else if (_isUsernameAvailable == null) {
+                          setState(() { _isCheckingUsername = true; });
+                          final isAvailable = await Provider.of<AuthProvider>(context, listen: false).checkUsernameAvailability(_usernameController.text.trim());
+                          if (mounted) {
+                            setState(() { _isCheckingUsername = false; _isUsernameAvailable = isAvailable; });
+                            if (isAvailable) {
+                              _nextPage();
+                            } else {
+                              _step1Key.currentState!.validate();
+                            }
+                          }
+                        } else {
+                          _step1Key.currentState!.validate();
+                        }
+                      }
                     },
                   ),
                   // Step 2: Phone Number (MANDATORY - V2)
