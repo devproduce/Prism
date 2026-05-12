@@ -44,8 +44,10 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
     );
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
 
-    // If batch status is null but we have a batch ID, reload from backend
-    if (sharingProvider.batchStatus == null && widget.batchId != null) {
+    // If batch status is null OR it's a different batch ID, reload from backend
+    if (widget.batchId != null && 
+        (sharingProvider.batchStatus == null || 
+         sharingProvider.batchStatus!.batchId != widget.batchId)) {
       if (authProvider.currentUser == null) {
         _showError('User not authenticated');
         return;
@@ -89,6 +91,8 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
         if (authProvider.currentUser != null) {
           galleryProvider.refreshAfterShare(authProvider.currentUser!.userId);
         }
+        
+        sharingProvider.clearBatch();
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

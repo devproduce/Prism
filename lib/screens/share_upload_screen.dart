@@ -1,8 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/screens/processing_screen.dart';
@@ -22,7 +22,6 @@ class ShareUploadScreen extends StatefulWidget {
 }
 
 class _ShareUploadScreenState extends State<ShareUploadScreen> {
-  final ImagePicker _picker = ImagePicker();
   final TextEditingController _descriptionController = TextEditingController();
 
   @override
@@ -78,56 +77,23 @@ class _ShareUploadScreenState extends State<ShareUploadScreen> {
 
   Future<void> _pickMedia() async {
     try {
-      final List<XFile> media = await _picker.pickMultipleMedia();
+      final List<AssetEntity>? assets = await AssetPicker.pickAssets(
+        context,
+        pickerConfig: const AssetPickerConfig(requestType: RequestType.common),
+      );
 
-      if (media.isNotEmpty) {
-        // Filter to only allow image and video extensions
-        final allowedExtensions = {
-          // Image formats
-          'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'heic', 'heif',
-          // Video formats
-          'mp4',
-          'mov',
-          'avi',
-          'mkv',
-          'webm',
-          '3gp',
-          'flv',
-          'f4v',
-          'mpg',
-          'mpeg',
-          'm4v',
-        };
+      if (assets != null && assets.isNotEmpty) {
+        final List<File> files = [];
 
-        final validMedia = media.where((xfile) {
-          final ext = xfile.path.split('.').last.toLowerCase();
-          return allowedExtensions.contains(ext);
-        }).toList();
-
-        if (validMedia.isEmpty) {
-          if (mounted) {
-            ErrorHandler.showErrorSnackbar(
-              context,
-              message: 'Please select only image or video files',
-            );
+        for (final asset in assets) {
+          final file = await asset.file;
+          if (file != null) {
+            files.add(file);
           }
-          return;
         }
 
-        final files = validMedia.map((xfile) => File(xfile.path)).toList();
-        if (mounted) {
+        if (mounted && files.isNotEmpty) {
           context.read<SharingProvider>().addImages(files);
-        }
-
-        // Show warning if some files were filtered out
-        if (validMedia.length < media.length) {
-          if (mounted) {
-            ErrorHandler.showInfoSnackbar(
-              context,
-              message:
-                  'Some files were skipped (only images and videos allowed)',
-            );
-          }
         }
       }
     } catch (e) {
@@ -257,8 +223,6 @@ class _ShareUploadScreenState extends State<ShareUploadScreen> {
                         // ),
 
                         //const SizedBox(height: 24),
-
-
 
                         // Image Grid Header
                         Row(

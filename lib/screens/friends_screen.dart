@@ -20,7 +20,12 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class FriendsScreen extends StatefulWidget {
-  const FriendsScreen({super.key});
+  final bool openRequestsDirectly;
+
+  const FriendsScreen({
+    super.key,
+    this.openRequestsDirectly = false,
+  });
 
   @override
   State<FriendsScreen> createState() => _FriendsScreenState();
@@ -45,6 +50,10 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
       if (authProvider.currentUser != null) {
         friendsProvider.refreshAll(authProvider.currentUser!.userId);
+      }
+      
+      if (widget.openRequestsDirectly) {
+        _showRequestsBottomSheet(context, friendsProvider, authProvider);
       }
     });
   }

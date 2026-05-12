@@ -371,8 +371,18 @@ class BackgroundShareService : Service() {
     }
     
     private fun showCompletionNotification(batchId: String, recipientCount: Int) {
-        // Clear processing state
-        saveProcessingState(null, false)
+        // Clear processing state but store the finished batch ID for offline launch
+        try {
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString("flutter.pending_review_batch_id", batchId)
+                .remove(KEY_PROCESSING_BATCH_ID)
+                .remove(KEY_IS_PROCESSING)
+                .apply()
+            Log.d(TAG, "Saved pending_review_batch_id: $batchId")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving pending_review_batch_id: ${e.message}")
+        }
         
         // Cancel the progress notification
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

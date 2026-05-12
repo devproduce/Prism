@@ -6,12 +6,14 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:prism/api/api_client.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:prism/services/local_notification_store.dart';
 
 // Must be top-level pragmas to operate in Dart Isolates!
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   debugPrint('Handling background FCM: ${message.messageId}');
+  await LocalNotificationStore.saveNotification(message);
 }
 
 class NotificationService {
@@ -49,7 +51,8 @@ class NotificationService {
         AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.createNotificationChannel(channel);
 
-    FirebaseMessaging.onMessage.listen((RemoteMessage msg) {
+    FirebaseMessaging.onMessage.listen((RemoteMessage msg) async {
+      await LocalNotificationStore.saveNotification(msg);
       if (msg.notification != null) {
         _localNotifs.show(
           msg.hashCode,

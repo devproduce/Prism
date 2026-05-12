@@ -59,9 +59,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _firstNameController = TextEditingController(text: user?.firstName ?? '');
     _lastNameController = TextEditingController(text: user?.lastName ?? '');
     _bioController = TextEditingController(text: user?.bio ?? '');
-    
+
     _selectedPronoun = user?.pronouns;
-    if (_selectedPronoun != null && _selectedPronoun!.isNotEmpty && !_pronounOptions.contains(_selectedPronoun)) {
+    if (_selectedPronoun != null &&
+        _selectedPronoun!.isNotEmpty &&
+        !_pronounOptions.contains(_selectedPronoun)) {
       _pronounOptions.add(_selectedPronoun!);
     } else if (_selectedPronoun?.isEmpty ?? true) {
       _selectedPronoun = null;
@@ -203,7 +205,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         lastName: _lastNameController.text.trim().isEmpty
             ? null
             : _lastNameController.text.trim(),
-        pronouns: _selectedPronoun == 'prefer not to say' ? '' : (_selectedPronoun ?? ''),
+        pronouns: _selectedPronoun == 'prefer not to say'
+            ? ''
+            : (_selectedPronoun ?? ''),
         bio: _bioController.text.trim().isEmpty
             ? null
             : _bioController.text.trim(),
@@ -443,8 +447,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       value: _selectedPronoun,
                       decoration: InputDecoration(
                         hintText: 'Select your pronouns',
-                        hintStyle: PrismTextStyles.bodyLarge.copyWith(color: PrismColors.secondaryText),
-                        prefixIcon: const Icon(Icons.person_outline, color: PrismColors.electricBlue),
+                        hintStyle: PrismTextStyles.bodyLarge.copyWith(
+                          color: PrismColors.secondaryText,
+                        ),
+                        prefixIcon: const Icon(
+                          Icons.person_outline,
+                          color: PrismColors.electricBlue,
+                        ),
                         filled: true,
                         fillColor: Colors.white.withOpacity(0.05),
                         border: OutlineInputBorder(
@@ -454,7 +463,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       ),
                       dropdownColor: PrismColors.surfaceGray,
                       style: PrismTextStyles.bodyLarge,
-                      icon: const Icon(Icons.arrow_drop_down, color: PrismColors.white),
+                      icon: const Icon(
+                        Icons.arrow_drop_down,
+                        color: PrismColors.white,
+                      ),
                       items: _pronounOptions.map((pronoun) {
                         return DropdownMenuItem<String>(
                           value: pronoun,

@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'package:provider/provider.dart';
 import 'package:prism/screens/onboarding_screen.dart';
@@ -8,6 +10,8 @@ import 'package:prism/screens/settings_screen.dart';
 import 'package:prism/screens/edit_profile_screen.dart';
 import 'package:prism/screens/blocked_users_screen.dart';
 import 'package:prism/screens/help_support_screen.dart';
+import 'package:prism/screens/user_profile_screen.dart';
+import 'package:prism/screens/friends_screen.dart';
 import 'package:prism/services/background_share_handler.dart';
 import 'package:prism/screens/privacy_policy_screen.dart';
 import 'package:prism/screens/about_screen.dart';
@@ -28,6 +32,7 @@ import 'package:prism/screens/confirm_sharing_screen.dart';
 import 'package:prism/providers/local_gallery_provider.dart';
 
 import 'package:prism/utils/globals.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -67,17 +72,107 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _setupNotificationHandler();
     _setupImmediateDeepLinkListener();
+    _checkPendingLocalNotificationPayload();
+    _checkOfflineCompletedBatch();
+  }
+
+  Future<void> _checkOfflineCompletedBatch() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.containsKey('pending_review_batch_id')) {
+        final pendingBatchId = prefs.getString('pending_review_batch_id');
+        if (pendingBatchId != null && pendingBatchId.isNotEmpty) {
+          debugPrint('📱 Found offline completed batch ID: $pendingBatchId. Routing to review...');
+          await prefs.remove('pending_review_batch_id');
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _navigateToRoute('/confirm_share', pendingBatchId, false);
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to check offline completed batch: $e');
+    }
+  }
+
+  void _checkPendingLocalNotificationPayload() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final pendingRaw = LocalNotificationService().pendingPayload;
+      if (pendingRaw != null && pendingRaw.startsWith('REVIEW_READY:')) {
+        final batchId = pendingRaw.substring('REVIEW_READY:'.length);
+        LocalNotificationService().pendingPayload = null;
+        debugPrint('📱 Handling stored notification launch with batch ID: $batchId');
+        _navigateToRoute('/confirm_share', batchId, false);
+      }
+    });
   }
 
   void _setupNotificationHandler() {
     LocalNotificationService().onDidReceiveNotificationResponse = (response) {
-      if (response.payload != null &&
-          response.payload!.startsWith('REVIEW_READY:')) {
-        final batchId = response.payload!.substring('REVIEW_READY:'.length);
-        debugPrint('📱 Notification tapped with batch ID: $batchId');
-        _navigateToRoute('/confirm_share', batchId, false);
+      if (response.payload != null) {
+        if (response.payload!.startsWith('REVIEW_READY:')) {
+          final batchId = response.payload!.substring('REVIEW_READY:'.length);
+          debugPrint('📱 Notification tapped with batch ID: $batchId');
+          _navigateToRoute('/confirm_share', batchId, false);
+        } else {
+          // Handle FCM local background json payload
+          try {
+            final data = jsonDecode(response.payload!);
+            _handleFcmRoute(data);
+          } catch (e) {
+            debugPrint('Failed to parse FCM payload: $e');
+          }
+        }
       }
     };
+
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      debugPrint('📱 Notification tapped from background');
+      _handleFcmRoute(message.data);
+    });
+
+    FirebaseMessaging.instance.getInitialMessage().then((message) {
+      if (message != null) {
+        debugPrint('📱 App launched from notification');
+        Future.delayed(const Duration(milliseconds: 500), () => _handleFcmRoute(message.data));
+      }
+    });
+  }
+
+  void _handleFcmRoute(Map<String, dynamic> data) {
+    if (navigatorKey.currentState == null) return;
+    
+    final type = data['type'];
+    final route = data['route'];
+    final senderId = data['sender_id'];
+    final senderUsername = data['sender_username'];
+
+    if (type == 'batch_received' || route == '/friend_profile') {
+      navigatorKey.currentState!.push(
+        MaterialPageRoute(
+          builder: (context) => UserProfileScreen(
+            userId: senderId ?? '',
+            username: senderUsername ?? 'Friend',
+          ),
+        ),
+      );
+    } else if (type == 'friend_request_received' || route == '/notifications') {
+      // User requested redirect to requests/inbox screen
+      // Assuming FriendsScreen or similar component holds 'requests'
+      // We will push friends screen and it can open the modal or appropriate view
+      // As requested: "redirect user to inbox screen under received tab"
+      navigatorKey.currentState!.pushNamed('/home'); // Fallback structure
+      // Wait slightly then push FriendsScreen and open requests?
+      // For now, let's just push friends screen or requests if defined.
+      navigatorKey.currentState!.push(
+        MaterialPageRoute(
+          builder: (context) => const FriendsScreen(
+            openRequestsDirectly: true, // we might need to add this property if it exists, or just send to friends screen
+          ),
+        ),
+      );
+    } else if (route != null && route.isNotEmpty) {
+      navigatorKey.currentState!.pushNamed(route);
+    }
   }
 
   /// Setup listener for immediate deep link notifications from native.
@@ -92,10 +187,19 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   }
 
   /// Navigate to the specified route immediately, removing intermediate screens.
-  void _navigateToRoute(String route, String batchId, bool isProcessing) {
+  Future<void> _navigateToRoute(String route, String batchId, bool isProcessing) async {
     if (navigatorKey.currentState == null) {
       debugPrint('⚠️ Navigator not ready, storing deep link for later');
       return;
+    }
+
+    if (route == '/confirm_share' || route == '/processing') {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('pending_review_batch_id');
+      } catch (e) {
+        debugPrint('Failed to clear pending_review_batch_id: $e');
+      }
     }
 
     // Use pushNamedAndRemoveUntil to navigate directly without showing home first

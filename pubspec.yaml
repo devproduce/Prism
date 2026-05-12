@@ -84,6 +84,7 @@ dependencies:
   firebase_messaging: ^16.2.0
   device_info_plus: ^12.4.0
   showcaseview: ^5.0.2
+  wechat_assets_picker: ^10.1.2
 dev_dependencies:
   flutter_test:
     sdk: flutter

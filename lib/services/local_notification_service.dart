@@ -25,6 +25,9 @@ class LocalNotificationService {
   static const String _completionChannelDesc =
       'Notifies when shared media is ready for review';
 
+  // Hold pending payload if app was launched via notification
+  String? pendingPayload;
+
   Future<void> initialize(GlobalKey<NavigatorState> navigatorKey) async {
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -81,6 +84,7 @@ class LocalNotificationService {
         final batchId = payload.substring('REVIEW_READY:'.length);
         debugPrint('📱 App launched from notification with batch ID: $batchId');
         // Store for later navigation (will be handled by main.dart)
+        pendingPayload = payload;
       }
     }
 

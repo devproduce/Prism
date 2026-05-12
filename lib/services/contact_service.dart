@@ -81,6 +81,45 @@ class ContactService {
     });
   }
 
+  Future<ContactSyncResult> _enrichWithAllLocalContacts(ContactSyncResult result) async {
+    final contacts = await getPhoneContacts();
+    if (contacts.isEmpty) return result;
+
+    final onPlatformNames = result.onPlatform
+        .map((u) => u.contactName)
+        .whereType<String>()
+        .toSet();
+
+    // The backend might limit the number of recommend invite targets.
+    // To ensure ALL local contacts are listed in "Invite to Prism",
+    // we explicitly reconstruct notOnPlatform using all our local contacts.
+    final allNotOnPlatform = contacts
+        .where((c) =>
+            c.displayName.isNotEmpty &&
+            (!onPlatformNames.contains(c.displayName)))
+        .map((c) {
+      String phone = '';
+      if (c.phones.isNotEmpty) {
+        phone = c.phones.first.number.replaceAll(RegExp(r'[^\d+]'), '');
+        if (phone.startsWith('+')) {
+          phone = phone.substring(1);
+        }
+      }
+      return NotOnPlatformContact(
+        displayName: c.displayName,
+        whatsappLink: phone.isNotEmpty ? 'https://wa.me/$phone' : '',
+        smsLink: phone.isNotEmpty ? 'sms:$phone' : '',
+      );
+    }).toList();
+
+    allNotOnPlatform.sort((a, b) => a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
+
+    return ContactSyncResult(
+      onPlatform: result.onPlatform,
+      notOnPlatform: allNotOnPlatform,
+    );
+  }
+
   /// V2 Bulk sync: upload entire phonebook.
   /// We send the entire payload in a single request because /contacts/sync
   /// typically performs a full replacement on the backend.
@@ -108,13 +147,15 @@ class ContactService {
         contacts: payload,
       );
 
+      final enrichedResult = await _enrichWithAllLocalContacts(result);
+
       debugPrint(
         '[ContactService] Sync complete: '
-        '${result.onPlatform.length} on-platform, '
-        '${result.notOnPlatform.length} invite targets',
+        '${enrichedResult.onPlatform.length} on-platform, '
+        '${enrichedResult.notOnPlatform.length} invite targets',
       );
 
-      return result;
+      return enrichedResult;
     } catch (e) {
       debugPrint('[ContactService] Error syncing contacts: $e');
       return null;
@@ -136,7 +177,8 @@ class ContactService {
   /// Fetch cached recommendations from the backend (no re-read of phonebook)
   Future<ContactSyncResult?> getRecommendations(String userId) async {
     try {
-      return await _apiClient.getContactRecommendations(userId: userId);
+      final result = await _apiClient.getContactRecommendations(userId: userId);
+      return await _enrichWithAllLocalContacts(result);
     } catch (e) {
       debugPrint('[ContactService] Error fetching recommendations: $e');
       return null;

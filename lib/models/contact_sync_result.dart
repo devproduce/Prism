@@ -34,12 +34,14 @@ class OnPlatformUser {
   final String username;
   final String? profilePicId;
   final int mutualContactCount;
+  final String? contactName;
 
   OnPlatformUser({
     required this.userId,
     required this.username,
     this.profilePicId,
     required this.mutualContactCount,
+    this.contactName,
   });
 
   factory OnPlatformUser.fromJson(Map<String, dynamic> json) {
@@ -48,6 +50,7 @@ class OnPlatformUser {
       username: json['username'] ?? '',
       profilePicId: json['profile_pic_id'] as String?,
       mutualContactCount: (json['mutual_contact_count'] as num?)?.toInt() ?? 0,
+      contactName: json['contact_name'] as String?,
     );
   }
 

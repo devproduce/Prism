@@ -109,6 +109,14 @@ class SharingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Clear loaded batch
+  void clearBatch() {
+    _batchStatus = null;
+    _imageRecipientMap.clear();
+    _error = null;
+    notifyListeners();
+  }
+
   // Set description
   void setDescription(String desc) {
     _description = desc;
