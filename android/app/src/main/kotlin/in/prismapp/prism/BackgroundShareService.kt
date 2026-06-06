@@ -18,6 +18,7 @@ import com.google.gson.JsonObject
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.asRequestBody
+import java.io.EOFException
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.Executors
@@ -32,7 +33,7 @@ import java.util.concurrent.TimeUnit
  * 1. Receives file paths and credentials from ShareReceiverActivity
  * 2. Starts as foreground service with "Uploading..." notification
  * 3. Uploads files to backend via OkHttp multipart request
- * 4. Polls for batch processing status
+ * 4. Watches batch status via SSE, then one REST GET for full payload; 5s REST fallback if SSE fails
  * 5. Shows "Ready to Review" notification when complete
  */
 class BackgroundShareService : Service() {
@@ -59,10 +60,10 @@ class BackgroundShareService : Service() {
         const val EXTRA_USER_ID = "user_id"
         const val EXTRA_BASE_URL = "base_url"
         
-        // Polling configuration
-        private const val POLL_INTERVAL_MS = 2000L
-        private const val MAX_POLL_ATTEMPTS = 60 // 2 minutes max
-        
+        // REST fallback when SSE is unavailable (5s interval, ~10 min cap)
+        private const val FALLBACK_POLL_INTERVAL_MS = 5000L
+        private const val MAX_FALLBACK_POLL_ATTEMPTS = 120
+
         // Upload endpoints - must match Flutter ApiClient
         private const val UPLOAD_ENDPOINT = "/images/upload" // Changed from /images/batch/upload
         private const val BATCH_STATUS_ENDPOINT = "/images/batch/" // + batchId
@@ -76,6 +77,8 @@ class BackgroundShareService : Service() {
     private val gson = Gson()
     
     private lateinit var okHttpClient: OkHttpClient
+    /** Long-lived reads for SSE (heartbeats + wait for terminal). */
+    private lateinit var sseHttpClient: OkHttpClient
     private var currentBatchId: String? = null
     private var pollAttempts = 0
 
@@ -88,6 +91,12 @@ class BackgroundShareService : Service() {
             .connectTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
+            .build()
+
+        sseHttpClient = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.SECONDS)
             .build()
     }
 
@@ -185,8 +194,8 @@ class BackgroundShareService : Service() {
                     // Update notification to show processing
                     updateNotificationProcessing()
                     
-                    // Start polling for batch status
-                    startPolling(authToken, baseUrl, batchId, userId)
+                    // SSE + REST (with 5s polling fallback)
+                    startBatchWatch(authToken, baseUrl, batchId, userId)
                 } else {
                     Log.e(TAG, "No batch_id in response")
                     showErrorNotification("Upload failed: Invalid response")
@@ -200,74 +209,233 @@ class BackgroundShareService : Service() {
         }
     }
     
-    private fun startPolling(authToken: String, baseUrl: String, batchId: String, userId: String) {
+    private fun startBatchWatch(authToken: String, baseUrl: String, batchId: String, userId: String) {
         pollAttempts = 0
-        pollBatchStatus(authToken, baseUrl, batchId, userId)
+        executor.execute {
+            try {
+                if (fetchRestBatchAndFinishIfTerminal(authToken, baseUrl, batchId, userId)) {
+                    return@execute
+                }
+                consumeSseUntilDone(baseUrl, batchId, authToken, userId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Batch watch error: ${e.message}", e)
+                scheduleFallbackPoll(authToken, baseUrl, batchId, userId)
+            }
+        }
     }
-    
-    private fun pollBatchStatus(authToken: String, baseUrl: String, batchId: String, userId: String) {
-        if (pollAttempts >= MAX_POLL_ATTEMPTS) {
-            Log.w(TAG, "Max poll attempts reached")
+
+    /**
+     * One authenticated GET /images/batch/{id} — shows completion/error notification when terminal.
+     * @return true if the batch is in a terminal state and the service is stopping (or should stop).
+     */
+    private fun fetchRestBatchAndFinishIfTerminal(
+        authToken: String,
+        baseUrl: String,
+        batchId: String,
+        userId: String
+    ): Boolean {
+        val request = Request.Builder()
+            .url("$baseUrl$BATCH_STATUS_ENDPOINT$batchId?user_id=$userId")
+            .header("Authorization", "Bearer $authToken")
+            .get()
+            .build()
+        okHttpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                Log.e(TAG, "Batch REST status failed: ${response.code}")
+                return false
+            }
+            val responseBody = response.body?.string() ?: return false
+            val jsonResponse = gson.fromJson(responseBody, JsonObject::class.java)
+            val status = jsonResponse.get("status")?.asString
+            Log.d(TAG, "Batch REST status: $status")
+            return when (status) {
+                "completed" -> {
+                    val recipientsArray = jsonResponse.getAsJsonArray("recipients")
+                    val recipientCount = recipientsArray?.size() ?: 0
+                    Log.d(TAG, "Processing complete! Found $recipientCount recipients")
+                    showCompletionNotification(batchId, recipientCount)
+                    stopForegroundAndSelf()
+                    true
+                }
+                "failed", "error", "timeout" -> {
+                    Log.e(TAG, "Batch processing failed: $status")
+                    showErrorNotification("Processing failed")
+                    stopForegroundAndSelf()
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private enum class SseFlushResult {
+        CONTINUE,
+        STOPPED,
+        NEED_FALLBACK
+    }
+
+    /** Read SSE until terminal event + REST finish, EOF, or error. May schedule fallback. */
+    private fun consumeSseUntilDone(
+        baseUrl: String,
+        batchId: String,
+        authToken: String,
+        userId: String
+    ) {
+        val url = "$baseUrl/images/batch/$batchId/stream"
+        val req = Request.Builder()
+            .url(url)
+            .header("Accept", "text/event-stream")
+            .get()
+            .build()
+
+        val response = try {
+            sseHttpClient.newCall(req).execute()
+        } catch (e: Exception) {
+            Log.w(TAG, "SSE connect failed: ${e.message}")
+            scheduleFallbackPoll(authToken, baseUrl, batchId, userId)
+            return
+        }
+
+        if (!response.isSuccessful) {
+            Log.w(TAG, "SSE HTTP ${response.code}")
+            response.close()
+            scheduleFallbackPoll(authToken, baseUrl, batchId, userId)
+            return
+        }
+
+        val body = response.body ?: run {
+            response.close()
+            scheduleFallbackPoll(authToken, baseUrl, batchId, userId)
+            return
+        }
+
+        val source = body.source()
+        var currentEvent: String? = null
+        val dataLines = mutableListOf<String>()
+
+        try {
+            while (true) {
+                val line = try {
+                    source.readUtf8LineStrict()
+                } catch (_: EOFException) {
+                    break
+                } catch (e: Exception) {
+                    Log.w(TAG, "SSE read ended: ${e.message}")
+                    break
+                }
+
+                when {
+                    line.isEmpty() -> {
+                        when (
+                            flushSseEventBlock(
+                                currentEvent,
+                                dataLines,
+                                authToken,
+                                baseUrl,
+                                batchId,
+                                userId,
+                                response
+                            )
+                        ) {
+                            SseFlushResult.STOPPED -> return
+                            SseFlushResult.NEED_FALLBACK -> {
+                                scheduleFallbackPoll(authToken, baseUrl, batchId, userId)
+                                return
+                            }
+                            SseFlushResult.CONTINUE -> {
+                                currentEvent = null
+                                dataLines.clear()
+                            }
+                        }
+                    }
+                    line.startsWith(":") -> { /* comment */ }
+                    line.startsWith("event:") -> {
+                        currentEvent = line.removePrefix("event:").trim()
+                    }
+                    line.startsWith("data:") -> {
+                        var v = line.removePrefix("data:")
+                        if (v.startsWith(" ")) v = v.substring(1)
+                        dataLines.add(v)
+                    }
+                }
+            }
+        } finally {
+            try {
+                response.close()
+            } catch (_: Exception) {
+            }
+        }
+
+        scheduleFallbackPoll(authToken, baseUrl, batchId, userId)
+    }
+
+    private fun flushSseEventBlock(
+        currentEvent: String?,
+        dataLines: MutableList<String>,
+        authToken: String,
+        baseUrl: String,
+        batchId: String,
+        userId: String,
+        response: Response
+    ): SseFlushResult {
+        if (dataLines.isEmpty()) return SseFlushResult.CONTINUE
+        val dataStr = dataLines.joinToString("\n")
+        if (dataStr.trim() == "ping" || currentEvent == "heartbeat") {
+            return SseFlushResult.CONTINUE
+        }
+        return try {
+            val obj = gson.fromJson(dataStr, JsonObject::class.java)
+            val st = obj.get("status")?.asString ?: return SseFlushResult.CONTINUE
+            if (st != "completed" && st != "failed" && st != "error" && st != "timeout") {
+                return SseFlushResult.CONTINUE
+            }
+            try {
+                response.close()
+            } catch (_: Exception) {
+            }
+            if (fetchRestBatchAndFinishIfTerminal(authToken, baseUrl, batchId, userId)) {
+                SseFlushResult.STOPPED
+            } else {
+                SseFlushResult.NEED_FALLBACK
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "SSE block parse skip: $e")
+            SseFlushResult.CONTINUE
+        }
+    }
+
+    private fun scheduleFallbackPoll(authToken: String, baseUrl: String, batchId: String, userId: String) {
+        mainHandler.postDelayed({
+            pollBatchStatusFallback(authToken, baseUrl, batchId, userId)
+        }, FALLBACK_POLL_INTERVAL_MS)
+    }
+
+    private fun pollBatchStatusFallback(
+        authToken: String,
+        baseUrl: String,
+        batchId: String,
+        userId: String
+    ) {
+        if (pollAttempts >= MAX_FALLBACK_POLL_ATTEMPTS) {
+            Log.w(TAG, "Max fallback poll attempts reached")
             showErrorNotification("Processing timeout")
             stopForegroundAndSelf()
             return
         }
-        
         pollAttempts++
-        Log.d(TAG, "Polling batch status (attempt $pollAttempts/$MAX_POLL_ATTEMPTS)")
-        
+        Log.d(TAG, "Fallback REST poll $pollAttempts/$MAX_FALLBACK_POLL_ATTEMPTS")
+
         executor.execute {
             try {
-                // Pass user_id as query parameter
-                val request = Request.Builder()
-                    .url("$baseUrl$BATCH_STATUS_ENDPOINT$batchId?user_id=$userId")
-                    .header("Authorization", "Bearer $authToken")
-                    .get()
-                    .build()
-                
-                okHttpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.e(TAG, "Status check failed: ${response.code}")
-                        schedulePollRetry(authToken, baseUrl, batchId, userId)
-                        return@use
-                    }
-                    
-                    val responseBody = response.body?.string()
-                    val jsonResponse = gson.fromJson(responseBody, JsonObject::class.java)
-                    val status = jsonResponse.get("status")?.asString
-                    
-                    Log.d(TAG, "Batch status: $status")
-                    
-                    when (status) {
-                        "completed" -> {
-                            val recipientsArray = jsonResponse.getAsJsonArray("recipients")
-                            val recipientCount = recipientsArray?.size() ?: 0
-                            Log.d(TAG, "Processing complete! Found $recipientCount recipients")
-                            showCompletionNotification(batchId, recipientCount)
-                            stopForegroundAndSelf()
-                        }
-                        "failed" -> {
-                            Log.e(TAG, "Batch processing failed")
-                            showErrorNotification("Processing failed")
-                            stopForegroundAndSelf()
-                        }
-                        else -> {
-                            // Still processing, continue polling
-                            schedulePollRetry(authToken, baseUrl, batchId, userId)
-                        }
-                    }
+                if (fetchRestBatchAndFinishIfTerminal(authToken, baseUrl, batchId, userId)) {
+                    return@execute
                 }
+                scheduleFallbackPoll(authToken, baseUrl, batchId, userId)
             } catch (e: Exception) {
-                Log.e(TAG, "Poll error: ${e.message}", e)
-                schedulePollRetry(authToken, baseUrl, batchId, userId)
+                Log.e(TAG, "Fallback poll error: ${e.message}", e)
+                scheduleFallbackPoll(authToken, baseUrl, batchId, userId)
             }
         }
-    }
-    
-    private fun schedulePollRetry(authToken: String, baseUrl: String, batchId: String, userId: String) {
-        mainHandler.postDelayed({
-            pollBatchStatus(authToken, baseUrl, batchId, userId)
-        }, POLL_INTERVAL_MS)
     }
     
     private fun getMediaType(file: File): MediaType {

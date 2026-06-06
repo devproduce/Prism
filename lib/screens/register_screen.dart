@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:sms_autofill/sms_autofill.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/widgets/glass_widgets.dart';
@@ -110,34 +109,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         });
       }
     });
-  }
-
-  Future<void> _fetchPhoneNumber() async {
-    try {
-      final hint = await SmsAutoFill().hint;
-      if (hint != null && hint.isNotEmpty && mounted) {
-        String digitsOnly = hint.replaceAll(RegExp(r'[^\d+]'), '');
-        if (digitsOnly.startsWith('+')) {
-          if (digitsOnly.startsWith('+91') && digitsOnly.length > 3) {
-            _countryCodeController.text = '91';
-            _phoneNumberController.text = digitsOnly.substring(3);
-          } else if (digitsOnly.startsWith('+1') && digitsOnly.length > 2) {
-            _countryCodeController.text = '1';
-            _phoneNumberController.text = digitsOnly.substring(2);
-          } else if (digitsOnly.startsWith('+44') && digitsOnly.length > 3) {
-            _countryCodeController.text = '44';
-            _phoneNumberController.text = digitsOnly.substring(3);
-          } else {
-            // If unknown country code, put everything in phone number field
-            _phoneNumberController.text = digitsOnly;
-          }
-        } else {
-           _phoneNumberController.text = digitsOnly;
-        }
-      }
-    } catch (e) {
-      debugPrint('Failed to fetch phone number hint: $e');
-    }
   }
 
   Future<void> _startFaceIdScan() async {
@@ -390,9 +361,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 onPageChanged: (page) {
                   setState(() => _currentPage = page);
-                  if (page == 1) {
-                    _fetchPhoneNumber();
-                  }
                 },
                 children: [
                   _buildStepTemplate(

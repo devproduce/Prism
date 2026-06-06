@@ -161,7 +161,7 @@ class SettingsScreen extends StatelessWidget {
                     context,
                     icon: Icons.numbers_rounded,
                     title: 'App Version',
-                    subtitle: '1.0.0',
+                    subtitle: '1.0.1',
                     onTap: () {},
                     showChevron: false,
                   ),

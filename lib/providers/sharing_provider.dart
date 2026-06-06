@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:prism/api/api_client.dart';
 import 'package:prism/models/sharing_models.dart';
+import 'package:prism/services/batch_status_stream.dart';
 import 'package:prism/services/local_notification_service.dart';
 import 'package:prism/utils/globals.dart';
 
@@ -30,6 +31,12 @@ class SharingProvider extends ChangeNotifier {
   String? _userId; // Added for batch authorization
   BatchStatusResponse? _batchStatus;
   Timer? _pollingTimer;
+  BatchStatusStream? _batchStatusStream;
+  String? _sseStatusMessage;
+  bool _batchWatchFinalized = false;
+  int _fallbackPollAttempts = 0;
+  static const int _maxFallbackPollAttempts = 120; // 10 min at 5s
+  bool _handlingSseTerminal = false;
 
   // Getters
   List<File> get selectedImages => _selectedImages;
@@ -42,6 +49,8 @@ class SharingProvider extends ChangeNotifier {
   String? get error => _error;
   String? get currentBatchId => _currentBatchId;
   BatchStatusResponse? get batchStatus => _batchStatus;
+  /// Live line from SSE `status` events while the batch is processing.
+  String? get batchProcessingSubtitle => _sseStatusMessage;
   bool get hasImages => _selectedImages.isNotEmpty;
   int get selectedCount => _selectedImages.length;
   List<DetectedRecipient> get selectedRecipients =>
@@ -114,6 +123,7 @@ class SharingProvider extends ChangeNotifier {
     _batchStatus = null;
     _imageRecipientMap.clear();
     _error = null;
+    _sseStatusMessage = null;
     notifyListeners();
   }
 
@@ -227,6 +237,7 @@ class SharingProvider extends ChangeNotifier {
       debugPrint('🔄 [SharingProvider] Loading batch status: $batchId');
       _userId = userId;
       _currentBatchId = batchId;
+      _sseStatusMessage = null;
 
       final response = await _apiClient.getBatchStatus(
         batchId: batchId,
@@ -330,9 +341,9 @@ class SharingProvider extends ChangeNotifier {
       _isUploading = false;
       notifyListeners();
 
-      // Start polling for batch status
-      debugPrint('🔄 [SharingProvider] Starting polling for batch status...');
-      await _startPolling();
+      // Watch batch status (SSE + REST; 5s polling fallback)
+      debugPrint('🔌 [SharingProvider] Starting batch status watch (SSE)...');
+      await _startBatchStatusWatch();
 
       return _currentBatchId;
     } catch (e) {
@@ -345,77 +356,158 @@ class SharingProvider extends ChangeNotifier {
     }
   }
 
-  // Start polling for batch status
-  int _pollingAttempts = 0;
-  static const int _maxPollingAttempts = 150; // 5 minutes at 2-second intervals
+  void _disconnectBatchStream() {
+    _batchStatusStream?.disconnect();
+    _batchStatusStream = null;
+  }
 
-  Future<void> _startPolling() async {
+  Future<void> _startBatchStatusWatch() async {
     if (_currentBatchId == null) {
-      debugPrint('⚠️ [SharingProvider] Cannot start polling: No batch ID');
+      debugPrint('⚠️ [SharingProvider] Cannot watch batch: No batch ID');
       return;
     }
 
     _isProcessing = true;
     _error = null;
-    _pollingAttempts = 0;
+    _batchWatchFinalized = false;
+    _sseStatusMessage = null;
+    _fallbackPollAttempts = 0;
+    _pollingTimer?.cancel();
+    _disconnectBatchStream();
+    notifyListeners();
+
+    await _fetchBatchStatus();
+    if (_batchWatchFinalized) return;
+
+    if (_batchStatus?.isCompleted == true || _batchStatus?.isFailed == true) {
+      await _finalizeBatchWatchFromRest();
+      return;
+    }
+
+    debugPrint('🔌 [SharingProvider] Opening SSE batch stream...');
+    _batchStatusStream = BatchStatusStream();
+    await _batchStatusStream!.connect(
+      batchId: _currentBatchId!,
+      onStatus: (status, message, error) {
+        if (_batchWatchFinalized) return;
+        _sseStatusMessage = message ?? error;
+        notifyListeners();
+
+        if (BatchStatusStream.isTerminalStatus(status)) {
+          unawaited(_handleSseTerminalEvent());
+        }
+      },
+      onConnectionError: (Object e) {
+        if (_batchWatchFinalized || !_isProcessing) return;
+        debugPrint('⚠️ [SharingProvider] SSE connection issue: $e');
+        _disconnectBatchStream();
+        _startPollingFallback();
+      },
+    );
+  }
+
+  Future<void> _handleSseTerminalEvent() async {
+    if (_batchWatchFinalized) return;
+    if (_handlingSseTerminal) return;
+    _handlingSseTerminal = true;
+    try {
+      _disconnectBatchStream();
+      try {
+        await _fetchBatchStatus(stopWatchOnFetchError: false);
+      } catch (e) {
+        debugPrint('❌ [SharingProvider] REST after SSE terminal: $e');
+      }
+      if (_batchWatchFinalized) return;
+
+      if (_batchStatus?.isCompleted == true || _batchStatus?.isFailed == true) {
+        await _finalizeBatchWatchFromRest();
+      } else {
+        _startPollingFallback();
+      }
+    } finally {
+      _handlingSseTerminal = false;
+    }
+  }
+
+  Future<void> _finalizeBatchWatchFromRest() async {
+    if (_batchWatchFinalized) return;
+    if (_batchStatus?.isCompleted != true && _batchStatus?.isFailed != true) {
+      return;
+    }
+
+    _batchWatchFinalized = true;
+    _pollingTimer?.cancel();
+    _disconnectBatchStream();
+
+    _isProcessing = false;
     debugPrint(
-      '🔄 [SharingProvider] Starting polling (max $_maxPollingAttempts attempts)',
+      '⏹️ [SharingProvider] Batch watch finished: ${_batchStatus?.status}',
     );
     notifyListeners();
 
-    // Initial fetch
-    await _fetchBatchStatus();
-
-    // Poll every 2 seconds until completed
-    _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
-      _pollingAttempts++;
-      debugPrint(
-        '🔄 [SharingProvider] Polling attempt $_pollingAttempts/$_maxPollingAttempts',
+    if (_batchStatus?.isCompleted == true) {
+      _notificationService.cancel(101);
+      _notificationService.showCompletionNotification(
+        id: 102,
+        title: 'Ready to Review!',
+        body:
+            'We found ${_batchStatus?.recipients.length ?? 0} friends in your photos.',
+        payload: 'REVIEW_READY:$_currentBatchId',
       );
 
-      await _fetchBatchStatus();
+      if (navigatorKey.currentState != null) {
+        navigatorKey.currentState!.pushReplacementNamed('/confirm_share');
+      }
+    }
+  }
+
+  void _startPollingFallback() {
+    if (_currentBatchId == null || _userId == null) return;
+    if (_batchWatchFinalized) return;
+
+    debugPrint(
+      '🔄 [SharingProvider] Using 5s REST polling fallback (SSE unavailable)',
+    );
+    _pollingTimer?.cancel();
+    _fallbackPollAttempts = 0;
+
+    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+      if (_batchWatchFinalized) {
+        timer.cancel();
+        return;
+      }
+      if (_currentBatchId == null || _userId == null) {
+        timer.cancel();
+        return;
+      }
+
+      _fallbackPollAttempts++;
+      debugPrint(
+        '🔄 [SharingProvider] Fallback poll $_fallbackPollAttempts/$_maxFallbackPollAttempts',
+      );
+
+      await _fetchBatchStatus(stopWatchOnFetchError: false);
+
+      if (_batchWatchFinalized) {
+        timer.cancel();
+        return;
+      }
 
       if (_batchStatus?.isCompleted == true || _batchStatus?.isFailed == true) {
         timer.cancel();
-        _isProcessing = false;
-        debugPrint(
-          '⏹️ [SharingProvider] Polling stopped: ${_batchStatus?.status}',
-        );
-        notifyListeners();
-
-        // Processing complete
-        if (_batchStatus?.isCompleted == true) {
-          _notificationService.cancel(101); // Cancel progress
-          _notificationService.showCompletionNotification(
-            id: 102,
-            title: 'Ready to Review!',
-            body:
-                'We found ${_batchStatus?.recipients.length ?? 0} friends in your photos.',
-            payload: 'REVIEW_READY:$_currentBatchId', // Include batch ID
-          );
-
-          // Auto-navigate if app is open
-          if (navigatorKey.currentState != null) {
-            // Use pushReplacementNamed to remove processing screen from stack
-            // so back button from review screen goes directly to share screen
-            navigatorKey.currentState!.pushReplacementNamed('/confirm_share');
-          }
-        }
-      } else if (_pollingAttempts >= _maxPollingAttempts) {
+        await _finalizeBatchWatchFromRest();
+      } else if (_fallbackPollAttempts >= _maxFallbackPollAttempts) {
         timer.cancel();
         _isProcessing = false;
         _error = 'Processing timeout: took longer than expected';
-        debugPrint(
-          '⏱️ [SharingProvider] Polling stopped: Max attempts reached',
-        );
+        _disconnectBatchStream();
         notifyListeners();
       }
     });
   }
 
   // Fetch batch status
-  Future<void> _fetchBatchStatus() async {
+  Future<void> _fetchBatchStatus({bool stopWatchOnFetchError = true}) async {
     if (_currentBatchId == null) {
       debugPrint('⚠️ [SharingProvider] Cannot fetch batch status: No batch ID');
       return;
@@ -465,7 +557,10 @@ class SharingProvider extends ChangeNotifier {
       }
 
       if (_batchStatus!.isFailed) {
-        _error = 'Processing failed';
+        _error = (_batchStatus!.errorMessage != null &&
+                _batchStatus!.errorMessage!.isNotEmpty)
+            ? _batchStatus!.errorMessage!
+            : 'Processing failed';
         debugPrint('❌ [SharingProvider] Batch processing failed');
       } else if (_batchStatus!.isCompleted) {
         debugPrint(
@@ -480,8 +575,11 @@ class SharingProvider extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       _error = e.toString();
-      _isProcessing = false;
-      _pollingTimer?.cancel();
+      if (stopWatchOnFetchError) {
+        _isProcessing = false;
+        _pollingTimer?.cancel();
+        _disconnectBatchStream();
+      }
       debugPrint('❌ [SharingProvider] Fetch batch status error: $e');
       notifyListeners();
     }
@@ -658,6 +756,7 @@ class SharingProvider extends ChangeNotifier {
   // Reset all state
   void reset() {
     _pollingTimer?.cancel();
+    _disconnectBatchStream();
     _selectedImages.clear();
     _description = '';
     _autoClean = false;
@@ -669,6 +768,9 @@ class SharingProvider extends ChangeNotifier {
     _batchStatus = null;
     _imageRecipientMap.clear();
     _allFriends.clear();
+    _sseStatusMessage = null;
+    _batchWatchFinalized = false;
+    _handlingSseTerminal = false;
 
     // Ensure notifications are cleared
     _notificationService.cancel(101);
@@ -680,8 +782,9 @@ class SharingProvider extends ChangeNotifier {
   // Cancel current operation
   Future<void> cancel() async {
     debugPrint('⏹️ [SharingProvider] Cancelling current operation');
-    debugPrint('   Polling attempts made: $_pollingAttempts');
+    _batchWatchFinalized = true;
     _pollingTimer?.cancel();
+    _disconnectBatchStream();
 
     // Call backend to clean up if we have a batch ID
     if (_currentBatchId != null && _userId != null) {
@@ -707,6 +810,7 @@ class SharingProvider extends ChangeNotifier {
   @override
   void dispose() {
     _pollingTimer?.cancel();
+    _disconnectBatchStream();
     super.dispose();
   }
 }

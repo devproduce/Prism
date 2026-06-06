@@ -180,10 +180,12 @@ class _ProcessingScreenState extends State<ProcessingScreen>
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Prism AI is detecting faces and scenes...',
+                            sharingProvider.batchProcessingSubtitle ??
+                                'Prism AI is detecting faces and scenes...',
                             style: PrismTextStyles.bodyMedium.copyWith(
                               color: PrismColors.secondaryText,
                             ),
+                            textAlign: TextAlign.center,
                           ),
 
                           const SizedBox(height: 48),

@@ -122,7 +122,8 @@ class BatchStatusResponse {
   // Status checks
   bool get isCompleted => status == 'completed';
   bool get isProcessing => status == 'processing';
-  bool get isFailed => status == 'failed';
+  bool get isFailed =>
+      status == 'failed' || status == 'error' || status == 'timeout';
   bool get isNotStarted => status == 'not_started';
 
   factory BatchStatusResponse.fromJson(Map<String, dynamic> json) {
@@ -166,6 +167,9 @@ class BatchStatusResponse {
         recipientsList = recipientsJson
             .map((e) => DetectedRecipient.fromJson(e as Map<String, dynamic>))
             .toList();
+        final seen = <String>{};
+        recipientsList =
+            recipientsList.where((r) => seen.add(r.userId)).toList();
       }
     } catch (e) {
       debugPrint('⚠️ [BatchStatusResponse] Error parsing recipients: $e');
