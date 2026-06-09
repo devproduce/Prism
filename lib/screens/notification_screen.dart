@@ -25,9 +25,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
   Future<void> _loadNotifications() async {
     final auth = context.read<AuthProvider>();
     if (auth.currentUser == null) return;
-    await context.read<NotificationsProvider>().fetchNotifications(
-          auth.currentUser!.userId,
-        );
+    final provider = context.read<NotificationsProvider>();
+    provider.setUserContext(profilePicId: auth.currentUser!.profilePicId);
+    await provider.fetchNotifications(auth.currentUser!.userId);
   }
 
   @override

@@ -99,6 +99,9 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         galleryProvider.fetchGallery(userId: authProvider.currentUser!.userId);
+        notificationsProvider.setUserContext(
+          profilePicId: authProvider.currentUser!.profilePicId,
+        );
         notificationsProvider.fetchNotifications(
           authProvider.currentUser!.userId,
         );
