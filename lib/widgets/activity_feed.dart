@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:prism/models/activity_item.dart';
 import 'package:prism/models/friend_model.dart';
 import 'package:prism/screens/friends_screen.dart';
-import 'package:prism/screens/user_profile_screen.dart';
+import 'package:prism/services/fcm_navigation_service.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/utils/constants.dart';
@@ -13,7 +13,7 @@ import 'package:prism/widgets/activity_title.dart';
 import 'package:prism/widgets/friend_requests_header.dart';
 import 'package:prism/widgets/retroactive_share_card.dart';
 
-/// Ports activity-feed.tsx — unified grouped activity timeline.
+/// Ports activity-feed.tsx Ã¢â‚¬â€ unified grouped activity timeline.
 class ActivityFeed extends StatelessWidget {
   final List<ActivityItem> activities;
   final Map<ActivityTimeBucket, List<ActivityItem>> groupedActivities;
@@ -198,49 +198,15 @@ class _ActivityFeedRow extends StatelessWidget {
   }
 
   void _openContactSearch(BuildContext context, ActivityItem item) {
-    final metadata = item.notification?.metadata ?? {};
-    final contactName = metadata['contact_name']?.toString();
-    if (contactName == null || contactName.isEmpty) return;
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => FriendsScreen(
-          initialSearchQuery: contactName,
-        ),
-      ),
-    );
+    final notification = item.notification;
+    if (notification == null) return;
+    FcmNavigationService.handleNotification(notification);
   }
 
   void _openNotification(BuildContext context, ActivityItem item) {
     final notification = item.notification;
     if (notification == null) return;
-
-    final type = notification.type;
-    final route = notification.metadata?['route']?.toString();
-    final senderId =
-        notification.metadata?['sender_id']?.toString() ?? notification.userId;
-    final senderUsername = notification.metadata?['sender_username']
-            ?.toString() ??
-        notification.username;
-
-    if (type == 'batch_received' || route == '/friend_profile') {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => UserProfileScreen(
-            userId: senderId ?? '',
-            username: senderUsername ?? 'Friend',
-          ),
-        ),
-      );
-    } else if (type == 'friend_request_received' || route == '/notifications') {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => const FriendsScreen(openRequestsDirectly: true),
-        ),
-      );
-    } else if (route != null && route.isNotEmpty) {
-      Navigator.of(context).pushNamed(route);
-    }
+    FcmNavigationService.handleNotification(notification);
   }
 }
 

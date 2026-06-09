@@ -10,9 +10,8 @@ import 'package:prism/screens/settings_screen.dart';
 import 'package:prism/screens/edit_profile_screen.dart';
 import 'package:prism/screens/blocked_users_screen.dart';
 import 'package:prism/screens/help_support_screen.dart';
-import 'package:prism/screens/user_profile_screen.dart';
-import 'package:prism/screens/notification_screen.dart';
 import 'package:prism/utils/activity_feed_refresh.dart';
+import 'package:prism/services/fcm_navigation_service.dart';
 import 'package:prism/services/background_share_handler.dart';
 import 'package:prism/screens/privacy_policy_screen.dart';
 import 'package:prism/screens/about_screen.dart';
@@ -119,7 +118,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           try {
             final data = jsonDecode(response.payload!);
             ActivityFeedRefresh.refreshFromPush();
-            _handleFcmRoute(data);
+            FcmNavigationService.handle(data);
           } catch (e) {
             debugPrint('Failed to parse FCM payload: $e');
           }
@@ -130,7 +129,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       debugPrint('📱 Notification tapped from background');
       ActivityFeedRefresh.refreshFromPush();
-      _handleFcmRoute(message.data);
+      FcmNavigationService.handle(message.data);
     });
 
     FirebaseMessaging.instance.getInitialMessage().then((message) {
@@ -138,46 +137,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         debugPrint('📱 App launched from notification');
         Future.delayed(const Duration(milliseconds: 500), () {
           ActivityFeedRefresh.refreshFromPush();
-          _handleFcmRoute(message.data);
+          FcmNavigationService.handle(message.data);
         });
       }
     });
-  }
-
-  void _handleFcmRoute(Map<String, dynamic> data) {
-    if (navigatorKey.currentState == null) return;
-
-    final type = data['type']?.toString();
-    final route = data['route']?.toString();
-    final senderId = data['sender_id']?.toString();
-    final senderUsername = data['sender_username']?.toString();
-
-    if (type == 'batch_received' || route == '/friend_profile') {
-      navigatorKey.currentState!.push(
-        MaterialPageRoute(
-          builder: (context) => UserProfileScreen(
-            userId: senderId ?? '',
-            username: senderUsername ?? 'Friend',
-          ),
-        ),
-      );
-      return;
-    }
-
-    if (type == 'friend_request_received' ||
-        type == 'friend_req_accepted' ||
-        route == '/notifications') {
-      navigatorKey.currentState!.push(
-        MaterialPageRoute(
-          builder: (context) => const NotificationScreen(),
-        ),
-      );
-      return;
-    }
-
-    if (route != null && route.isNotEmpty) {
-      navigatorKey.currentState!.pushNamed(route);
-    }
   }
 
   /// Setup listener for immediate deep link notifications from native.

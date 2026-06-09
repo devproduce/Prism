@@ -19,8 +19,14 @@ import 'package:prism/widgets/empty_state_widget.dart';
 class UserProfileScreen extends StatefulWidget {
   final String userId;
   final String? username;
+  final String? initialProfileTab;
 
-  const UserProfileScreen({super.key, required this.userId, this.username});
+  const UserProfileScreen({
+    super.key,
+    required this.userId,
+    this.username,
+    this.initialProfileTab,
+  });
 
   @override
   State<UserProfileScreen> createState() => _UserProfileScreenState();
@@ -40,7 +46,12 @@ class _UserProfileScreenState extends State<UserProfileScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    final initialIndex = widget.initialProfileTab == 'received' ? 1 : 0;
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: initialIndex,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadUserData();
       _loadSharedImages();

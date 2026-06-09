@@ -9,8 +9,14 @@ import 'package:prism/providers/notifications_provider.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/screens/friends_screen.dart';
+
 class NotificationScreen extends StatefulWidget {
-  const NotificationScreen({super.key});
+  final bool highlightFriendRequests;
+
+  const NotificationScreen({
+    super.key,
+    this.highlightFriendRequests = false,
+  });
 
   @override
   State<NotificationScreen> createState() => _NotificationScreenState();
@@ -18,6 +24,8 @@ class NotificationScreen extends StatefulWidget {
 
 class _NotificationScreenState extends State<NotificationScreen>
     with WidgetsBindingObserver {
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
@@ -28,7 +36,17 @@ class _NotificationScreenState extends State<NotificationScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _scrollToTop() {
+    if (!_scrollController.hasClients) return;
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
   }
 
   @override
@@ -44,6 +62,9 @@ class _NotificationScreenState extends State<NotificationScreen>
     final provider = context.read<NotificationsProvider>();
     provider.setUserContext(profilePicId: auth.currentUser!.profilePicId);
     await provider.refetch(auth.currentUser!.userId);
+    if (widget.highlightFriendRequests && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToTop());
+    }
   }
 
   Future<void> _handleAccept(String friendshipId) async {
@@ -171,6 +192,7 @@ class _NotificationScreenState extends State<NotificationScreen>
               backgroundColor: PrismColors.surfaceGray,
               onRefresh: _loadNotifications,
               child: ListView(
+                controller: _scrollController,
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: EdgeInsets.fromLTRB(
                   horizontalInset,

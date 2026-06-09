@@ -36,7 +36,9 @@ import 'package:prism/widgets/section_header.dart';
 import 'package:prism/widgets/see_all_albums_card.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final int? initialNavIndex;
+
+  const HomeScreen({super.key, this.initialNavIndex});
 
   static final GlobalKey<_HomeScreenState> homeScreenKey =
       GlobalKey<_HomeScreenState>();
@@ -77,6 +79,10 @@ class _HomeScreenState extends State<HomeScreen> {
       blurValue: 1,
     );
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (widget.initialNavIndex != null) {
+        switchToTab(widget.initialNavIndex!);
+      }
+
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final galleryProvider = Provider.of<GalleryProvider>(
         context,
