@@ -24,10 +24,12 @@ import 'package:prism/widgets/unknown_face_recommendation_card.dart';
 
 class FriendsScreen extends StatefulWidget {
   final bool openRequestsDirectly;
+  final String? initialSearchQuery;
 
   const FriendsScreen({
     super.key,
     this.openRequestsDirectly = false,
+    this.initialSearchQuery,
   });
 
   @override
@@ -58,6 +60,17 @@ class _FriendsScreenState extends State<FriendsScreen> {
       
       if (widget.openRequestsDirectly) {
         _showRequestsBottomSheet(context, friendsProvider, authProvider);
+      }
+
+      final initialQuery = widget.initialSearchQuery?.trim();
+      final userId = authProvider.currentUser?.userId;
+      if (initialQuery != null &&
+          initialQuery.isNotEmpty &&
+          userId != null) {
+        _searchController.text = initialQuery;
+        setState(() {});
+        _updateSearchStatusRefreshTimer(true);
+        friendsProvider.searchUsers(initialQuery, userId);
       }
     });
   }

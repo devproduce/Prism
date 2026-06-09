@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
-import 'package:prism/widgets/notification_card.dart';
+import 'package:prism/widgets/activity_feed.dart';
 import 'package:prism/widgets/empty_state_widget.dart';
 import 'package:prism/providers/notifications_provider.dart';
 import 'package:prism/providers/auth_provider.dart';
+import 'package:prism/providers/friends_provider.dart';
+import 'package:prism/screens/friends_screen.dart';
 
 class NotificationScreen extends StatefulWidget {
   const NotificationScreen({super.key});
@@ -27,7 +29,29 @@ class _NotificationScreenState extends State<NotificationScreen> {
     if (auth.currentUser == null) return;
     final provider = context.read<NotificationsProvider>();
     provider.setUserContext(profilePicId: auth.currentUser!.profilePicId);
-    await provider.fetchNotifications(auth.currentUser!.userId);
+    await provider.refetch(auth.currentUser!.userId);
+  }
+
+  Future<void> _handleAccept(String friendshipId) async {
+    final auth = context.read<AuthProvider>();
+    final provider = context.read<NotificationsProvider>();
+    final userId = auth.currentUser?.userId;
+    if (userId == null || !mounted) return;
+
+    await provider.acceptFriendRequest(friendshipId, userId, context);
+    if (!mounted) return;
+    await context.read<FriendsProvider>().syncFriendshipsIfStale(userId, force: true);
+  }
+
+  Future<void> _handleDecline(String friendshipId) async {
+    final auth = context.read<AuthProvider>();
+    final provider = context.read<NotificationsProvider>();
+    final userId = auth.currentUser?.userId;
+    if (userId == null || !mounted) return;
+
+    await provider.rejectFriendRequest(friendshipId, userId, context);
+    if (!mounted) return;
+    await context.read<FriendsProvider>().syncFriendshipsIfStale(userId, force: true);
   }
 
   @override
@@ -36,7 +60,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
     final isDesktop = media.size.width > 900;
     final horizontalInset = isDesktop
         ? (media.size.width - 800).clamp(16.0, double.infinity) / 2
-        : 0.0;
+        : 16.0;
 
     return Scaffold(
       backgroundColor: PrismColors.voidBlack,
@@ -68,12 +92,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
                         size: 20,
                       ),
                       tooltip: 'Mark all read',
-                      onPressed: provider.activityFeedNotifications.isEmpty
+                      onPressed: provider.activities.isEmpty
                           ? null
                           : () async {
                               HapticFeedback.lightImpact();
-                              final userId =
-                                  context.read<AuthProvider>().currentUser?.userId;
+                              final userId = context
+                                  .read<AuthProvider>()
+                                  .currentUser
+                                  ?.userId;
                               if (userId != null) {
                                 await provider.markAllAsRead(userId);
                               }
@@ -86,16 +112,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
           ];
         },
         body: Consumer2<NotificationsProvider, AuthProvider>(
-          builder: (context, notificationsProvider, authProvider, _) {
-            if (notificationsProvider.isLoading &&
-                notificationsProvider.activityFeedNotifications.isEmpty) {
+          builder: (context, provider, authProvider, _) {
+            if (provider.isLoading && provider.activities.isEmpty) {
               return const Center(
                 child: CircularProgressIndicator(color: PrismColors.prismYellow),
               );
             }
 
-            if (notificationsProvider.error != null &&
-                notificationsProvider.activityFeedNotifications.isEmpty) {
+            if (provider.error != null && provider.activities.isEmpty) {
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
@@ -103,7 +127,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        notificationsProvider.error!,
+                        provider.error!,
                         style: PrismTextStyles.bodyMedium.copyWith(
                           color: PrismColors.destructiveRed,
                         ),
@@ -121,9 +145,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
             }
 
             final userId = authProvider.currentUser?.userId ?? '';
-            final items = notificationsProvider.activityFeedNotifications;
+            final hasContent =
+                provider.activities.isNotEmpty || provider.receivedRequests.isNotEmpty;
 
-            if (items.isEmpty) {
+            if (!hasContent) {
               return EmptyStateWidget.noNotifications();
             }
 
@@ -131,37 +156,36 @@ class _NotificationScreenState extends State<NotificationScreen> {
               color: PrismColors.prismYellow,
               backgroundColor: PrismColors.surfaceGray,
               onRefresh: _loadNotifications,
-              child: ListView.separated(
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: EdgeInsets.fromLTRB(
                   horizontalInset,
-                  0,
+                  8,
                   horizontalInset,
                   media.padding.bottom + 32,
                 ),
-                itemCount: items.length,
-                separatorBuilder: (context, index) {
-                  final type = items[index].type;
-                  if (type == 'retroactive_share_prompt' ||
-                      type == 'contact_found_in_batch') {
-                    return const SizedBox(height: 4);
-                  }
-                  return Divider(
-                    height: 1,
-                    indent: isDesktop ? 88 : 72,
-                    color: PrismColors.white.withValues(alpha: 0.05),
-                  );
-                },
-                itemBuilder: (context, index) {
-                  final notification = items[index];
-                  return NotificationCard(
-                    key: ValueKey(notification.id),
-                    notification: notification,
+                children: [
+                  ActivityFeed(
+                    activities: provider.activities,
+                    groupedActivities: provider.groupedActivities,
                     currentUserId: userId,
-                    onDismiss: () {
-                      if (mounted) setState(() {});
+                    showFriendRequestsHeader: true,
+                    friendRequestsCount: provider.receivedRequests.length,
+                    friendRequestsPreview: provider.friendRequestsPreview(),
+                    onAccept: _handleAccept,
+                    onDecline: _handleDecline,
+                    onNavigateToRequests: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const FriendsScreen(
+                            openRequestsDirectly: true,
+                          ),
+                        ),
+                      );
                     },
-                  );
-                },
+                    onRetroactiveSuccess: _loadNotifications,
+                  ),
+                ],
               ),
             );
           },
