@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:prism/api/api_client.dart';
+import 'package:prism/models/review_models.dart';
 import 'package:prism/models/sharing_models.dart';
 import 'package:prism/services/batch_status_stream.dart';
 import 'package:prism/services/local_notification_service.dart';
@@ -112,6 +113,111 @@ class SharingProvider extends ChangeNotifier {
     return recipients
         .where((r) => !_specialFlags.contains(r) && r != _userId)
         .length;
+  }
+
+  /// True when at least one image is assigned to a friend recipient.
+  bool get hasValidShareRecipients {
+    if (_userId == null) return false;
+    for (final recipients in _imageRecipientMap.values) {
+      for (final recipient in recipients) {
+        if (!_specialFlags.contains(recipient) && recipient != _userId) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /// Contacts detected in this batch who are on Prism but not yet friends.
+  List<ReviewSuggestion> get batchContactSuggestions {
+    final batch = _batchStatus;
+    if (batch == null) return [];
+
+    final suggestions = batch.contacts
+        .where((contact) => contact.userId != _userId)
+        .map(
+          (contact) => ReviewSuggestion(
+            userId: contact.userId,
+            username: contact.username,
+            profilePicId: contact.profilePicId,
+            photoCount: photoCountForUserId(contact.userId),
+          ),
+        )
+        .toList();
+
+    suggestions.sort((a, b) => b.photoCount.compareTo(a.photoCount));
+    return suggestions;
+  }
+
+  /// Friend groups for accordion sections, sorted by photo count descending.
+  List<ReviewPersonGroup> get friendPhotoGroups {
+    final batch = _batchStatus;
+    if (batch == null) return [];
+
+    final groups = batch.recipients
+        .where((recipient) => recipient.userId != _userId)
+        .map((recipient) {
+          final images = imagesForUserId(recipient.userId);
+          return ReviewPersonGroup(
+            id: recipient.userId,
+            displayName: recipient.username,
+            profilePicId: recipient.profilePicId,
+            photoCount: images.isNotEmpty ? images.length : recipient.count,
+            images: images,
+            type: ReviewGroupType.friend,
+          );
+        })
+        .toList();
+
+    groups.sort((a, b) => b.photoCount.compareTo(a.photoCount));
+    return groups;
+  }
+
+  /// No-face photos as a single accordion group, or null when none exist.
+  ReviewPersonGroup? get noFaceGroup {
+    final images = noFaceImages;
+    if (images.isEmpty) return null;
+
+    return ReviewPersonGroup(
+      id: kReviewNoFaceGroupId,
+      displayName: 'No faces detected',
+      photoCount: images.length,
+      images: images,
+      type: ReviewGroupType.noFace,
+    );
+  }
+
+  List<BatchImage> imagesForUserId(String userId) {
+    final batch = _batchStatus;
+    if (batch == null) return [];
+
+    final result = <BatchImage>[];
+    final seen = <String>{};
+
+    for (final image in batch.images) {
+      if (image.hasNoFaces) continue;
+      final faces = image.detectedFaces;
+      if (faces == null) continue;
+
+      for (final face in faces) {
+        if (_faceUserId(face) == userId && seen.add(image.id)) {
+          result.add(image);
+          break;
+        }
+      }
+    }
+
+    return result;
+  }
+
+  int photoCountForUserId(String userId) => imagesForUserId(userId).length;
+
+  static String? _faceUserId(dynamic face) {
+    if (face is Map) {
+      final id = face['user_id'];
+      if (id != null) return id.toString();
+    }
+    return null;
   }
 
   // Check if all images are marked for archive

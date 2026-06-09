@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:prism/api/api_client.dart';
 import 'package:prism/models/friend_model.dart';
 import 'package:prism/models/contact_sync_result.dart';
+import 'package:prism/models/review_models.dart';
 import 'package:prism/services/contact_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -81,6 +82,39 @@ class FriendsProvider with ChangeNotifier {
       return FriendshipDisplayStatus.pendingSent;
     }
     return FriendshipDisplayStatus.none;
+  }
+
+  /// Batch contact suggestions excluding friends, enriched with phonebook names.
+  List<ReviewSuggestion> visibleBatchSuggestions(
+    List<ReviewSuggestion> suggestions,
+  ) {
+    final onPlatform = _contactSyncResult?.onPlatform ?? [];
+
+    return suggestions
+        .where(
+          (suggestion) =>
+              friendshipDisplayStatusFor(
+                userId: suggestion.userId,
+                username: suggestion.username,
+              ) !=
+              FriendshipDisplayStatus.friend,
+        )
+        .map((suggestion) {
+          final platformUser = onPlatform
+              .where((user) => user.userId == suggestion.userId)
+              .firstOrNull;
+
+          if (platformUser == null) return suggestion;
+
+          return ReviewSuggestion(
+            userId: suggestion.userId,
+            username: suggestion.username,
+            profilePicId: suggestion.profilePicId ?? platformUser.profilePicId,
+            contactName: platformUser.contactName,
+            photoCount: suggestion.photoCount,
+          );
+        })
+        .toList();
   }
 
   /// Keep friendship lists fresh while searching without spamming the API.

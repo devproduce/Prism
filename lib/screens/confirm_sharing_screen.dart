@@ -1,26 +1,25 @@
-// ... imports fixed at top
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:prism/providers/sharing_provider.dart';
+import 'package:prism/models/review_models.dart';
 import 'package:prism/providers/auth_provider.dart';
+import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/providers/gallery_provider.dart';
+import 'package:prism/providers/sharing_provider.dart';
+import 'package:prism/screens/home_screen.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
-import 'package:prism/widgets/prism_button.dart';
-import 'package:prism/screens/home_screen.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
-
-import 'package:prism/widgets/prism_media_preview.dart';
-import 'package:prism/widgets/recipient_selector_sheet.dart';
-import 'package:prism/utils/constants.dart';
 import 'package:prism/utils/error_handler.dart';
+import 'package:prism/utils/media_url_utils.dart';
+import 'package:prism/widgets/recipient_selector_sheet.dart';
+import 'package:prism/widgets/review/review_bottom_bar.dart';
+import 'package:prism/widgets/review/review_no_face_send_all.dart';
+import 'package:prism/widgets/review/review_person_section.dart';
+import 'package:prism/widgets/review/review_suggestions_strip.dart';
 import 'package:prism/widgets/shimmer_placeholder.dart';
-import 'package:prism/models/sharing_models.dart';
-import 'package:prism/widgets/no_face_review_section.dart';
 
 class ConfirmSharingScreen extends StatefulWidget {
-  final String? batchId; // Batch ID passed from notification
+  final String? batchId;
 
   const ConfirmSharingScreen({super.key, this.batchId});
 
@@ -31,79 +30,100 @@ class ConfirmSharingScreen extends StatefulWidget {
 class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
   bool _isSharing = false;
   bool _isLoadingBatch = false;
+  bool _expandedInitialized = false;
+  final ScrollController _suggestionsScrollController = ScrollController();
+  final Set<String> _expandedGroupIds = {};
 
   @override
   void initState() {
     super.initState();
     _loadBatchStatusIfNeeded();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadReviewContext());
+  }
+
+  @override
+  void dispose() {
+    _suggestionsScrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadReviewContext() async {
+    final userId = context.read<AuthProvider>().currentUser?.userId;
+    if (userId == null) return;
+
+    final friendsProvider = context.read<FriendsProvider>();
+    await friendsProvider.syncFriendshipsIfStale(userId);
+    await friendsProvider.loadRecommendations(userId);
   }
 
   Future<void> _loadBatchStatusIfNeeded() async {
-    final sharingProvider = Provider.of<SharingProvider>(
-      context,
-      listen: false,
+    final sharingProvider = context.read<SharingProvider>();
+    final authProvider = context.read<AuthProvider>();
+
+    if (widget.batchId == null ||
+        (sharingProvider.batchStatus != null &&
+            sharingProvider.batchStatus!.batchId == widget.batchId)) {
+      return;
+    }
+
+    if (authProvider.currentUser == null) {
+      _showError('User not authenticated');
+      return;
+    }
+
+    setState(() => _isLoadingBatch = true);
+    final success = await sharingProvider.loadBatchStatus(
+      widget.batchId!,
+      authProvider.currentUser!.userId,
     );
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
 
-    // If batch status is null OR it's a different batch ID, reload from backend
-    if (widget.batchId != null && 
-        (sharingProvider.batchStatus == null || 
-         sharingProvider.batchStatus!.batchId != widget.batchId)) {
-      if (authProvider.currentUser == null) {
-        _showError('User not authenticated');
-        return;
-      }
-
-      setState(() => _isLoadingBatch = true);
-      final success = await sharingProvider.loadBatchStatus(
-        widget.batchId!,
-        authProvider.currentUser!.userId,
+    if (!success && mounted) {
+      _showError(sharingProvider.error ?? 'Failed to load batch');
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => HomeScreen(key: HomeScreen.homeScreenKey),
+        ),
       );
+    }
 
-      if (!success && mounted) {
-        _showError(sharingProvider.error ?? 'Failed to load batch');
-        // Navigate back to home
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => HomeScreen(key: HomeScreen.homeScreenKey)),
-        );
-      }
-
-      if (mounted) setState(() => _isLoadingBatch = false);
+    if (mounted) {
+      setState(() {
+        _isLoadingBatch = false;
+        _ensureDefaultExpanded(sharingProvider);
+      });
     }
   }
 
+  void _ensureDefaultExpanded(SharingProvider sharingProvider) {
+    if (_expandedInitialized) return;
+
+    final topGroup = sharingProvider.friendPhotoGroups.firstOrNull;
+    if (topGroup == null) return;
+
+    _expandedInitialized = true;
+    _expandedGroupIds.add(topGroup.id);
+  }
+
   Future<void> _exitReview() async {
-    final sharingProvider = Provider.of<SharingProvider>(
-      context,
-      listen: false,
-    );
-    await sharingProvider.cancel();
-    if (mounted) {
-      Navigator.of(context).pop();
-    }
+    await context.read<SharingProvider>().cancel();
+    if (mounted) Navigator.of(context).pop();
   }
 
   Future<void> _handleShare() async {
     HapticFeedback.mediumImpact();
     setState(() => _isSharing = true);
-    final sharingProvider = Provider.of<SharingProvider>(
-      context,
-      listen: false,
-    );
-    final galleryProvider = Provider.of<GalleryProvider>(
-      context,
-      listen: false,
-    );
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    final sharingProvider = context.read<SharingProvider>();
+    final galleryProvider = context.read<GalleryProvider>();
+    final authProvider = context.read<AuthProvider>();
 
     try {
       final success = await sharingProvider.confirmShare();
       if (success && mounted) {
-        // Refresh gallery to sync newly shared images to local album
-        if (authProvider.currentUser != null) {
-          galleryProvider.refreshAfterShare(authProvider.currentUser!.userId);
+        final userId = authProvider.currentUser?.userId;
+        if (userId != null) {
+          galleryProvider.refreshAfterShare(userId);
         }
-        
         sharingProvider.clearBatch();
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -131,7 +151,9 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
         HapticFeedback.heavyImpact();
 
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => HomeScreen(key: HomeScreen.homeScreenKey)),
+          MaterialPageRoute(
+            builder: (context) => HomeScreen(key: HomeScreen.homeScreenKey),
+          ),
           (route) => false,
         );
       } else if (mounted) {
@@ -148,7 +170,7 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
     ErrorHandler.showErrorSnackbar(context, message: message);
   }
 
-  void _showRecipientSelector(BuildContext context, String imageId) {
+  void _showRecipientSelector(String imageId) {
     HapticFeedback.selectionClick();
     showModalBottomSheet(
       context: context,
@@ -158,28 +180,72 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
     );
   }
 
-  // Helper to fix image URLs
-  String? _fixUrl(String? url) {
-    if (url == null || url.isEmpty) return null;
-    if (url.startsWith('http')) return url;
-    final cleanUrl = url.startsWith('/') ? url.substring(1) : url;
-    return '${ApiConstants.baseUrl}/$cleanUrl';
+  void _scrollSuggestionsToEnd() {
+    if (!_suggestionsScrollController.hasClients) return;
+    _suggestionsScrollController.animateTo(
+      _suggestionsScrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOut,
+    );
+  }
+
+  void _toggleGroup(String groupId) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      if (_expandedGroupIds.contains(groupId)) {
+        _expandedGroupIds.remove(groupId);
+      } else {
+        _expandedGroupIds.add(groupId);
+      }
+    });
+  }
+
+  Future<void> _handleAddSuggestion(ReviewSuggestion suggestion) async {
+    final userId = context.read<AuthProvider>().currentUser?.userId;
+    if (userId == null) return;
+
+    final friendsProvider = context.read<FriendsProvider>();
+    final success = await friendsProvider.sendFriendRequest(
+      userId,
+      suggestion.username,
+    );
+
+    if (!mounted) return;
+    if (!success) {
+      _showError(friendsProvider.error ?? 'Failed to send request');
+    }
+  }
+
+  Map<String, String>? _headersForUrl(String? url) {
+    return MediaUrlUtils.authHeaders(
+      url,
+      context.read<AuthProvider>().token,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final sharingProvider = Provider.of<SharingProvider>(context);
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final sharingProvider = context.watch<SharingProvider>();
+    final friendsProvider = context.watch<FriendsProvider>();
     final batchStatus = sharingProvider.batchStatus;
-    // Responsive Layout
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isDesktop = screenWidth > 900;
-    final isTablet = screenWidth > 600;
-    final gridColumns = isDesktop ? 4 : (isTablet ? 3 : 2);
+
+    if (batchStatus != null && !_expandedInitialized) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _expandedInitialized) return;
+        setState(() => _ensureDefaultExpanded(sharingProvider));
+      });
+    }
+
+    final contentInset = _contentInset(context);
 
     if (batchStatus == null || _isLoadingBatch) {
       return Scaffold(
         backgroundColor: PrismColors.voidBlack,
+        appBar: AppBar(
+          title: Text('Review & Share', style: PrismTextStyles.h2),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+        ),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -196,516 +262,180 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
       );
     }
 
-    final contentInset = isDesktop
-        ? (screenWidth - 800).clamp(16.0, double.infinity) / 2
-        : 16.0;
-
-    final noFaceImages = sharingProvider.noFaceImages;
-    final withFaceImages = sharingProvider.faceDetectedImages;
-    final hasNoFaceSection = noFaceImages.isNotEmpty;
-    final hasWithFaceSection = withFaceImages.isNotEmpty;
+    final friendGroups = sharingProvider.friendPhotoGroups;
+    final noFaceGroup = sharingProvider.noFaceGroup;
+    final suggestions = friendsProvider.visibleBatchSuggestions(
+      sharingProvider.batchContactSuggestions,
+    );
 
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) {
-          _exitReview();
-        }
+        if (!didPop) _exitReview();
       },
       child: Scaffold(
-      backgroundColor: PrismColors.voidBlack,
-      appBar: AppBar(
-        title: Text('Review & Share', style: PrismTextStyles.h2),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: PrismColors.white),
-          onPressed: _exitReview,
+        backgroundColor: PrismColors.voidBlack,
+        appBar: AppBar(
+          title: Text('Review & Share', style: PrismTextStyles.h2),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: PrismColors.white),
+            onPressed: _exitReview,
+          ),
+        ),
+        body: Column(
+          children: [
+            Expanded(
+              child: CustomScrollView(
+                slivers: [
+                  if (suggestions.isNotEmpty)
+                    SliverToBoxAdapter(
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 800),
+                          child: ReviewSuggestionsStrip(
+                            suggestions: suggestions,
+                            scrollController: _suggestionsScrollController,
+                            onViewAll: _scrollSuggestionsToEnd,
+                            onAddTap: _handleAddSuggestion,
+                            statusFor: (userId, username) =>
+                                friendsProvider.friendshipDisplayStatusFor(
+                              userId: userId,
+                              username: username,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (friendGroups.isEmpty && noFaceGroup == null)
+                    const SliverToBoxAdapter(
+                      child: _EmptyReviewState(),
+                    ),
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 800),
+                          child: _ReviewGroupTile(
+                            group: friendGroups[index],
+                            isExpanded:
+                                _expandedGroupIds.contains(friendGroups[index].id),
+                            onToggle: () => _toggleGroup(friendGroups[index].id),
+                            onImageTap: _showRecipientSelector,
+                            headersForUrl: _headersForUrl,
+                            recipientCountForImage:
+                                sharingProvider.recipientCountForImage,
+                          ),
+                        ),
+                      ),
+                      childCount: friendGroups.length,
+                    ),
+                  ),
+                  if (noFaceGroup != null)
+                    SliverToBoxAdapter(
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 800),
+                          child: _ReviewGroupTile(
+                            group: noFaceGroup,
+                            isExpanded:
+                                _expandedGroupIds.contains(noFaceGroup.id),
+                            onToggle: () => _toggleGroup(noFaceGroup.id),
+                            onImageTap: _showRecipientSelector,
+                            headersForUrl: _headersForUrl,
+                            recipientCountForImage:
+                                sharingProvider.recipientCountForImage,
+                            expandedHeaderExtra: const ReviewNoFaceSendAllTile(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  const SliverToBoxAdapter(child: SizedBox(height: 16)),
+                ],
+              ),
+            ),
+            ReviewBottomBar(
+              contentInset: contentInset,
+              onCancel: _exitReview,
+              onShare: sharingProvider.hasValidShareRecipients
+                  ? _handleShare
+                  : null,
+              isSharing: _isSharing,
+              showNoRecipientsWarning: !sharingProvider.hasValidShareRecipients,
+            ),
+          ],
         ),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: CustomScrollView(
-              slivers: [
-                // Recipients Section Header
-                SliverToBoxAdapter(
-                  child: Center(
-                    child: Container(
-                      constraints: const BoxConstraints(maxWidth: 800),
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.people_alt,
-                            color: PrismColors.prismYellow,
-                            size: 24,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Sharing with ${batchStatus.recipients.length} ${batchStatus.recipients.length == 1 ? "Friend" : "Friends"}',
-                            style: PrismTextStyles.h3,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Recipients List
-                SliverToBoxAdapter(
-                  child: Center(
-                    child: Container(
-                      constraints: const BoxConstraints(maxWidth: 800),
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: PrismColors.surfaceGray,
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(
-                            color: PrismColors.white.withValues(alpha: 0.1),
-                          ),
-                        ),
-                        child: batchStatus.recipients.isEmpty
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(24),
-                                  child: Column(
-                                    children: [
-                                      Icon(
-                                        Icons.person_off_outlined,
-                                        size: 48,
-                                        color: PrismColors.secondaryText,
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        'No friends detected',
-                                        style: PrismTextStyles.bodyMedium
-                                            .copyWith(
-                                              color: PrismColors.secondaryText,
-                                            ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              )
-                            : Wrap(
-                                spacing: 12,
-                                runSpacing: 12,
-                                children: batchStatus.recipients.map((
-                                  recipient,
-                                ) {
-                                  return _buildRecipientChip(
-                                    recipient,
-                                    authProvider,
-                                  );
-                                }).toList(),
-                              ),
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SliverToBoxAdapter(child: SizedBox(height: 24)),
-
-                if (hasNoFaceSection)
-                  SliverToBoxAdapter(
-                    child: NoFaceReviewSection(
-                      images: noFaceImages,
-                      onImageTap: (id) => _showRecipientSelector(context, id),
-                      fixUrl: _fixUrl,
-                    ),
-                  ),
-
-                if (hasNoFaceSection && hasWithFaceSection)
-                  const SliverToBoxAdapter(child: SizedBox(height: 20)),
-
-                if (hasWithFaceSection) ...[
-                  SliverToBoxAdapter(
-                    child: Center(
-                      child: Container(
-                        constraints: const BoxConstraints(maxWidth: 800),
-                        padding: EdgeInsets.symmetric(
-                          horizontal: contentInset,
-                          vertical: 8,
-                        ),
-                        child: Row(
-                          children: [
-                            Text(
-                              'Photos with people',
-                              style: PrismTextStyles.h3.copyWith(
-                                fontSize: isDesktop ? 20 : 18,
-                              ),
-                            ),
-                            const Spacer(),
-                            Flexible(
-                              child: Text(
-                                'Tap to edit recipients',
-                                style: PrismTextStyles.bodySmall.copyWith(
-                                  color: PrismColors.secondaryText,
-                                ),
-                                textAlign: TextAlign.right,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  SliverPadding(
-                    padding: EdgeInsets.symmetric(horizontal: contentInset),
-                    sliver: SliverMasonryGrid.count(
-                      crossAxisCount: gridColumns,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      childCount: withFaceImages.length,
-                      itemBuilder: (context, index) {
-                        final image = withFaceImages[index];
-                        return _buildMediaTile(
-                          context: context,
-                          image: image,
-                          sharingProvider: sharingProvider,
-                          authProvider: authProvider,
-                          onTap: () =>
-                              _showRecipientSelector(context, image.id),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-
-                // Bottom padding for scroll area
-                const SliverToBoxAdapter(child: SizedBox(height: 16)),
-              ],
-            ),
-          ),
-
-          // Privacy/Info Note (fixed above action bar)
-          Center(
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 800),
-              padding: EdgeInsets.symmetric(
-                horizontal: contentInset,
-                vertical: 12,
-              ),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: PrismColors.electricCyan.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: PrismColors.electricCyan.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.privacy_tip_outlined,
-                      color: PrismColors.electricCyan,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        _reviewHint(
-                          hasNoFaceSection: hasNoFaceSection,
-                          hasWithFaceSection: hasWithFaceSection,
-                        ),
-                        style: PrismTextStyles.bodySmall.copyWith(
-                          color: PrismColors.electricCyan,
-                          height: 1.3,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // Bottom Action Bar
-          Container(
-            padding: EdgeInsets.fromLTRB(
-              contentInset,
-              isTablet ? 20 : 16,
-              contentInset,
-              MediaQuery.of(context).padding.bottom + (isTablet ? 20 : 16),
-            ),
-            decoration: BoxDecoration(
-              color: PrismColors.surfaceGray,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-              border: Border(
-                top: BorderSide(
-                  color: PrismColors.white.withValues(alpha: 0.1),
-                ),
-              ),
-            ),
-            child: Center(
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 800),
-                child: Column(
-                  children: [
-                    // Show message if no valid recipients
-                    if (sharingProvider.imageRecipientMap.values
-                        .expand((recipients) => recipients)
-                        .where(
-                          (r) =>
-                              !{'archive', 'favourite', 'bin'}.contains(r) &&
-                              r != authProvider.currentUser?.userId,
-                        )
-                        .isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Text(
-                          'Select at least one friend to share with',
-                          style: PrismTextStyles.bodySmall.copyWith(
-                            color: PrismColors.destructiveRed,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    // Buttons Row
-                    Row(
-                      children: [
-                        // Cancel Button
-                        Expanded(
-                          child: TextButton.icon(
-                            onPressed: _exitReview,
-                            icon: const Icon(
-                              Icons.close,
-                              color: PrismColors.secondaryText,
-                            ),
-                            label: Text(
-                              'Cancel',
-                              style: PrismTextStyles.button.copyWith(
-                                color: PrismColors.secondaryText,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        // Share Button
-                        Expanded(
-                          flex: 2,
-                          child: Builder(
-                            builder: (context) {
-                              // Calculate actual recipient count (excluding current user)
-                              final currentUserId =
-                                  authProvider.currentUser?.userId;
-                              final specialFlags = {
-                                'archive',
-                                'favourite',
-                                'bin',
-                              };
-
-                              // Collect all unique recipient IDs from imageRecipientMap
-                              final Set<String> allRecipientIds = {};
-                              for (var recipients
-                                  in sharingProvider.imageRecipientMap.values) {
-                                for (var recipient in recipients) {
-                                  // Skip special flags and current user
-                                  if (!specialFlags.contains(recipient) &&
-                                      recipient != currentUserId) {
-                                    allRecipientIds.add(recipient);
-                                  }
-                                }
-                              }
-
-                              final hasValidRecipients =
-                                  allRecipientIds.isNotEmpty;
-
-                              return PrismButton(
-                                text: 'Share Memories',
-                                isLoading: _isSharing,
-                                icon: Icons.send_rounded,
-                                onPressed: hasValidRecipients
-                                    ? _handleShare
-                                    : null,
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    ),
     );
   }
 
-  String _reviewHint({
-    required bool hasNoFaceSection,
-    required bool hasWithFaceSection,
-  }) {
-    if (hasNoFaceSection && !hasWithFaceSection) {
-      return 'These photos have no detected faces. Use Send to all or tap each photo to pick recipients.';
-    }
-    if (hasNoFaceSection && hasWithFaceSection) {
-      return 'People photos are auto-matched to friends. No-face photos need your choice above.';
-    }
-    return 'Prism has auto-selected recipients based on who is in the photos.';
+  double _contentInset(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    if (screenWidth <= 900) return 16;
+    return (screenWidth - 800).clamp(16.0, double.infinity) / 2;
   }
+}
 
-  Widget _buildMediaTile({
-    required BuildContext context,
-    required BatchImage image,
-    required SharingProvider sharingProvider,
-    required AuthProvider authProvider,
-    required VoidCallback onTap,
-  }) {
-    final tileHeight = 200.0;
-    final recipientCount = sharingProvider.recipientCountForImage(image.id);
-    final imageUrl = _fixUrl(image.url ?? image.thumbUrl);
-    final isSignedUrl = imageUrl?.contains('X-Amz-Signature') ?? false;
-    final headers = isSignedUrl
-        ? null
-        : {'Authorization': 'Bearer ${authProvider.token}'};
+class _ReviewGroupTile extends StatelessWidget {
+  final ReviewPersonGroup group;
+  final bool isExpanded;
+  final VoidCallback onToggle;
+  final void Function(String imageId) onImageTap;
+  final Map<String, String>? Function(String? url) headersForUrl;
+  final int Function(String imageId) recipientCountForImage;
+  final Widget? expandedHeaderExtra;
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Stack(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: imageUrl != null
-                ? PrismMediaPreview(
-                    imageUrl: imageUrl,
-                    mediaType: image.mediaType,
-                    height: tileHeight,
-                    fit: BoxFit.cover,
-                    placeholderColor: PrismColors.surfaceGray,
-                    httpHeaders: headers,
-                  )
-                : Container(
-                    height: tileHeight,
-                    color: PrismColors.surfaceGray,
-                    child: const Center(
-                      child: Icon(
-                        Icons.broken_image_rounded,
-                        color: PrismColors.destructiveRed,
-                        size: 48,
-                      ),
-                    ),
-                  ),
-          ),
-          if (recipientCount > 0)
-            Positioned(
-              top: 8,
-              right: 8,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                decoration: BoxDecoration(
-                  color: PrismColors.prismYellow,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.person, size: 14, color: PrismColors.black),
-                    const SizedBox(width: 4),
-                    Text(
-                      '$recipientCount',
-                      style: PrismTextStyles.bodySmall.copyWith(
-                        color: PrismColors.black,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
+  const _ReviewGroupTile({
+    required this.group,
+    required this.isExpanded,
+    required this.onToggle,
+    required this.onImageTap,
+    required this.headersForUrl,
+    required this.recipientCountForImage,
+    this.expandedHeaderExtra,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ReviewPersonSection(
+      group: group,
+      isExpanded: isExpanded,
+      onToggle: onToggle,
+      onImageTap: onImageTap,
+      fixUrl: MediaUrlUtils.resolve,
+      headersForUrl: headersForUrl,
+      recipientCountForImage: recipientCountForImage,
+      expandedHeaderExtra: expandedHeaderExtra,
     );
   }
+}
 
-  Widget _buildRecipientChip(
-    DetectedRecipient recipient,
-    AuthProvider authProvider,
-  ) {
-    // Fix profile pic URL
-    final profilePicUrl = recipient.profilePicId != null
-        ? _fixUrl('images/${recipient.profilePicId}')
-        : null;
+class _EmptyReviewState extends StatelessWidget {
+  const _EmptyReviewState();
 
-    // Don't send auth headers for S3 signed URLs
-    final isSignedUrl = profilePicUrl?.contains('X-Amz-Signature') ?? false;
-    final headers = isSignedUrl
-        ? null
-        : {'Authorization': 'Bearer ${authProvider.token}'};
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: PrismColors.inputGray,
-        borderRadius: BorderRadius.circular(100),
-        border: Border.all(color: PrismColors.white.withValues(alpha: 0.1)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Profile Picture
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: PrismColors.surfaceGray,
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.all(32),
+      child: Center(
+        child: Column(
+          children: [
+            Icon(
+              Icons.person_off_outlined,
+              size: 48,
+              color: PrismColors.secondaryText,
             ),
-            clipBehavior: Clip.antiAlias,
-            child: profilePicUrl != null
-                ? Image.network(
-                    profilePicUrl,
-                    fit: BoxFit.cover,
-                    headers: headers,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Icon(
-                        Icons.person,
-                        color: PrismColors.secondaryText,
-                        size: 20,
-                      );
-                    },
-                  )
-                : Icon(
-                    Icons.person,
-                    color: PrismColors.secondaryText,
-                    size: 20,
-                  ),
-          ),
-          const SizedBox(width: 8),
-          // Username
-          Text(
-            recipient.username,
-            style: PrismTextStyles.bodyMedium.copyWith(
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(width: 4),
-          // Photo count badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: PrismColors.prismYellow,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              '${recipient.count}',
-              style: PrismTextStyles.bodySmall.copyWith(
-                color: PrismColors.black,
-                fontWeight: FontWeight.bold,
-                fontSize: 11,
+            SizedBox(height: 12),
+            Text(
+              'No friends detected in these photos',
+              style: PrismTextStyles.bodyMedium.copyWith(
+                color: PrismColors.secondaryText,
               ),
+              textAlign: TextAlign.center,
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

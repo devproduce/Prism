@@ -20,7 +20,8 @@ import 'package:prism/widgets/shimmer_placeholder.dart';
 import 'package:prism/utils/error_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:prism/widgets/unknown_face_recommendation_card.dart';
+import 'package:prism/widgets/friendship_action_pill.dart';
+import 'package:prism/widgets/unknown_faces_strip.dart';
 
 class FriendsScreen extends StatefulWidget {
   final bool openRequestsDirectly;
@@ -217,7 +218,14 @@ class _FriendsScreenState extends State<FriendsScreen> {
               },
             ),
           ),
-          
+
+          if (_searchController.text.isEmpty)
+            UnknownFacesStrip(
+              faces: friendsProvider
+                      .contactSyncResult?.unknownFaceRecommendations ??
+                  const [],
+            ),
+
           Expanded(
             child: _searchController.text.isNotEmpty
                 ? _buildSearchResults(friendsProvider, authProvider)
@@ -259,8 +267,6 @@ class _FriendsScreenState extends State<FriendsScreen> {
                         SliverToBoxAdapter(
                           child: _buildInviteHeader(friendsProvider),
                         ),
-                        // ── Unknown face recommendations (V2.2) ─────────────
-                        _buildUnknownFaceSliver(friendsProvider),
                         // ── Invite contacts list ──────────────────────────────
                         _buildInviteSliver(friendsProvider, authProvider),
                         const SliverToBoxAdapter(child: SizedBox(height: 100)),
@@ -713,7 +719,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
         ),
         title: Text(user.displayName, style: PrismTextStyles.bodyLarge),
         subtitle: Text('@${user.username}', style: PrismTextStyles.bodySmall),
-        trailing: _buildFriendshipStatusBadge(
+        trailing: FriendshipActionPill(
           status: status,
           onAddTap: status == FriendshipDisplayStatus.none
               ? () async {
@@ -738,84 +744,6 @@ class _FriendsScreenState extends State<FriendsScreen> {
         },
       ),
     );
-  }
-
-  Widget _buildFriendshipStatusBadge({
-    required FriendshipDisplayStatus status,
-    VoidCallback? onAddTap,
-  }) {
-    switch (status) {
-      case FriendshipDisplayStatus.friend:
-        return SizedBox(
-          width: 44,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.people_rounded,
-                color: PrismColors.successGreen,
-                size: 22,
-              ),
-              Text(
-                'Friend',
-                style: PrismTextStyles.bodySmall.copyWith(
-                  color: PrismColors.successGreen,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        );
-      case FriendshipDisplayStatus.pendingSent:
-        return SizedBox(
-          width: 44,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.schedule_rounded,
-                color: PrismColors.electricCyan,
-                size: 22,
-              ),
-              Text(
-                'Sent',
-                style: PrismTextStyles.bodySmall.copyWith(
-                  color: PrismColors.electricCyan,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        );
-      case FriendshipDisplayStatus.none:
-        return SizedBox(
-          width: 44,
-          child: InkWell(
-            onTap: onAddTap,
-            borderRadius: BorderRadius.circular(8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.person_add_rounded,
-                  color: PrismColors.prismYellow,
-                  size: 22,
-                ),
-                Text(
-                  'Add',
-                  style: PrismTextStyles.bodySmall.copyWith(
-                    color: PrismColors.prismYellow,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-    }
   }
 
   Widget _buildPendingRequestCard(
@@ -1100,8 +1028,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
     }
 
     final hasPhoneInvites = result.notOnPlatform.isNotEmpty;
-    final hasUnknownFaces = result.unknownFaceRecommendations.isNotEmpty;
-    if (!hasPhoneInvites && !hasUnknownFaces) {
+    if (!hasPhoneInvites) {
       return const SizedBox.shrink();
     }
 
@@ -1111,18 +1038,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildDiscoverSectionHeader('INVITE TO PRISM', Icons.mail_outline_rounded),
-          if (hasUnknownFaces) ...[
-            const SizedBox(height: 6),
-            Text(
-              'People detected in your photos who are not on Prism yet',
-              style: PrismTextStyles.bodySmall.copyWith(
-                color: PrismColors.secondaryText,
-              ),
-            ),
-          ],
-          if (hasPhoneInvites) ...[
-            const SizedBox(height: 10),
-            TextField(
+          const SizedBox(height: 10),
+          TextField(
             controller: _inviteSearchController,
             style: PrismTextStyles.bodyMedium,
             onChanged: (value) {
@@ -1163,37 +1080,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
                   : null,
             ),
           ),
-          ],
-          if (hasPhoneInvites) const SizedBox(height: 8),
+          const SizedBox(height: 8),
         ],
-      ),
-    );
-  }
-
-  Widget _buildUnknownFaceSliver(FriendsProvider provider) {
-    final result = provider.contactSyncResult;
-    final isLoadingRecs = provider.isLoadingRecommendations;
-
-    if (isLoadingRecs ||
-        result == null ||
-        result.unknownFaceRecommendations.isEmpty) {
-      return const SliverToBoxAdapter(child: SizedBox.shrink());
-    }
-
-    return SliverPadding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      sliver: SliverList(
-        delegate: SliverChildListDelegate(
-          result.unknownFaceRecommendations
-              .map(
-                (face) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: UnknownFaceRecommendationCard(recommendation: face),
-                ),
-              )
-              .toList(),
-          addRepaintBoundaries: true,
-        ),
       ),
     );
   }
