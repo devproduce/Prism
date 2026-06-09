@@ -48,4 +48,5 @@ class ApiConstants {
       '/notifications/'; // + notification_id + /accept
   static const String rejectNotification =
       '/notifications/'; // + notification_id + /reject
+  static const String markNotificationsRead = '/notifications/mark-read';
 }

@@ -1377,6 +1377,25 @@ class ApiClient {
     }
   }
 
+  /// Mark all notifications as read
+  /// POST /notifications/mark-read
+  Future<void> markNotificationsRead({required String userId}) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/notifications/mark-read',
+      );
+      final response = await _client.post(
+        uri,
+        headers: _getHeaders(),
+        body: json.encode({'user_id': userId}),
+      );
+      _handleResponse(response);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to mark notifications read: ${e.toString()}');
+    }
+  }
+
   /// Mark a single notification as read
   /// POST /notifications/{notification_id}/mark-read
   Future<void> markNotificationReadSingle({

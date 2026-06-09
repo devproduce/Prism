@@ -7,6 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:prism/api/api_client.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:prism/services/local_notification_store.dart';
+import 'package:prism/utils/activity_feed_refresh.dart';
 
 // Must be top-level pragmas to operate in Dart Isolates!
 @pragma('vm:entry-point')
@@ -53,6 +54,7 @@ class NotificationService {
 
     FirebaseMessaging.onMessage.listen((RemoteMessage msg) async {
       await LocalNotificationStore.saveNotification(msg);
+      await ActivityFeedRefresh.refreshFromPush();
       if (msg.notification != null) {
         _localNotifs.show(
           msg.hashCode,

@@ -11,7 +11,8 @@ import 'package:prism/screens/edit_profile_screen.dart';
 import 'package:prism/screens/blocked_users_screen.dart';
 import 'package:prism/screens/help_support_screen.dart';
 import 'package:prism/screens/user_profile_screen.dart';
-import 'package:prism/screens/friends_screen.dart';
+import 'package:prism/screens/notification_screen.dart';
+import 'package:prism/utils/activity_feed_refresh.dart';
 import 'package:prism/services/background_share_handler.dart';
 import 'package:prism/screens/privacy_policy_screen.dart';
 import 'package:prism/screens/about_screen.dart';
@@ -117,6 +118,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           // Handle FCM local background json payload
           try {
             final data = jsonDecode(response.payload!);
+            ActivityFeedRefresh.refreshFromPush();
             _handleFcmRoute(data);
           } catch (e) {
             debugPrint('Failed to parse FCM payload: $e');
@@ -127,24 +129,28 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       debugPrint('📱 Notification tapped from background');
+      ActivityFeedRefresh.refreshFromPush();
       _handleFcmRoute(message.data);
     });
 
     FirebaseMessaging.instance.getInitialMessage().then((message) {
       if (message != null) {
         debugPrint('📱 App launched from notification');
-        Future.delayed(const Duration(milliseconds: 500), () => _handleFcmRoute(message.data));
+        Future.delayed(const Duration(milliseconds: 500), () {
+          ActivityFeedRefresh.refreshFromPush();
+          _handleFcmRoute(message.data);
+        });
       }
     });
   }
 
   void _handleFcmRoute(Map<String, dynamic> data) {
     if (navigatorKey.currentState == null) return;
-    
-    final type = data['type'];
-    final route = data['route'];
-    final senderId = data['sender_id'];
-    final senderUsername = data['sender_username'];
+
+    final type = data['type']?.toString();
+    final route = data['route']?.toString();
+    final senderId = data['sender_id']?.toString();
+    final senderUsername = data['sender_username']?.toString();
 
     if (type == 'batch_received' || route == '/friend_profile') {
       navigatorKey.currentState!.push(
@@ -155,22 +161,21 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           ),
         ),
       );
-    } else if (type == 'friend_request_received' || route == '/notifications') {
-      // User requested redirect to requests/inbox screen
-      // Assuming FriendsScreen or similar component holds 'requests'
-      // We will push friends screen and it can open the modal or appropriate view
-      // As requested: "redirect user to inbox screen under received tab"
-      navigatorKey.currentState!.pushNamed('/home'); // Fallback structure
-      // Wait slightly then push FriendsScreen and open requests?
-      // For now, let's just push friends screen or requests if defined.
+      return;
+    }
+
+    if (type == 'friend_request_received' ||
+        type == 'friend_req_accepted' ||
+        route == '/notifications') {
       navigatorKey.currentState!.push(
         MaterialPageRoute(
-          builder: (context) => const FriendsScreen(
-            openRequestsDirectly: true, // we might need to add this property if it exists, or just send to friends screen
-          ),
+          builder: (context) => const NotificationScreen(),
         ),
       );
-    } else if (route != null && route.isNotEmpty) {
+      return;
+    }
+
+    if (route != null && route.isNotEmpty) {
       navigatorKey.currentState!.pushNamed(route);
     }
   }
@@ -223,6 +228,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _checkForPendingDeepLink();
       _checkForNewSharedFiles();
+      ActivityFeedRefresh.refreshFromPush();
     }
   }
 

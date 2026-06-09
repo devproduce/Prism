@@ -20,12 +20,10 @@ class ActivityFeedProvider with ChangeNotifier {
 
   List<NotificationModel> get notifications => _notifications;
 
-  /// Legacy alias — raw notifications excluding acted-on retroactive prompts.
   List<NotificationModel> get activityFeedNotifications => _notifications
       .where((n) => !(n.type == 'retroactive_share_prompt' && n.isRead))
       .toList();
 
-  /// Unified timeline (notifications + sent + received requests).
   List<ActivityItem> get activities => _activities;
 
   List<FriendRequest> get pendingRequests => _pendingRequests;
@@ -38,7 +36,6 @@ class ActivityFeedProvider with ChangeNotifier {
   int get unreadCount =>
       _notifications.where((n) => !n.isRead).length + _pendingRequests.length;
 
-  /// Preview for the friend-requests header (first N received requests).
   List<FriendRequest> friendRequestsPreview({int limit = 3}) {
     if (_pendingRequests.length <= limit) {
       return List<FriendRequest>.from(_pendingRequests);
@@ -85,7 +82,6 @@ class ActivityFeedProvider with ChangeNotifier {
     return status.isGranted;
   }
 
-  /// Fetch all feed sources in parallel and rebuild the unified timeline.
   Future<void> refetch(String userId) => fetchNotifications(userId);
 
   Future<void> fetchNotifications(String userId) async {
@@ -112,9 +108,8 @@ class ActivityFeedProvider with ChangeNotifier {
           .where((n) => !(n.type == 'retroactive_share_prompt' && n.isRead))
           .toList();
 
-      _pendingRequests = pendingData
-          .map((json) => FriendRequest.fromJson(json))
-          .toList();
+      _pendingRequests =
+          pendingData.map((json) => FriendRequest.fromJson(json)).toList();
 
       _sentRequests =
           sentData.map((json) => FriendRequest.fromJson(json)).toList();
@@ -378,6 +373,8 @@ class ActivityFeedProvider with ChangeNotifier {
 
   Future<void> markAllAsRead(String userId) async {
     try {
+      await _apiClient.markNotificationsRead(userId: userId);
+
       _notifications = _notifications
           .map(
             (n) => NotificationModel(
@@ -396,6 +393,9 @@ class ActivityFeedProvider with ChangeNotifier {
           .toList();
 
       _rebuildActivities();
+      notifyListeners();
+    } on ApiException catch (e) {
+      _setError(e.message);
       notifyListeners();
     } catch (e) {
       debugPrint('Failed to mark all as read: $e');
