@@ -17,6 +17,7 @@ import 'package:prism/utils/constants.dart';
 import 'package:prism/utils/error_handler.dart';
 import 'package:prism/widgets/shimmer_placeholder.dart';
 import 'package:prism/models/sharing_models.dart';
+import 'package:prism/widgets/no_face_review_section.dart';
 
 class ConfirmSharingScreen extends StatefulWidget {
   final String? batchId; // Batch ID passed from notification
@@ -68,6 +69,17 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
       }
 
       if (mounted) setState(() => _isLoadingBatch = false);
+    }
+  }
+
+  Future<void> _exitReview() async {
+    final sharingProvider = Provider.of<SharingProvider>(
+      context,
+      listen: false,
+    );
+    await sharingProvider.cancel();
+    if (mounted) {
+      Navigator.of(context).pop();
     }
   }
 
@@ -184,9 +196,23 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
       );
     }
 
-    final images = batchStatus.images;
+    final contentInset = isDesktop
+        ? (screenWidth - 800).clamp(16.0, double.infinity) / 2
+        : 16.0;
 
-    return Scaffold(
+    final noFaceImages = sharingProvider.noFaceImages;
+    final withFaceImages = sharingProvider.faceDetectedImages;
+    final hasNoFaceSection = noFaceImages.isNotEmpty;
+    final hasWithFaceSection = withFaceImages.isNotEmpty;
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          _exitReview();
+        }
+      },
+      child: Scaffold(
       backgroundColor: PrismColors.voidBlack,
       appBar: AppBar(
         title: Text('Review & Share', style: PrismTextStyles.h2),
@@ -194,7 +220,7 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: PrismColors.white),
-          onPressed: () => Navigator.pop(context),
+          onPressed: _exitReview,
         ),
       ),
       body: Column(
@@ -283,121 +309,72 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
 
                 const SliverToBoxAdapter(child: SizedBox(height: 24)),
 
-                // Grid Divider
-                SliverToBoxAdapter(
-                  child: Center(
-                    child: Container(
-                      constraints: const BoxConstraints(maxWidth: 800),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      child: Row(
-                        children: [
-                          Text('Media', style: PrismTextStyles.h3),
-                          const Spacer(),
-                          Text(
-                            'Tap to edit recipients',
-                            style: PrismTextStyles.bodySmall.copyWith(
-                              color: PrismColors.secondaryText,
+                if (hasNoFaceSection)
+                  SliverToBoxAdapter(
+                    child: NoFaceReviewSection(
+                      images: noFaceImages,
+                      onImageTap: (id) => _showRecipientSelector(context, id),
+                      fixUrl: _fixUrl,
+                    ),
+                  ),
+
+                if (hasNoFaceSection && hasWithFaceSection)
+                  const SliverToBoxAdapter(child: SizedBox(height: 20)),
+
+                if (hasWithFaceSection) ...[
+                  SliverToBoxAdapter(
+                    child: Center(
+                      child: Container(
+                        constraints: const BoxConstraints(maxWidth: 800),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: contentInset,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          children: [
+                            Text(
+                              'Photos with people',
+                              style: PrismTextStyles.h3.copyWith(
+                                fontSize: isDesktop ? 20 : 18,
+                              ),
                             ),
-                          ),
-                        ],
+                            const Spacer(),
+                            Flexible(
+                              child: Text(
+                                'Tap to edit recipients',
+                                style: PrismTextStyles.bodySmall.copyWith(
+                                  color: PrismColors.secondaryText,
+                                ),
+                                textAlign: TextAlign.right,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-
-                // Media Grid
-                SliverPadding(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: isDesktop
-                        ? (screenWidth - 800) / 2
-                        : 16, // Center grid on desktop if < 800 width, else padding
+                  SliverPadding(
+                    padding: EdgeInsets.symmetric(horizontal: contentInset),
+                    sliver: SliverMasonryGrid.count(
+                      crossAxisCount: gridColumns,
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 12,
+                      childCount: withFaceImages.length,
+                      itemBuilder: (context, index) {
+                        final image = withFaceImages[index];
+                        return _buildMediaTile(
+                          context: context,
+                          image: image,
+                          sharingProvider: sharingProvider,
+                          authProvider: authProvider,
+                          onTap: () =>
+                              _showRecipientSelector(context, image.id),
+                        );
+                      },
+                    ),
                   ),
-                  sliver: SliverMasonryGrid.count(
-                    crossAxisCount: gridColumns,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    childCount: images.length,
-                    itemBuilder: (context, index) {
-                      final image = images[index];
-                      final hasCustomRecipients = sharingProvider
-                          .imageRecipientMap
-                          .containsKey(image.id);
-
-                      // Debug logging
-                      debugPrint('🖼️ Image ${index + 1}:');
-                      debugPrint('   ID: ${image.id}');
-                      debugPrint('   URL: ${image.url}');
-                      debugPrint('   Thumb URL: ${image.thumbUrl}');
-
-                      // Fix URL
-                      final imageUrl = _fixUrl(image.url ?? image.thumbUrl);
-
-                      debugPrint('   Final URL: $imageUrl');
-
-                      // Don't send auth headers for S3 signed URLs (they already have auth in URL params)
-                      // Only send auth for direct API image URLs
-                      final isSignedUrl =
-                          imageUrl?.contains('X-Amz-Signature') ?? false;
-                      final headers = isSignedUrl
-                          ? null
-                          : {'Authorization': 'Bearer ${authProvider.token}'};
-
-                      return GestureDetector(
-                        onTap: () => _showRecipientSelector(context, image.id),
-                        child: Stack(
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: imageUrl != null
-                                  ? PrismMediaPreview(
-                                      imageUrl: imageUrl,
-                                      mediaType: image.mediaType,
-                                      height:
-                                          200, // Fixed height or adjust for masonry
-                                      fit: BoxFit.cover,
-                                      placeholderColor: PrismColors.surfaceGray,
-                                      httpHeaders: headers,
-                                    )
-                                  : Container(
-                                      height: 200,
-                                      color: PrismColors.surfaceGray,
-                                      child: const Center(
-                                        child: Icon(
-                                          Icons.broken_image_rounded,
-                                          color: PrismColors.destructiveRed,
-                                          size: 48,
-                                        ),
-                                      ),
-                                    ),
-                            ),
-
-                            // Custom Recipients Indicator
-                            if (hasCustomRecipients)
-                              Positioned(
-                                top: 8,
-                                right: 8,
-                                child: Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: const BoxDecoration(
-                                    color: PrismColors.prismYellow,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.person,
-                                    size: 16,
-                                    color: PrismColors.black,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
+                ],
 
                 // Bottom padding for scroll area
                 const SliverToBoxAdapter(child: SizedBox(height: 16)),
@@ -409,7 +386,10 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
           Center(
             child: Container(
               constraints: const BoxConstraints(maxWidth: 800),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: EdgeInsets.symmetric(
+                horizontal: contentInset,
+                vertical: 12,
+              ),
               child: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -429,7 +409,10 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Prism has auto-selected recipients based on who is in the photos.',
+                        _reviewHint(
+                          hasNoFaceSection: hasNoFaceSection,
+                          hasWithFaceSection: hasWithFaceSection,
+                        ),
                         style: PrismTextStyles.bodySmall.copyWith(
                           color: PrismColors.electricCyan,
                           height: 1.3,
@@ -444,7 +427,12 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
 
           // Bottom Action Bar
           Container(
-            padding: const EdgeInsets.all(24),
+            padding: EdgeInsets.fromLTRB(
+              contentInset,
+              isTablet ? 20 : 16,
+              contentInset,
+              MediaQuery.of(context).padding.bottom + (isTablet ? 20 : 16),
+            ),
             decoration: BoxDecoration(
               color: PrismColors.surfaceGray,
               borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
@@ -484,16 +472,7 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
                         // Cancel Button
                         Expanded(
                           child: TextButton.icon(
-                            onPressed: () {
-                              // Cancel and clean up
-                              sharingProvider.cancel();
-                              Navigator.of(context).pushAndRemoveUntil(
-                                MaterialPageRoute(
-                                  builder: (context) => HomeScreen(key: HomeScreen.homeScreenKey),
-                                ),
-                                (route) => false,
-                              );
-                            },
+                            onPressed: _exitReview,
                             icon: const Icon(
                               Icons.close,
                               color: PrismColors.secondaryText,
@@ -555,6 +534,94 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
               ),
             ),
           ),
+        ],
+      ),
+    ),
+    );
+  }
+
+  String _reviewHint({
+    required bool hasNoFaceSection,
+    required bool hasWithFaceSection,
+  }) {
+    if (hasNoFaceSection && !hasWithFaceSection) {
+      return 'These photos have no detected faces. Use Send to all or tap each photo to pick recipients.';
+    }
+    if (hasNoFaceSection && hasWithFaceSection) {
+      return 'People photos are auto-matched to friends. No-face photos need your choice above.';
+    }
+    return 'Prism has auto-selected recipients based on who is in the photos.';
+  }
+
+  Widget _buildMediaTile({
+    required BuildContext context,
+    required BatchImage image,
+    required SharingProvider sharingProvider,
+    required AuthProvider authProvider,
+    required VoidCallback onTap,
+  }) {
+    final tileHeight = 200.0;
+    final recipientCount = sharingProvider.recipientCountForImage(image.id);
+    final imageUrl = _fixUrl(image.url ?? image.thumbUrl);
+    final isSignedUrl = imageUrl?.contains('X-Amz-Signature') ?? false;
+    final headers = isSignedUrl
+        ? null
+        : {'Authorization': 'Bearer ${authProvider.token}'};
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: imageUrl != null
+                ? PrismMediaPreview(
+                    imageUrl: imageUrl,
+                    mediaType: image.mediaType,
+                    height: tileHeight,
+                    fit: BoxFit.cover,
+                    placeholderColor: PrismColors.surfaceGray,
+                    httpHeaders: headers,
+                  )
+                : Container(
+                    height: tileHeight,
+                    color: PrismColors.surfaceGray,
+                    child: const Center(
+                      child: Icon(
+                        Icons.broken_image_rounded,
+                        color: PrismColors.destructiveRed,
+                        size: 48,
+                      ),
+                    ),
+                  ),
+          ),
+          if (recipientCount > 0)
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: PrismColors.prismYellow,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.person, size: 14, color: PrismColors.black),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$recipientCount',
+                      style: PrismTextStyles.bodySmall.copyWith(
+                        color: PrismColors.black,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );

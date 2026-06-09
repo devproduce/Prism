@@ -117,6 +117,7 @@ class ContactService {
     return ContactSyncResult(
       onPlatform: result.onPlatform,
       notOnPlatform: allNotOnPlatform,
+      unknownFaceRecommendations: result.unknownFaceRecommendations,
     );
   }
 

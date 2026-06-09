@@ -5,21 +5,88 @@ import 'package:prism/theme/text_styles.dart';
 import 'package:prism/models/notification_model.dart';
 import 'package:prism/screens/user_profile_screen.dart';
 import 'package:prism/screens/friends_screen.dart';
+import 'package:prism/widgets/retroactive_share_card.dart';
+import 'package:prism/widgets/contact_found_batch_card.dart';
 
 class NotificationCard extends StatelessWidget {
   final NotificationModel notification;
   final String currentUserId;
+  final VoidCallback? onDismiss;
 
   const NotificationCard({
     super.key,
     required this.notification,
     required this.currentUserId,
+    this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    switch (notification.type) {
+      case 'retroactive_share_prompt':
+        return RetroactiveShareCard(
+          notification: notification,
+          currentUserId: currentUserId,
+          onDismiss: onDismiss ?? () {},
+        );
+      case 'contact_found_in_batch':
+        return ContactFoundBatchCard(
+          notification: notification,
+          currentUserId: currentUserId,
+          onDismiss: onDismiss ?? () {},
+        );
+      default:
+        return _DefaultNotificationRow(
+          notification: notification,
+          onTap: () => _handleRoute(context),
+        );
+    }
+  }
+
+  void _handleRoute(BuildContext context) {
+    final type = notification.type;
+    final r = notification.metadata?['route'];
+    final senderId =
+        notification.metadata?['sender_id'] ?? notification.userId;
+    final senderUsername =
+        notification.metadata?['sender_username'] ?? notification.username;
+
+    if (type == 'batch_received' || r == '/friend_profile') {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => UserProfileScreen(
+            userId: senderId ?? '',
+            username: senderUsername ?? 'Friend',
+          ),
+        ),
+      );
+    } else if (type == 'friend_request_received' || r == '/notifications') {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => const FriendsScreen(
+            openRequestsDirectly: true,
+          ),
+        ),
+      );
+    } else if (r != null && r.isNotEmpty) {
+      Navigator.of(context).pushNamed(r);
+    }
+  }
+}
+
+class _DefaultNotificationRow extends StatelessWidget {
+  final NotificationModel notification;
+  final VoidCallback onTap;
+
+  const _DefaultNotificationRow({
+    required this.notification,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: () => _handleRoute(context),
+      onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
@@ -55,37 +122,9 @@ class NotificationCard extends StatelessWidget {
     );
   }
 
-  void _handleRoute(BuildContext context) {
-    final type = notification.type;
-    final r = notification.metadata?['route'];
-    final routeTab = notification.metadata?['route_tab'];
-    final senderId = notification.metadata?['sender_id'] ?? notification.userId;
-    final senderUsername = notification.metadata?['sender_username'] ?? notification.username;
-
-    if (type == 'batch_received' || r == '/friend_profile') {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => UserProfileScreen(
-            userId: senderId ?? '',
-            username: senderUsername ?? 'Friend',
-          ),
-        ),
-      );
-    } else if (type == 'friend_request_received' || r == '/notifications') {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => const FriendsScreen(
-            openRequestsDirectly: true,
-          ),
-        ),
-      );
-    } else if (r != null && r.isNotEmpty) {
-      Navigator.of(context).pushNamed(r);
-    }
-  }
-
   Widget _buildContextIcon() {
-    if (notification.type.contains('friend') || notification.username != null) {
+    if (notification.type.contains('friend') ||
+        notification.username != null) {
       return _buildAvatar(radius: 20);
     }
 
@@ -119,7 +158,8 @@ class NotificationCard extends StatelessWidget {
   }
 
   Widget _buildAvatar({required double radius}) {
-    if (notification.profilePicId != null && notification.profilePicId!.isNotEmpty) {
+    if (notification.profilePicId != null &&
+        notification.profilePicId!.isNotEmpty) {
       return CachedNetworkImage(
         imageUrl: notification.profilePictureUrl,
         imageBuilder: (context, imageProvider) => CircleAvatar(
@@ -132,18 +172,20 @@ class NotificationCard extends StatelessWidget {
           backgroundColor: Colors.grey[800],
           child: CircularProgressIndicator(
             strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation<Color>(PrismColors.prismYellow),
+            valueColor:
+                AlwaysStoppedAnimation<Color>(PrismColors.prismYellow),
           ),
         ),
         errorWidget: (context, url, error) => _buildFallbackAvatar(radius),
       );
-    } else {
-      return _buildFallbackAvatar(radius);
     }
+    return _buildFallbackAvatar(radius);
   }
 
   Widget _buildFallbackAvatar(double radius) {
-    final uname = notification.username ?? notification.metadata?['sender_username'] ?? '?';
+    final uname = notification.username ??
+        notification.metadata?['sender_username'] ??
+        '?';
     return CircleAvatar(
       radius: radius,
       backgroundColor: Colors.grey[800],

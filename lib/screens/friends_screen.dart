@@ -18,6 +18,7 @@ import 'package:prism/widgets/shimmer_placeholder.dart';
 import 'package:prism/utils/error_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:prism/widgets/unknown_face_recommendation_card.dart';
 
 class FriendsScreen extends StatefulWidget {
   final bool openRequestsDirectly;
@@ -216,6 +217,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
                         SliverToBoxAdapter(
                           child: _buildInviteHeader(friendsProvider),
                         ),
+                        // ── Unknown face recommendations (V2.2) ─────────────
+                        _buildUnknownFaceSliver(friendsProvider),
                         // ── Invite contacts list ──────────────────────────────
                         _buildInviteSliver(friendsProvider, authProvider),
                         const SliverToBoxAdapter(child: SizedBox(height: 100)),
@@ -909,7 +912,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
               ),
             )
           else if (result != null) ...[
-            if (result.onPlatform.isNotEmpty)
+            if (provider.visibleOnPlatformRecommendations.isNotEmpty)
               _buildDiscoverSectionHeader('PEOPLE YOU MAY KNOW', Icons.people_rounded),
             if (result.isEmpty)
               Padding(
@@ -953,8 +956,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
     FriendsProvider provider,
     AuthProvider authProvider,
   ) {
-    final result = provider.contactSyncResult;
-    if (result == null || result.onPlatform.isEmpty) {
+    final suggestions = provider.visibleOnPlatformRecommendations;
+    if (suggestions.isEmpty) {
       return const SliverToBoxAdapter(child: SizedBox.shrink());
     }
 
@@ -962,7 +965,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       sliver: SliverList(
         delegate: SliverChildListDelegate(
-          result.onPlatform.map((user) => Padding(
+          suggestions.map((user) => Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: _buildOnPlatformCard(user, provider, authProvider),
           )).toList(),
@@ -977,7 +980,13 @@ class _FriendsScreenState extends State<FriendsScreen> {
     final result = provider.contactSyncResult;
     final isLoadingRecs = provider.isLoadingRecommendations;
 
-    if (isLoadingRecs || result == null || result.notOnPlatform.isEmpty) {
+    if (isLoadingRecs || result == null) {
+      return const SizedBox.shrink();
+    }
+
+    final hasPhoneInvites = result.notOnPlatform.isNotEmpty;
+    final hasUnknownFaces = result.unknownFaceRecommendations.isNotEmpty;
+    if (!hasPhoneInvites && !hasUnknownFaces) {
       return const SizedBox.shrink();
     }
 
@@ -987,8 +996,18 @@ class _FriendsScreenState extends State<FriendsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildDiscoverSectionHeader('INVITE TO PRISM', Icons.mail_outline_rounded),
-          const SizedBox(height: 10),
-          TextField(
+          if (hasUnknownFaces) ...[
+            const SizedBox(height: 6),
+            Text(
+              'People detected in your photos who are not on Prism yet',
+              style: PrismTextStyles.bodySmall.copyWith(
+                color: PrismColors.secondaryText,
+              ),
+            ),
+          ],
+          if (hasPhoneInvites) ...[
+            const SizedBox(height: 10),
+            TextField(
             controller: _inviteSearchController,
             style: PrismTextStyles.bodyMedium,
             onChanged: (value) {
@@ -1029,8 +1048,37 @@ class _FriendsScreenState extends State<FriendsScreen> {
                   : null,
             ),
           ),
-          const SizedBox(height: 8),
+          ],
+          if (hasPhoneInvites) const SizedBox(height: 8),
         ],
+      ),
+    );
+  }
+
+  Widget _buildUnknownFaceSliver(FriendsProvider provider) {
+    final result = provider.contactSyncResult;
+    final isLoadingRecs = provider.isLoadingRecommendations;
+
+    if (isLoadingRecs ||
+        result == null ||
+        result.unknownFaceRecommendations.isEmpty) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      sliver: SliverList(
+        delegate: SliverChildListDelegate(
+          result.unknownFaceRecommendations
+              .map(
+                (face) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: UnknownFaceRecommendationCard(recommendation: face),
+                ),
+              )
+              .toList(),
+          addRepaintBoundaries: true,
+        ),
       ),
     );
   }
@@ -1106,9 +1154,6 @@ class _FriendsScreenState extends State<FriendsScreen> {
     AuthProvider authProvider,
   ) {
     final isFriend = provider.friends.any((f) => f.username == user.username);
-    final isPending = provider.sentRequests.any(
-      (r) => r.username == user.username,
-    );
 
     return PrismCard(
       padding: EdgeInsets.zero,
@@ -1165,40 +1210,69 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 Icons.check_circle_rounded,
                 color: PrismColors.successGreen,
               )
-            : isPending
-            ? Text(
-                'Sent',
-                style: PrismTextStyles.bodySmall.copyWith(
-                  color: PrismColors.electricCyan,
-                ),
-              )
-            : SizedBox(
-                height: 32,
-                child: ElevatedButton(
-                  onPressed: () async {
-                    if (authProvider.currentUser != null) {
-                      await provider.sendFriendRequest(
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Dismiss suggestion',
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: PrismColors.secondaryText,
+                      size: 20,
+                    ),
+                    onPressed: () async {
+                      if (authProvider.currentUser == null) return;
+                      HapticFeedback.selectionClick();
+                      await provider.dismissRecommendation(
                         authProvider.currentUser!.userId,
-                        user.username,
+                        user.userId,
                       );
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: PrismColors.prismYellow,
-                    foregroundColor: PrismColors.black,
-                    elevation: 0,
-                    shape: const StadiumBorder(),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    },
                   ),
-                  child: Text(
-                    'Add',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: PrismColors.black,
+                  SizedBox(
+                    height: 32,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        if (authProvider.currentUser != null) {
+                          final ok = await provider.sendFriendRequest(
+                            authProvider.currentUser!.userId,
+                            user.username,
+                          );
+                          if (ok && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Request sent to @${user.username}',
+                                  style: PrismTextStyles.bodySmall.copyWith(
+                                    color: PrismColors.black,
+                                  ),
+                                ),
+                                backgroundColor: PrismColors.prismYellow,
+                                behavior: SnackBarBehavior.floating,
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: PrismColors.prismYellow,
+                        foregroundColor: PrismColors.black,
+                        elevation: 0,
+                        shape: const StadiumBorder(),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                      ),
+                      child: const Text(
+                        'Add',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: PrismColors.black,
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                ],
               ),
         ),
       ),

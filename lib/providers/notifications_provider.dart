@@ -15,6 +15,13 @@ class NotificationsProvider with ChangeNotifier {
 
   // Getters
   List<NotificationModel> get notifications => _notifications;
+
+  /// Activity log list — hides read retroactive share prompts (V2.2)
+  List<NotificationModel> get activityFeedNotifications => _notifications
+      .where(
+        (n) => !(n.type == 'retroactive_share_prompt' && n.isRead),
+      )
+      .toList();
   List<FriendRequest> get pendingRequests => _pendingRequests;
   List<FriendRequest> get sentRequests => _sentRequests;
   bool get isLoading => _isLoading;
@@ -81,6 +88,13 @@ class NotificationsProvider with ChangeNotifier {
 
       // Sort by date (newest first)
       _notifications.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+      // Hide acted-on retroactive prompts
+      _notifications = _notifications
+          .where(
+            (n) => !(n.type == 'retroactive_share_prompt' && n.isRead),
+          )
+          .toList();
 
       // Fetch pending friend requests (received)
       try {
@@ -217,7 +231,7 @@ class NotificationsProvider with ChangeNotifier {
     }
   }
 
-  /// Mark notification as read (local only for now)
+  /// Mark notification as read locally
   void markAsRead(String notificationId) {
     final index = _notifications.indexWhere((n) => n.id == notificationId);
     if (index != -1) {
@@ -228,11 +242,140 @@ class NotificationsProvider with ChangeNotifier {
         userId: _notifications[index].userId,
         username: _notifications[index].username,
         profilePicId: _notifications[index].profilePicId,
+        resourceId: _notifications[index].resourceId,
         metadata: _notifications[index].metadata,
         createdAt: _notifications[index].createdAt,
         isRead: true,
       );
       notifyListeners();
+    }
+  }
+
+  /// Mark single notification read on backend (V2.2)
+  Future<bool> markAsReadSingle(
+    String notificationId,
+    String userId, {
+    bool removeRetroactiveFromFeed = false,
+  }) async {
+    try {
+      _setError(null);
+      await _apiClient.markNotificationReadSingle(
+        notificationId: notificationId,
+        userId: userId,
+      );
+
+      if (removeRetroactiveFromFeed ||
+          _notifications.any(
+            (n) =>
+                n.id == notificationId &&
+                n.type == 'retroactive_share_prompt',
+          )) {
+        _notifications.removeWhere((n) => n.id == notificationId);
+      } else {
+        markAsRead(notificationId);
+      }
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      return false;
+    } catch (e) {
+      _setError('Failed to mark notification read: ${e.toString()}');
+      return false;
+    }
+  }
+
+  /// Accept retroactive memory share (V2.2)
+  Future<bool> acceptRetroactiveShare({
+    required BuildContext context,
+    required String userId,
+    required String friendId,
+    required List<String> contactFaceIds,
+    required List<String> unknownFaceIds,
+    required List<String> imageIds,
+  }) async {
+    try {
+      _setError(null);
+      final response = await _apiClient.acceptRetroactiveShare(
+        userId: userId,
+        friendId: friendId,
+        contactFaceIds: contactFaceIds,
+        unknownFaceIds: unknownFaceIds,
+        imageIds: imageIds,
+      );
+
+      if (context.mounted) {
+        final count = response['shared_count'] as int? ?? imageIds.length;
+        showInAppNotification(
+          context,
+          title: 'Memories shared',
+          message: '$count ${count == 1 ? 'photo' : 'photos'} linked with your friend.',
+          type: 'success',
+        );
+      }
+      return true;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      if (context.mounted) {
+        showInAppNotification(
+          context,
+          title: 'Could not share memories',
+          message: e.message.contains('No valid pending')
+              ? 'These memories were already shared or are no longer available.'
+              : e.message,
+          type: 'info',
+        );
+      }
+      return false;
+    } catch (e) {
+      _setError('Failed to accept retroactive share: ${e.toString()}');
+      if (context.mounted) {
+        showInAppNotification(
+          context,
+          title: 'Error',
+          message: 'Failed to share memories. Please try again.',
+          type: 'error',
+        );
+      }
+      return false;
+    }
+  }
+
+  /// Send friend request from contact_found_in_batch notification (V2.2)
+  Future<bool> sendFriendRequestFromNotification({
+    required BuildContext context,
+    required String userId,
+    required String username,
+  }) async {
+    try {
+      _setError(null);
+      await _apiClient.sendFriendRequest(
+        userId: userId,
+        targetUsername: username,
+      );
+      if (context.mounted) {
+        showInAppNotification(
+          context,
+          title: 'Request sent',
+          message: 'Friend request sent to @$username',
+          type: 'success',
+        );
+      }
+      return true;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      if (context.mounted) {
+        showInAppNotification(
+          context,
+          title: 'Error',
+          message: e.message,
+          type: 'error',
+        );
+      }
+      return false;
+    } catch (e) {
+      _setError('Failed to send friend request: ${e.toString()}');
+      return false;
     }
   }
 

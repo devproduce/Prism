@@ -231,9 +231,24 @@ class BatchImage {
   final String id;
   final String? url;
   final String? thumbUrl;
+  final List<String>? faceIds;
   final List<dynamic>? detectedFaces; // Raw detected faces data
 
-  BatchImage({required this.id, this.url, this.thumbUrl, this.detectedFaces});
+  BatchImage({
+    required this.id,
+    this.url,
+    this.thumbUrl,
+    this.faceIds,
+    this.detectedFaces,
+  });
+
+  /// True only when CV explicitly reported no faces.
+  /// Prefer `detected_faces` when present; fall back to empty `face_ids`.
+  bool get hasNoFaces {
+    if (detectedFaces != null) return detectedFaces!.isEmpty;
+    if (faceIds != null) return faceIds!.isEmpty;
+    return false;
+  }
 
   factory BatchImage.fromJson(Map<String, dynamic> json) {
     // API returns 'image_url' but model expects 'url'
@@ -241,12 +256,19 @@ class BatchImage {
     final imageUrl = json['image_url'] ?? json['url'];
     final thumbUrl = json['thumb_url'] ?? json['thumbnail_url'];
 
+    List<String>? parsedFaceIds;
+    final faceIdsRaw = json['face_ids'];
+    if (faceIdsRaw is List) {
+      parsedFaceIds = faceIdsRaw.map((e) => e.toString()).toList();
+    }
+
     debugPrint('📦 BatchImage.fromJson:');
     debugPrint('   Raw json keys: ${json.keys.toList()}');
     debugPrint('   id: ${json['id']}');
     debugPrint('   image_url: ${json['image_url']}');
     debugPrint('   url: ${json['url']}');
     debugPrint('   Final URL: $imageUrl');
+    debugPrint('   face_ids: $parsedFaceIds');
 
     return BatchImage(
       id: json['id'],
@@ -254,6 +276,7 @@ class BatchImage {
       thumbUrl: _ensureAbsoluteUrl(
         thumbUrl ?? imageUrl,
       ), // Use main image as thumb if no thumb
+      faceIds: parsedFaceIds,
       detectedFaces: json['detected_faces'] as List<dynamic>?,
     );
   }

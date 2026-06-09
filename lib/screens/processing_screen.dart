@@ -75,9 +75,9 @@ class _ProcessingScreenState extends State<ProcessingScreen>
         userId,
       );
 
-      if (success && sharingProvider.batchStatus?.isCompleted == true) {
+      if (success && _shouldNavigateToConfirm(sharingProvider)) {
         // Batch is already complete, navigate to confirm screen
-        _navigateToConfirm();
+        _navigateToConfirm(sharingProvider);
       }
     } catch (e) {
       debugPrint('❌ [ProcessingScreen] Error loading batch status: $e');
@@ -119,14 +119,28 @@ class _ProcessingScreenState extends State<ProcessingScreen>
     super.dispose();
   }
 
-  void _navigateToConfirm() {
+  void _navigateToConfirm(SharingProvider sharingProvider) {
     if (_hasNavigated) return;
+    final batchId = sharingProvider.currentBatchId;
+    if (batchId == null) return;
+    if (sharingProvider.batchStatus?.batchId != batchId) return;
+    if (sharingProvider.batchStatus?.isCompleted != true) return;
+
     _hasNavigated = true;
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => const ConfirmSharingScreen()),
+      MaterialPageRoute(
+        builder: (context) => ConfirmSharingScreen(batchId: batchId),
+      ),
     );
+  }
+
+  bool _shouldNavigateToConfirm(SharingProvider sharingProvider) {
+    final batchId = sharingProvider.currentBatchId;
+    if (batchId == null || _hasNavigated) return false;
+    final status = sharingProvider.batchStatus;
+    return status?.isCompleted == true && status?.batchId == batchId;
   }
 
   @override
@@ -142,10 +156,9 @@ class _ProcessingScreenState extends State<ProcessingScreen>
           child: Consumer<SharingProvider>(
             builder: (context, sharingProvider, _) {
               // Navigate to confirm screen when processing is complete
-              if (sharingProvider.batchStatus?.isCompleted == true &&
-                  !_hasNavigated) {
+              if (_shouldNavigateToConfirm(sharingProvider)) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _navigateToConfirm();
+                  _navigateToConfirm(sharingProvider);
                 });
               }
 

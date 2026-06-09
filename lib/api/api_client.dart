@@ -122,6 +122,32 @@ class ApiClient {
     }
   }
 
+  /// Backend responses may be a raw JSON array or an object wrapping the array.
+  List<dynamic> _coerceToList(
+    dynamic data, {
+    List<String> listKeys = const [
+      'images',
+      'gallery',
+      'gallery_items',
+      'items',
+      'data',
+      'results',
+      'notifications',
+      'contacts',
+      'friends',
+    ],
+  }) {
+    if (data == null) return [];
+    if (data is List) return data;
+    if (data is Map) {
+      for (final key in listKeys) {
+        final value = data[key];
+        if (value is List) return value;
+      }
+    }
+    throw ApiException('Expected list but got ${data.runtimeType}');
+  }
+
   // ==================== AUTH ENDPOINTS ====================
 
   /// Check if username is available
@@ -518,19 +544,12 @@ class ApiClient {
       final data = _handleResponse(response);
       print('Gallery API Parsed Data Type: ${data.runtimeType}');
 
-      // Ensure we have a list
-      if (data == null) {
-        print('Gallery API data is null');
-        return [];
-      }
-
-      if (data is! List) {
-        print('Gallery API data is not a list: $data');
-        throw ApiException('Expected list but got ${data.runtimeType}');
-      }
-
-      print('Gallery API Data Length: ${data.length}');
-      return data;
+      final list = _coerceToList(
+        data,
+        listKeys: const ['images', 'gallery', 'gallery_items', 'items', 'data'],
+      );
+      print('Gallery API Data Length: ${list.length}');
+      return list;
     } catch (e) {
       print('Gallery API Error: $e');
       if (e is ApiException) rethrow;
@@ -613,13 +632,10 @@ class ApiClient {
 
       final data = _handleResponse(response);
 
-      if (data == null) return [];
-      if (data is! List) {
-        throw ApiException('Expected list but got ${data.runtimeType}');
-      }
-
-      print('Shared Gallery Data Length: ${data.length}');
-      return data;
+      return _coerceToList(
+        data,
+        listKeys: const ['images', 'gallery', 'gallery_items', 'items', 'data'],
+      );
     } catch (e) {
       print('Shared Gallery API Error: $e');
       if (e is ApiException) rethrow;
@@ -724,12 +740,10 @@ class ApiClient {
 
       final response = await _client.get(uri, headers: _getHeaders());
       final data = _handleResponse(response);
-
-      if (data is List) {
-        return data;
-      } else {
-        return [];
-      }
+      return _coerceToList(
+        data,
+        listKeys: const ['contacts', 'items', 'data'],
+      );
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to get contacts: ${e.toString()}');
@@ -773,7 +787,10 @@ class ApiClient {
 
       final response = await _client.get(uri, headers: _getHeaders());
       final data = _handleResponse(response);
-      return data as List<dynamic>;
+      return _coerceToList(
+        data,
+        listKeys: const ['friends', 'friendships', 'items', 'data'],
+      );
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to get friends: ${e.toString()}');
@@ -793,7 +810,10 @@ class ApiClient {
 
       final response = await _client.get(uri, headers: _getHeaders());
       final data = _handleResponse(response);
-      return data as List<dynamic>;
+      return _coerceToList(
+        data,
+        listKeys: const ['users', 'results', 'items', 'data'],
+      );
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to search users: ${e.toString()}');
@@ -832,7 +852,10 @@ class ApiClient {
 
       final response = await _client.get(uri, headers: _getHeaders());
       final data = _handleResponse(response);
-      return data as List<dynamic>;
+      return _coerceToList(
+        data,
+        listKeys: const ['requests', 'pending', 'items', 'data'],
+      );
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to get pending requests: ${e.toString()}');
@@ -849,7 +872,10 @@ class ApiClient {
 
       final response = await _client.get(uri, headers: _getHeaders());
       final data = _handleResponse(response);
-      return data as List<dynamic>;
+      return _coerceToList(
+        data,
+        listKeys: const ['requests', 'sent', 'items', 'data'],
+      );
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to get sent requests: ${e.toString()}');
@@ -916,7 +942,10 @@ class ApiClient {
 
       final response = await _client.get(uri, headers: _getHeaders());
       final data = _handleResponse(response);
-      return data as List<dynamic>;
+      return _coerceToList(
+        data,
+        listKeys: const ['notifications', 'items', 'data'],
+      );
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to get notifications: ${e.toString()}');
@@ -981,7 +1010,10 @@ class ApiClient {
 
       final response = await _client.get(uri, headers: _getHeaders());
       final data = _handleResponse(response);
-      return data as List<dynamic>;
+      return _coerceToList(
+        data,
+        listKeys: const ['blocked', 'users', 'items', 'data'],
+      );
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to get blocked users: ${e.toString()}');
@@ -1287,6 +1319,83 @@ class ApiClient {
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to get recommendations: ${e.toString()}');
+    }
+  }
+
+  /// Dismiss a "People You May Know" suggestion permanently
+  /// POST /contacts/recommendations/dismiss
+  Future<void> dismissRecommendation({
+    required String userId,
+    required String dismissedUserId,
+  }) async {
+    try {
+      final uri =
+          Uri.parse('${ApiConstants.baseUrl}/contacts/recommendations/dismiss');
+      final response = await _client.post(
+        uri,
+        headers: _getHeaders(),
+        body: json.encode({
+          'user_id': userId,
+          'dismissed_user_id': dismissedUserId,
+        }),
+      );
+      _handleResponse(response);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to dismiss recommendation: ${e.toString()}');
+    }
+  }
+
+  /// Link historical photo matches when two users become friends
+  /// POST /friends/retroactive-share/accept
+  Future<Map<String, dynamic>> acceptRetroactiveShare({
+    required String userId,
+    required String friendId,
+    required List<String> contactFaceIds,
+    required List<String> unknownFaceIds,
+    required List<String> imageIds,
+  }) async {
+    try {
+      final uri =
+          Uri.parse('${ApiConstants.baseUrl}/friends/retroactive-share/accept');
+      final response = await _client.post(
+        uri,
+        headers: _getHeaders(),
+        body: json.encode({
+          'user_id': userId,
+          'friend_id': friendId,
+          'contact_face_ids': contactFaceIds,
+          'unknown_face_ids': unknownFaceIds,
+          'image_ids': imageIds,
+        }),
+      );
+      final data = _handleResponse(response);
+      return data as Map<String, dynamic>;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to accept retroactive share: ${e.toString()}');
+    }
+  }
+
+  /// Mark a single notification as read
+  /// POST /notifications/{notification_id}/mark-read
+  Future<void> markNotificationReadSingle({
+    required String notificationId,
+    required String userId,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/notifications/$notificationId/mark-read',
+      );
+      final response = await _client.post(
+        uri,
+        headers: _getHeaders(),
+        body: json.encode({'user_id': userId}),
+      );
+      _handleResponse(response);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to mark notification read: ${e.toString()}');
     }
   }
 

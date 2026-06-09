@@ -78,7 +78,7 @@ dependencies:
   web_socket_channel: ^3.0.3
   photo_manager: ^3.8.3
   open_filex: ^4.7.0
-  font_awesome_flutter: ^10.9.1
+  font_awesome_flutter: ^11.0.0
   firebase_core: ^4.7.0
   firebase_messaging: ^16.2.0
   device_info_plus: ^12.4.0

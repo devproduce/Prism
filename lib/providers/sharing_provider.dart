@@ -37,6 +37,9 @@ class SharingProvider extends ChangeNotifier {
   int _fallbackPollAttempts = 0;
   static const int _maxFallbackPollAttempts = 120; // 10 min at 5s
   bool _handlingSseTerminal = false;
+  bool _sendNoFaceToAll = false;
+  final Set<String> _bulkAssignedNoFaceImageIds = {};
+  static const Set<String> _specialFlags = {'archive', 'favourite', 'bin'};
 
   // Getters
   List<File> get selectedImages => _selectedImages;
@@ -77,6 +80,39 @@ class SharingProvider extends ChangeNotifier {
   }
 
   Map<String, List<String>> get imageRecipientMap => _imageRecipientMap;
+
+  bool get sendNoFaceToAll => _sendNoFaceToAll;
+
+  /// Photos with no detected faces — mutually exclusive with [faceDetectedImages].
+  List<BatchImage> get noFaceImages =>
+      _batchStatus?.images.where((img) => img.hasNoFaces).toList() ?? [];
+
+  /// Photos with at least one detected face — mutually exclusive with [noFaceImages].
+  List<BatchImage> get faceDetectedImages =>
+      _batchStatus?.images.where((img) => !img.hasNoFaces).toList() ?? [];
+
+  bool get hasNoFaceImages => noFaceImages.isNotEmpty;
+
+  /// Batch recipients excluding the uploader — used for "Send to all".
+  List<String> get batchRecipientUserIds {
+    if (_batchStatus == null || _userId == null) return [];
+    return _batchStatus!.recipients
+        .map((r) => r.userId)
+        .where((id) => id != _userId)
+        .toList();
+  }
+
+  bool get canSendNoFaceToAll =>
+      hasNoFaceImages && batchRecipientUserIds.isNotEmpty;
+
+  /// User recipient count for a single image (excludes album flags and self).
+  int recipientCountForImage(String imageId) {
+    final recipients = _imageRecipientMap[imageId];
+    if (recipients == null) return 0;
+    return recipients
+        .where((r) => !_specialFlags.contains(r) && r != _userId)
+        .length;
+  }
 
   // Check if all images are marked for archive
   bool get areAllArchived {
@@ -122,6 +158,8 @@ class SharingProvider extends ChangeNotifier {
   void clearBatch() {
     _batchStatus = null;
     _imageRecipientMap.clear();
+    _sendNoFaceToAll = false;
+    _bulkAssignedNoFaceImageIds.clear();
     _error = null;
     _sseStatusMessage = null;
     notifyListeners();
@@ -174,7 +212,64 @@ class SharingProvider extends ChangeNotifier {
       _imageRecipientMap.remove(imageId);
     }
 
+    if (noFaceImages.any((img) => img.id == imageId)) {
+      _bulkAssignedNoFaceImageIds.remove(imageId);
+      _reconcileSendNoFaceToAllCheckbox();
+    }
+
     notifyListeners();
+  }
+
+  /// Assign all no-face images to every friend detected in this batch.
+  void setSendNoFaceToAll(bool value) {
+    if (_sendNoFaceToAll == value) return;
+
+    _sendNoFaceToAll = value;
+    if (value) {
+      _applySendNoFaceToAll();
+    } else {
+      _clearBulkNoFaceRecipients();
+    }
+    notifyListeners();
+  }
+
+  void _applySendNoFaceToAll() {
+    final recipientIds = batchRecipientUserIds;
+    if (recipientIds.isEmpty) {
+      _sendNoFaceToAll = false;
+      return;
+    }
+
+    for (final img in noFaceImages) {
+      _bulkAssignedNoFaceImageIds.add(img.id);
+      _imageRecipientMap[img.id] = List<String>.from(recipientIds);
+    }
+  }
+
+  void _clearBulkNoFaceRecipients() {
+    for (final imageId in _bulkAssignedNoFaceImageIds) {
+      _imageRecipientMap.remove(imageId);
+    }
+    _bulkAssignedNoFaceImageIds.clear();
+  }
+
+  void _reconcileSendNoFaceToAllCheckbox() {
+    final expected = batchRecipientUserIds;
+    if (expected.isEmpty || noFaceImages.isEmpty) {
+      _sendNoFaceToAll = false;
+      return;
+    }
+
+    final expectedSet = expected.toSet();
+    _sendNoFaceToAll = noFaceImages.every((img) {
+      final assigned = _imageRecipientMap[img.id];
+      if (assigned == null) return false;
+      final userRecipients = assigned
+          .where((r) => !_specialFlags.contains(r) && r != _userId)
+          .toSet();
+      return userRecipients.length == expectedSet.length &&
+          expectedSet.every(userRecipients.contains);
+    });
   }
 
   // Check if specific recipient is selected for image
@@ -283,6 +378,13 @@ class SharingProvider extends ChangeNotifier {
     debugPrint(
       '   Description: ${_description.isNotEmpty ? _description : "(none)"}',
     );
+
+    // Drop any previous batch so ProcessingScreen cannot reopen stale review data.
+    clearBatch();
+    _currentBatchId = null;
+    _batchWatchFinalized = false;
+    _pollingTimer?.cancel();
+    _disconnectBatchStream();
 
     _isUploading = true;
     _uploadProgress = 0.0;
@@ -456,7 +558,10 @@ class SharingProvider extends ChangeNotifier {
       );
 
       if (navigatorKey.currentState != null) {
-        navigatorKey.currentState!.pushReplacementNamed('/confirm_share');
+        navigatorKey.currentState!.pushReplacementNamed(
+          '/confirm_share',
+          arguments: {'batchId': _currentBatchId},
+        );
       }
     }
   }
@@ -677,10 +782,9 @@ class SharingProvider extends ChangeNotifier {
 
     // Add custom per-image recipients from imageRecipientMap
     // Filter out special flags like 'archive', 'favourite', 'bin'
-    const specialFlags = {'archive', 'favourite', 'bin'};
     for (var recipients in _imageRecipientMap.values) {
       for (var recipient in recipients) {
-        if (!specialFlags.contains(recipient)) {
+        if (!_specialFlags.contains(recipient)) {
           recipientIds.add(recipient);
         }
       }
@@ -768,6 +872,8 @@ class SharingProvider extends ChangeNotifier {
     _batchStatus = null;
     _imageRecipientMap.clear();
     _allFriends.clear();
+    _sendNoFaceToAll = false;
+    _bulkAssignedNoFaceImageIds.clear();
     _sseStatusMessage = null;
     _batchWatchFinalized = false;
     _handlingSseTerminal = false;
@@ -804,6 +910,8 @@ class SharingProvider extends ChangeNotifier {
 
     _isUploading = false;
     _isProcessing = false;
+    clearBatch();
+    _currentBatchId = null;
     notifyListeners();
   }
 

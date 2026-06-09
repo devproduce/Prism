@@ -41,6 +41,47 @@ class FriendsProvider with ChangeNotifier {
   DateTime? get lastSyncedAt => _lastSyncedAt;
   bool get hasSynced => _hasSynced;
 
+  /// On-platform suggestions excluding friends and already-sent requests.
+  List<OnPlatformUser> get visibleOnPlatformRecommendations {
+    final result = _contactSyncResult;
+    if (result == null) return [];
+    return result.onPlatform.where((user) {
+      return !_isAlreadyFriend(user.userId, user.username) &&
+          !_hasPendingSentTo(user.userId, user.username);
+    }).toList();
+  }
+
+  bool _isAlreadyFriend(String userId, String username) {
+    return _friends.any(
+      (f) => f.userId == userId || f.username == username,
+    );
+  }
+
+  bool _hasPendingSentTo(String userId, String username) {
+    return _sentRequests.any(
+      (r) =>
+          r.userId == userId ||
+          r.receiverId == userId ||
+          r.username == username,
+    );
+  }
+
+  void _removeFromOnPlatformRecommendations({
+    required String username,
+    String? userId,
+  }) {
+    if (_contactSyncResult == null) return;
+    _contactSyncResult = ContactSyncResult(
+      onPlatform: _contactSyncResult!.onPlatform
+          .where(
+            (u) => u.username != username && (userId == null || u.userId != userId),
+          )
+          .toList(),
+      notOnPlatform: _contactSyncResult!.notOnPlatform,
+      unknownFaceRecommendations: _contactSyncResult!.unknownFaceRecommendations,
+    );
+  }
+
   // Set loading state
   void _setLoading(bool value) {
     _isLoading = value;
@@ -178,22 +219,41 @@ class FriendsProvider with ChangeNotifier {
         targetUsername: targetUsername,
       );
 
-      // Immediately add to sent requests for UI feedback
-      // Create a temporary FriendRequest object
+      final addresseeId = response['addressee_id']?.toString() ?? '';
+
+      // Pull profile pic from discovery list when available
+      String? profilePicId;
+      for (final u in _contactSyncResult?.onPlatform ?? []) {
+        if (u.username == targetUsername || u.userId == addresseeId) {
+          profilePicId = u.profilePicId;
+          break;
+        }
+      }
+
       final tempRequest = FriendRequest(
         friendshipId: response['friendship_id']?.toString() ?? '',
-        userId: response['addressee_id']?.toString() ?? '',
+        userId: addresseeId,
         username: targetUsername,
-        profilePicId: null,
+        profilePicId: profilePicId,
         firstName: null,
         lastName: null,
         createdAt: DateTime.now(),
         status: 'pending',
         requesterId: userId,
-        receiverId: response['addressee_id']?.toString() ?? '',
+        receiverId: addresseeId,
       );
 
-      _sentRequests.add(tempRequest);
+      final alreadySent = _sentRequests.any(
+        (r) => r.username == targetUsername || r.userId == addresseeId,
+      );
+      if (!alreadySent) {
+        _sentRequests.add(tempRequest);
+      }
+
+      _removeFromOnPlatformRecommendations(
+        username: targetUsername,
+        userId: addresseeId.isNotEmpty ? addresseeId : null,
+      );
       notifyListeners();
 
       // Refresh friends in background to get full data
@@ -456,6 +516,39 @@ class FriendsProvider with ChangeNotifier {
       await _contactService.updateSyncStatus(userId, status);
     } catch (e) {
       debugPrint('[FriendsProvider] Error updating sync status: $e');
+    }
+  }
+
+  /// Permanently dismiss a "People You May Know" card (V2.2)
+  Future<bool> dismissRecommendation(
+    String userId,
+    String dismissedUserId,
+  ) async {
+    try {
+      _setError(null);
+      await _apiClient.dismissRecommendation(
+        userId: userId,
+        dismissedUserId: dismissedUserId,
+      );
+
+      if (_contactSyncResult != null) {
+        _contactSyncResult = ContactSyncResult(
+          onPlatform: _contactSyncResult!.onPlatform
+              .where((u) => u.userId != dismissedUserId)
+              .toList(),
+          notOnPlatform: _contactSyncResult!.notOnPlatform,
+          unknownFaceRecommendations:
+              _contactSyncResult!.unknownFaceRecommendations,
+        );
+      }
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      return false;
+    } catch (e) {
+      _setError('Failed to dismiss suggestion: ${e.toString()}');
+      return false;
     }
   }
 }

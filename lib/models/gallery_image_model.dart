@@ -15,8 +15,13 @@ class GalleryImage {
 
   factory GalleryImage.fromJson(Map<String, dynamic> json) {
     try {
+      // Support nested `{ image: {...} }` and flat `{ id, image_url, ... }` shapes.
+      final imageJson = json['image'] is Map<String, dynamic>
+          ? json['image'] as Map<String, dynamic>
+          : json;
+
       return GalleryImage(
-        image: ImageData.fromJson(json['image'] as Map<String, dynamic>),
+        image: ImageData.fromJson(imageJson),
         faces:
             (json['faces'] as List?)
                 ?.map((face) => FaceData.fromJson(face as Map<String, dynamic>))
