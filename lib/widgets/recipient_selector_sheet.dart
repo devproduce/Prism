@@ -25,15 +25,7 @@ class RecipientSelectorSheet extends StatelessWidget {
     );
 
     // Identify detected user IDs for this specific image
-    final Set<String> detectedUserIds = {};
-    if (batchImage?.detectedFaces != null) {
-      for (var face in batchImage!.detectedFaces!) {
-        // face is dynamic (Map), typically has 'user_id' if recognized
-        if (face is Map && face['user_id'] != null) {
-          detectedUserIds.add(face['user_id'].toString());
-        }
-      }
-    }
+    final detectedUserIds = batchImage?.recognizedUserIds ?? {};
 
     // Split recipients into detected and others
     final detectedRecipients = recipients

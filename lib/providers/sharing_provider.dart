@@ -196,14 +196,17 @@ class SharingProvider extends ChangeNotifier {
 
     for (final image in batch.images) {
       if (image.hasNoFaces) continue;
-      final faces = image.detectedFaces;
-      if (faces == null) continue;
 
-      for (final face in faces) {
-        if (_faceUserId(face) == userId && seen.add(image.id)) {
-          result.add(image);
-          break;
-        }
+      if (image.recognizedUserIds.contains(userId) && seen.add(image.id)) {
+        result.add(image);
+        continue;
+      }
+
+      final assigned = _imageRecipientMap[image.id];
+      if (assigned != null &&
+          assigned.contains(userId) &&
+          seen.add(image.id)) {
+        result.add(image);
       }
     }
 
@@ -211,14 +214,6 @@ class SharingProvider extends ChangeNotifier {
   }
 
   int photoCountForUserId(String userId) => imagesForUserId(userId).length;
-
-  static String? _faceUserId(dynamic face) {
-    if (face is Map) {
-      final id = face['user_id'];
-      if (id != null) return id.toString();
-    }
-    return null;
-  }
 
   // Check if all images are marked for archive
   bool get areAllArchived {
@@ -801,28 +796,22 @@ class SharingProvider extends ChangeNotifier {
     if (_batchStatus == null || _userId == null) return;
 
     for (var image in _batchStatus!.images) {
-      if (image.detectedFaces != null) {
-        for (var face in image.detectedFaces!) {
-          if (face is Map && face['user_id'] != null) {
-            final userId = face['user_id'].toString();
+      if (image.hasNoFaces) continue;
 
-            // Don't add current user as a recipient (can't share with yourself)
-            if (userId == _userId) {
-              debugPrint('⏭️ Skipping current user from recipients: $userId');
-              continue;
-            }
+      for (final userId in image.recognizedUserIds) {
+        if (userId == _userId) {
+          debugPrint('⏭️ Skipping current user from recipients: $userId');
+          continue;
+        }
 
-            // Add to image recipient map
-            if (!_imageRecipientMap.containsKey(image.id)) {
-              _imageRecipientMap[image.id] = [];
-            }
-            if (!_imageRecipientMap[image.id]!.contains(userId)) {
-              _imageRecipientMap[image.id]!.add(userId);
-              debugPrint(
-                '✅ Auto-selected recipient $userId for image ${image.id}',
-              );
-            }
-          }
+        if (!_imageRecipientMap.containsKey(image.id)) {
+          _imageRecipientMap[image.id] = [];
+        }
+        if (!_imageRecipientMap[image.id]!.contains(userId)) {
+          _imageRecipientMap[image.id]!.add(userId);
+          debugPrint(
+            '✅ Auto-selected recipient $userId for image ${image.id}',
+          );
         }
       }
     }

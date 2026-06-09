@@ -242,12 +242,24 @@ class BatchImage {
     this.detectedFaces,
   });
 
-  /// True only when CV explicitly reported no faces.
-  /// Prefer `detected_faces` when present; fall back to empty `face_ids`.
+  /// True only when CV explicitly reported no faces in either field.
   bool get hasNoFaces {
-    if (detectedFaces != null) return detectedFaces!.isEmpty;
-    if (faceIds != null) return faceIds!.isEmpty;
+    final hasDetectedFaceEntries =
+        detectedFaces != null && detectedFaces!.isNotEmpty;
+    final hasFaceIds = faceIds != null && faceIds!.isNotEmpty;
+    if (hasDetectedFaceEntries || hasFaceIds) return false;
+    if (detectedFaces != null || faceIds != null) return true;
     return false;
+  }
+
+  /// User IDs recognized in this image from [detectedFaces] metadata.
+  Set<String> get recognizedUserIds {
+    final ids = <String>{};
+    for (final face in detectedFaces ?? const []) {
+      final userId = BatchFaceParser.userId(face);
+      if (userId != null) ids.add(userId);
+    }
+    return ids;
   }
 
   factory BatchImage.fromJson(Map<String, dynamic> json) {
@@ -277,7 +289,9 @@ class BatchImage {
         thumbUrl ?? imageUrl,
       ), // Use main image as thumb if no thumb
       faceIds: parsedFaceIds,
-      detectedFaces: json['detected_faces'] as List<dynamic>?,
+      detectedFaces: BatchFaceParser.parseFaceList(
+        json['detected_faces'] ?? json['faces'],
+      ),
     );
   }
 
@@ -298,5 +312,41 @@ class BatchImage {
       return 'video/$ext';
     }
     return 'image/jpeg';
+  }
+}
+
+/// Parses face metadata from batch image payloads.
+class BatchFaceParser {
+  BatchFaceParser._();
+
+  static List<dynamic>? parseFaceList(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is List) return raw;
+    if (raw is String) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) return decoded;
+      } catch (e) {
+        debugPrint('⚠️ [BatchFaceParser] Failed to parse face list string: $e');
+      }
+    }
+    return null;
+  }
+
+  static String? userId(dynamic face) {
+    if (face is Map) {
+      for (final key in const [
+        'user_id',
+        'friend_id',
+        'matched_user_id',
+        'recipient_id',
+      ]) {
+        final value = face[key];
+        if (value != null && value.toString().isNotEmpty) {
+          return value.toString();
+        }
+      }
+    }
+    return null;
   }
 }
