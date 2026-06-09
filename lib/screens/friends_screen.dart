@@ -702,35 +702,29 @@ class _FriendsScreenState extends State<FriendsScreen> {
       padding: EdgeInsets.zero,
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildFriendshipStatusBadge(
-              status: status,
-              onAddTap: status == FriendshipDisplayStatus.none
-                  ? () async {
-                      if (authProvider.currentUser == null) return;
-                      await provider.sendFriendRequest(
-                        authProvider.currentUser!.userId,
-                        user.username,
-                      );
-                    }
-                  : null,
-            ),
-            const SizedBox(width: 10),
-            CircleAvatar(
-              backgroundColor: PrismColors.inputGray,
-              backgroundImage: user.profilePictureUrl.isNotEmpty
-                  ? CachedNetworkImageProvider(user.profilePictureUrl)
-                  : null,
-              child: user.profilePictureUrl.isEmpty
-                  ? const Icon(Icons.person, color: PrismColors.secondaryText)
-                  : null,
-            ),
-          ],
+        leading: CircleAvatar(
+          backgroundColor: PrismColors.inputGray,
+          backgroundImage: user.profilePictureUrl.isNotEmpty
+              ? CachedNetworkImageProvider(user.profilePictureUrl)
+              : null,
+          child: user.profilePictureUrl.isEmpty
+              ? const Icon(Icons.person, color: PrismColors.secondaryText)
+              : null,
         ),
         title: Text(user.displayName, style: PrismTextStyles.bodyLarge),
         subtitle: Text('@${user.username}', style: PrismTextStyles.bodySmall),
+        trailing: _buildFriendshipStatusBadge(
+          status: status,
+          onAddTap: status == FriendshipDisplayStatus.none
+              ? () async {
+                  if (authProvider.currentUser == null) return;
+                  await provider.sendFriendRequest(
+                    authProvider.currentUser!.userId,
+                    user.username,
+                  );
+                }
+              : null,
+        ),
         onTap: () {
           Navigator.push(
             context,
