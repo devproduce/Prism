@@ -5,6 +5,8 @@ import 'package:prism/models/contact_sync_result.dart';
 import 'package:prism/services/contact_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+enum FriendshipDisplayStatus { none, pendingSent, friend }
+
 class FriendsProvider with ChangeNotifier {
   final ApiClient _apiClient = ApiClient();
   final ContactService _contactService = ContactService();
@@ -24,6 +26,7 @@ class FriendsProvider with ChangeNotifier {
   bool _isLoading = false;
   bool _isSearching = false;
   String? _error;
+  DateTime? _lastFriendshipSyncAt;
 
   // Getters — existing
   List<Friend> get friends => _friends;
@@ -64,6 +67,36 @@ class FriendsProvider with ChangeNotifier {
           r.receiverId == userId ||
           r.username == username,
     );
+  }
+
+  /// Resolve how a user should appear in search / discovery cards.
+  FriendshipDisplayStatus friendshipDisplayStatusFor({
+    required String userId,
+    required String username,
+  }) {
+    if (_isAlreadyFriend(userId, username)) {
+      return FriendshipDisplayStatus.friend;
+    }
+    if (_hasPendingSentTo(userId, username)) {
+      return FriendshipDisplayStatus.pendingSent;
+    }
+    return FriendshipDisplayStatus.none;
+  }
+
+  /// Keep friendship lists fresh while searching without spamming the API.
+  Future<void> syncFriendshipsIfStale(
+    String userId, {
+    bool force = false,
+  }) async {
+    final now = DateTime.now();
+    if (!force &&
+        _lastFriendshipSyncAt != null &&
+        now.difference(_lastFriendshipSyncAt!) <
+            const Duration(seconds: 8)) {
+      return;
+    }
+    _lastFriendshipSyncAt = now;
+    await fetchFriends(userId, showLoading: false);
   }
 
   void _removeFromOnPlatformRecommendations({
@@ -215,10 +248,11 @@ class FriendsProvider with ChangeNotifier {
       _setSearching(true);
       _setError(null);
 
-      final data = await _apiClient.searchUsers(
-        username: username,
-        userId: userId,
-      );
+      final results = await Future.wait([
+        _apiClient.searchUsers(username: username, userId: userId),
+        syncFriendshipsIfStale(userId),
+      ]);
+      final data = results.first as List<dynamic>;
       _searchResults = data.map((json) => Friend.fromJson(json)).toList();
 
       _setSearching(false);
@@ -284,8 +318,7 @@ class FriendsProvider with ChangeNotifier {
       );
       notifyListeners();
 
-      // Refresh friends in background to get full data
-      fetchFriends(userId);
+      await fetchFriends(userId, showLoading: false);
 
       return true;
     } on ApiException catch (e) {

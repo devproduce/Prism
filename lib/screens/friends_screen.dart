@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -36,6 +38,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _inviteSearchController = TextEditingController();
   String _inviteSearchQuery = '';
+  Timer? _searchStatusRefreshTimer;
 
   @override
   void initState() {
@@ -61,9 +64,33 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
   @override
   void dispose() {
+    _searchStatusRefreshTimer?.cancel();
     _inviteSearchController.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _updateSearchStatusRefreshTimer(bool searchActive) {
+    if (!searchActive) {
+      _searchStatusRefreshTimer?.cancel();
+      _searchStatusRefreshTimer = null;
+      return;
+    }
+
+    if (_searchStatusRefreshTimer != null) return;
+
+    _searchStatusRefreshTimer = Timer.periodic(
+      const Duration(seconds: 12),
+      (_) {
+        if (!mounted) return;
+        final userId = context.read<AuthProvider>().currentUser?.userId;
+        if (userId == null) return;
+        context.read<FriendsProvider>().syncFriendshipsIfStale(
+              userId,
+              force: true,
+            );
+      },
+    );
   }
 
   @override
@@ -141,11 +168,13 @@ class _FriendsScreenState extends State<FriendsScreen> {
                           _searchController.clear();
                           friendsProvider.clearSearchResults();
                         });
+                        _updateSearchStatusRefreshTimer(false);
                       },
                     )
                   : null,
               onChanged: (value) {
                 setState(() {});
+                _updateSearchStatusRefreshTimer(value.isNotEmpty);
                 if (authProvider.currentUser != null) {
                   friendsProvider.searchUsers(value, authProvider.currentUser!.userId);
                 }
@@ -651,66 +680,44 @@ class _FriendsScreenState extends State<FriendsScreen> {
     FriendsProvider provider,
     AuthProvider authProvider,
   ) {
-    final isFriend = provider.friends.any((f) => f.userId == user.userId);
-    final isPending = provider.sentRequests.any(
-      (r) => r.receiverId == user.userId,
+    final status = provider.friendshipDisplayStatusFor(
+      userId: user.userId,
+      username: user.username,
     );
 
     return PrismCard(
       padding: EdgeInsets.zero,
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: CircleAvatar(
-          backgroundColor: PrismColors.inputGray,
-          backgroundImage: user.profilePictureUrl.isNotEmpty
-              ? CachedNetworkImageProvider(user.profilePictureUrl)
-              : null,
-          child: user.profilePictureUrl.isEmpty
-              ? const Icon(Icons.person, color: PrismColors.secondaryText)
-              : null,
-        ),
-        title: Text(user.displayName, style: PrismTextStyles.bodyLarge),
-        subtitle: Text('@${user.username}', style: PrismTextStyles.bodySmall),
-        trailing: isFriend
-            ? const Icon(
-                Icons.check_circle_rounded,
-                color: PrismColors.successGreen,
-              )
-            : isPending
-            ? Text(
-                'Sent',
-                style: PrismTextStyles.bodySmall.copyWith(
-                  color: PrismColors.electricCyan,
-                ),
-              )
-            : SizedBox(
-                height: 32,
-                child: ElevatedButton(
-                  onPressed: () async {
-                    if (authProvider.currentUser != null) {
+        leading: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildFriendshipStatusBadge(
+              status: status,
+              onAddTap: status == FriendshipDisplayStatus.none
+                  ? () async {
+                      if (authProvider.currentUser == null) return;
                       await provider.sendFriendRequest(
                         authProvider.currentUser!.userId,
                         user.username,
                       );
                     }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: PrismColors.prismYellow,
-                    foregroundColor: PrismColors.black,
-                    elevation: 0,
-                    shape: const StadiumBorder(),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                  ),
-                  child: const Text(
-                    'Add',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: PrismColors.black,
-                    ),
-                  ),
-                ),
-              ),
+                  : null,
+            ),
+            const SizedBox(width: 10),
+            CircleAvatar(
+              backgroundColor: PrismColors.inputGray,
+              backgroundImage: user.profilePictureUrl.isNotEmpty
+                  ? CachedNetworkImageProvider(user.profilePictureUrl)
+                  : null,
+              child: user.profilePictureUrl.isEmpty
+                  ? const Icon(Icons.person, color: PrismColors.secondaryText)
+                  : null,
+            ),
+          ],
+        ),
+        title: Text(user.displayName, style: PrismTextStyles.bodyLarge),
+        subtitle: Text('@${user.username}', style: PrismTextStyles.bodySmall),
         onTap: () {
           Navigator.push(
             context,
@@ -724,6 +731,84 @@ class _FriendsScreenState extends State<FriendsScreen> {
         },
       ),
     );
+  }
+
+  Widget _buildFriendshipStatusBadge({
+    required FriendshipDisplayStatus status,
+    VoidCallback? onAddTap,
+  }) {
+    switch (status) {
+      case FriendshipDisplayStatus.friend:
+        return SizedBox(
+          width: 44,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.people_rounded,
+                color: PrismColors.successGreen,
+                size: 22,
+              ),
+              Text(
+                'Friend',
+                style: PrismTextStyles.bodySmall.copyWith(
+                  color: PrismColors.successGreen,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        );
+      case FriendshipDisplayStatus.pendingSent:
+        return SizedBox(
+          width: 44,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.schedule_rounded,
+                color: PrismColors.electricCyan,
+                size: 22,
+              ),
+              Text(
+                'Sent',
+                style: PrismTextStyles.bodySmall.copyWith(
+                  color: PrismColors.electricCyan,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        );
+      case FriendshipDisplayStatus.none:
+        return SizedBox(
+          width: 44,
+          child: InkWell(
+            onTap: onAddTap,
+            borderRadius: BorderRadius.circular(8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.person_add_rounded,
+                  color: PrismColors.prismYellow,
+                  size: 22,
+                ),
+                Text(
+                  'Add',
+                  style: PrismTextStyles.bodySmall.copyWith(
+                    color: PrismColors.prismYellow,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+    }
   }
 
   Widget _buildPendingRequestCard(
