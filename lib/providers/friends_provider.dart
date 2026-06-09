@@ -108,9 +108,11 @@ class FriendsProvider with ChangeNotifier {
 
   /// Fetch all friends and parse into accepted/pending/sent
   /// The /friends endpoint returns ALL friendships, so we filter them
-  Future<void> fetchFriends(String userId) async {
+  Future<void> fetchFriends(String userId, {bool showLoading = true}) async {
     try {
-      _setLoading(true);
+      if (showLoading) {
+        _setLoading(true);
+      }
       _setError(null);
 
       final data = await _apiClient.getFriends(userId: userId);
@@ -162,17 +164,43 @@ class FriendsProvider with ChangeNotifier {
       }
 
       _friends = acceptedFriends;
-      _pendingRequests = pendingReceived;
-      _sentRequests = pendingSent;
+      _pendingRequests = _dedupeFriendRequests(pendingReceived);
+      _sentRequests = _dedupeFriendRequests(pendingSent);
 
-      _setLoading(false);
+      if (showLoading) {
+        _setLoading(false);
+      } else {
+        notifyListeners();
+      }
     } on ApiException catch (e) {
       _setError(e.message);
-      _setLoading(false);
+      if (showLoading) {
+        _setLoading(false);
+      } else {
+        notifyListeners();
+      }
     } catch (e) {
       _setError('Failed to fetch friends: ${e.toString()}');
-      _setLoading(false);
+      if (showLoading) {
+        _setLoading(false);
+      } else {
+        notifyListeners();
+      }
     }
+  }
+
+  List<FriendRequest> _dedupeFriendRequests(List<FriendRequest> requests) {
+    final seen = <String>{};
+    final deduped = <FriendRequest>[];
+    for (final request in requests) {
+      final key = request.friendshipId.isNotEmpty
+          ? request.friendshipId
+          : '${request.requesterId}:${request.receiverId}';
+      if (seen.add(key)) {
+        deduped.add(request);
+      }
+    }
+    return deduped;
   }
 
   /// Search users by username
@@ -273,15 +301,17 @@ class FriendsProvider with ChangeNotifier {
 
   /// Accept friend request
   Future<bool> acceptFriendRequest(String friendshipId, String userId) async {
+    FriendRequest? removedRequest;
+    var removedIndex = -1;
+
     try {
       _setError(null);
 
-      // Optimistically remove from pending requests
-      final requestIndex = _pendingRequests.indexWhere(
+      removedIndex = _pendingRequests.indexWhere(
         (r) => r.friendshipId == friendshipId,
       );
-      if (requestIndex != -1) {
-        _pendingRequests.removeAt(requestIndex);
+      if (removedIndex != -1) {
+        removedRequest = _pendingRequests.removeAt(removedIndex);
         notifyListeners();
       }
 
@@ -290,15 +320,26 @@ class FriendsProvider with ChangeNotifier {
         userId: userId,
       );
 
-      // Refresh friends to get updated data
-      await fetchFriends(userId);
+      await fetchFriends(userId, showLoading: false);
 
       return true;
     } on ApiException catch (e) {
+      if (removedRequest != null && removedIndex != -1) {
+        _pendingRequests.insert(
+          removedIndex.clamp(0, _pendingRequests.length),
+          removedRequest,
+        );
+      }
       _setError(e.message);
       notifyListeners();
       return false;
     } catch (e) {
+      if (removedRequest != null && removedIndex != -1) {
+        _pendingRequests.insert(
+          removedIndex.clamp(0, _pendingRequests.length),
+          removedRequest,
+        );
+      }
       _setError('Failed to accept friend request: ${e.toString()}');
       notifyListeners();
       return false;
@@ -307,27 +348,47 @@ class FriendsProvider with ChangeNotifier {
 
   /// Reject friend request
   Future<bool> rejectFriendRequest(String friendshipId, String userId) async {
+    FriendRequest? removedRequest;
+    var removedIndex = -1;
+
     try {
       _setError(null);
 
-      // Optimistically remove from pending requests
-      _pendingRequests.removeWhere((r) => r.friendshipId == friendshipId);
-      notifyListeners();
+      removedIndex = _pendingRequests.indexWhere(
+        (r) => r.friendshipId == friendshipId,
+      );
+      if (removedIndex != -1) {
+        removedRequest = _pendingRequests.removeAt(removedIndex);
+        notifyListeners();
+      }
 
       await _apiClient.rejectFriendRequest(
         friendshipId: friendshipId,
         userId: userId,
       );
 
-      // Refresh friends in background
-      fetchFriends(userId);
+      await fetchFriends(userId, showLoading: false);
 
       return true;
     } on ApiException catch (e) {
+      if (removedRequest != null && removedIndex != -1) {
+        _pendingRequests.insert(
+          removedIndex.clamp(0, _pendingRequests.length),
+          removedRequest,
+        );
+      }
       _setError(e.message);
+      notifyListeners();
       return false;
     } catch (e) {
+      if (removedRequest != null && removedIndex != -1) {
+        _pendingRequests.insert(
+          removedIndex.clamp(0, _pendingRequests.length),
+          removedRequest,
+        );
+      }
       _setError('Failed to reject friend request: ${e.toString()}');
+      notifyListeners();
       return false;
     }
   }

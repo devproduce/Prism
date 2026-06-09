@@ -231,7 +231,11 @@ class _FriendsScreenState extends State<FriendsScreen> {
     );
   }
 
-  void _showRequestsBottomSheet(BuildContext context, FriendsProvider friendsProvider, AuthProvider authProvider) {
+  void _showRequestsBottomSheet(
+    BuildContext context,
+    FriendsProvider friendsProvider,
+    AuthProvider authProvider,
+  ) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -239,50 +243,69 @@ class _FriendsScreenState extends State<FriendsScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.75,
-          minChildSize: 0.5,
-          maxChildSize: 0.95,
-          expand: false,
-          builder: (context, scrollController) {
-            return DefaultTabController(
-              length: 2,
-              child: Column(
-                children: [
-                  Container(
-                    margin: const EdgeInsets.symmetric(vertical: 12),
-                    height: 4,
-                    width: 40,
-                    decoration: BoxDecoration(
-                      color: PrismColors.white.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Text('Requests', style: PrismTextStyles.h3),
-                  ),
-                  TabBar(
-                    indicatorColor: PrismColors.prismYellow,
-                    labelColor: PrismColors.prismYellow,
-                    unselectedLabelColor: PrismColors.secondaryText,
-                    dividerColor: Colors.transparent,
-                    tabs: [
-                      Tab(text: 'Received (${friendsProvider.pendingRequests.length})'),
-                      Tab(text: 'Sent (${friendsProvider.sentRequests.length})'),
+      builder: (sheetContext) {
+        return Consumer<FriendsProvider>(
+          builder: (context, provider, _) {
+            final auth = Provider.of<AuthProvider>(context, listen: false);
+            return DraggableScrollableSheet(
+              initialChildSize: 0.75,
+              minChildSize: 0.5,
+              maxChildSize: 0.95,
+              expand: false,
+              builder: (context, scrollController) {
+                return DefaultTabController(
+                  length: 2,
+                  child: Column(
+                    children: [
+                      Container(
+                        margin: const EdgeInsets.symmetric(vertical: 12),
+                        height: 4,
+                        width: 40,
+                        decoration: BoxDecoration(
+                          color: PrismColors.white.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        child: Text('Requests', style: PrismTextStyles.h3),
+                      ),
+                      TabBar(
+                        indicatorColor: PrismColors.prismYellow,
+                        labelColor: PrismColors.prismYellow,
+                        unselectedLabelColor: PrismColors.secondaryText,
+                        dividerColor: Colors.transparent,
+                        tabs: [
+                          Tab(
+                            text:
+                                'Received (${provider.pendingRequests.length})',
+                          ),
+                          Tab(text: 'Sent (${provider.sentRequests.length})'),
+                        ],
+                      ),
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            _buildPendingRequestsTab(
+                              provider,
+                              auth,
+                              scrollController,
+                            ),
+                            _buildSentRequestsTab(
+                              provider,
+                              auth,
+                              scrollController,
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
-                  Expanded(
-                    child: TabBarView(
-                      children: [
-                        _buildPendingRequestsTab(friendsProvider, authProvider, scrollController),
-                        _buildSentRequestsTab(friendsProvider, authProvider, scrollController),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+                );
+              },
             );
           },
         );
