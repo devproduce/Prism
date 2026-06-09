@@ -6,7 +6,7 @@ import 'package:prism/screens/share_upload_screen.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/providers/auth_provider.dart';
-import 'package:prism/providers/notifications_provider.dart';
+import 'package:prism/providers/activity_feed_provider.dart';
 import 'package:prism/services/share_handler_service.dart';
 import 'package:provider/provider.dart';
 
@@ -46,7 +46,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
       // Request notification permissions
       if (mounted) {
-        Provider.of<NotificationsProvider>(
+        Provider.of<ActivityFeedProvider>(
           context,
           listen: false,
         ).requestPermissions();

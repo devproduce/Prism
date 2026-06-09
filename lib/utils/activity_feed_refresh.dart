@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
-import 'package:prism/providers/notifications_provider.dart';
+import 'package:prism/providers/activity_feed_provider.dart';
 import 'package:prism/utils/globals.dart';
 
-/// Mirrors web `prism-new-notification` — refreshes feed when push arrives.
+/// Mirrors web `prism-new-notification` â€” refreshes feed when push arrives.
 class ActivityFeedRefresh {
   ActivityFeedRefresh._();
 
@@ -18,7 +18,7 @@ class ActivityFeedRefresh {
       final user = auth.currentUser;
       if (user == null) return;
 
-      final feed = context.read<NotificationsProvider>();
+      final feed = context.read<ActivityFeedProvider>();
       final friends = context.read<FriendsProvider>();
       feed.setUserContext(profilePicId: user.profilePicId);
       await feed.refetch(user.userId);

@@ -22,7 +22,7 @@ import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/gallery_provider.dart';
 import 'package:prism/providers/profile_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
-import 'package:prism/providers/notifications_provider.dart';
+import 'package:prism/providers/activity_feed_provider.dart';
 import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/providers/theme_provider.dart';
 import 'package:prism/services/notification_service.dart';
@@ -247,7 +247,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ChangeNotifierProvider(create: (_) => GalleryProvider()),
         ChangeNotifierProvider(create: (_) => ProfileProvider()),
         ChangeNotifierProvider(create: (_) => FriendsProvider()),
-        ChangeNotifierProvider(create: (_) => NotificationsProvider()),
+        ChangeNotifierProvider(create: (_) => ActivityFeedProvider()),
         ChangeNotifierProvider(create: (_) => SharingProvider()),
         ChangeNotifierProvider(create: (_) => LocalGalleryProvider()),
       ],

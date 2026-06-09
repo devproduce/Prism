@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:prism/models/notification_model.dart';
-import 'package:prism/providers/notifications_provider.dart';
+import 'package:prism/providers/activity_feed_provider.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/utils/constants.dart';
@@ -161,7 +161,7 @@ class RetroactiveShareCard extends StatelessWidget {
                   ),
                   onPressed: () async {
                     HapticFeedback.mediumImpact();
-                    final provider = context.read<NotificationsProvider>();
+                    final provider = context.read<ActivityFeedProvider>();
                     final ok = await provider.acceptRetroactiveShare(
                       context: context,
                       userId: currentUserId,
@@ -183,7 +183,7 @@ class RetroactiveShareCard extends StatelessWidget {
                 TextButton(
                   onPressed: () async {
                     HapticFeedback.selectionClick();
-                    await context.read<NotificationsProvider>().markAsReadSingle(
+                    await context.read<ActivityFeedProvider>().markAsReadSingle(
                           notification.id,
                           currentUserId,
                           removeRetroactiveFromFeed: true,

@@ -17,7 +17,7 @@ import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/gallery_provider.dart';
 import 'package:prism/providers/profile_provider.dart';
 import 'package:prism/providers/sharing_provider.dart';
-import 'package:prism/providers/notifications_provider.dart';
+import 'package:prism/providers/activity_feed_provider.dart';
 import 'package:prism/screens/share_upload_screen.dart';
 import 'package:prism/screens/processing_screen.dart';
 import 'package:prism/screens/friends_screen.dart';
@@ -88,7 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
         context,
         listen: false,
       );
-      final notificationsProvider = Provider.of<NotificationsProvider>(
+      final activityFeedProvider = Provider.of<ActivityFeedProvider>(
         context,
         listen: false,
       );
@@ -105,10 +105,10 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         galleryProvider.fetchGallery(userId: authProvider.currentUser!.userId);
-        notificationsProvider.setUserContext(
+        activityFeedProvider.setUserContext(
           profilePicId: authProvider.currentUser!.profilePicId,
         );
-        notificationsProvider.fetchNotifications(
+        activityFeedProvider.refetch(
           authProvider.currentUser!.userId,
         );
 
@@ -1099,7 +1099,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<Widget> _defaultActions() {
     return [
-      Consumer<NotificationsProvider>(
+      Consumer<ActivityFeedProvider>(
         builder: (context, provider, child) {
           return IconButton(
             icon: Badge(

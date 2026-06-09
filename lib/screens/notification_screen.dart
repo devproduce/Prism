@@ -5,7 +5,7 @@ import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/widgets/activity_feed.dart';
 import 'package:prism/widgets/empty_state_widget.dart';
-import 'package:prism/providers/notifications_provider.dart';
+import 'package:prism/providers/activity_feed_provider.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/screens/friends_screen.dart';
@@ -59,7 +59,7 @@ class _NotificationScreenState extends State<NotificationScreen>
   Future<void> _loadNotifications() async {
     final auth = context.read<AuthProvider>();
     if (auth.currentUser == null) return;
-    final provider = context.read<NotificationsProvider>();
+    final provider = context.read<ActivityFeedProvider>();
     provider.setUserContext(profilePicId: auth.currentUser!.profilePicId);
     await provider.refetch(auth.currentUser!.userId);
     if (widget.highlightFriendRequests && mounted) {
@@ -69,7 +69,7 @@ class _NotificationScreenState extends State<NotificationScreen>
 
   Future<void> _handleAccept(String friendshipId) async {
     final auth = context.read<AuthProvider>();
-    final provider = context.read<NotificationsProvider>();
+    final provider = context.read<ActivityFeedProvider>();
     final userId = auth.currentUser?.userId;
     if (userId == null || !mounted) return;
 
@@ -80,7 +80,7 @@ class _NotificationScreenState extends State<NotificationScreen>
 
   Future<void> _handleDecline(String friendshipId) async {
     final auth = context.read<AuthProvider>();
-    final provider = context.read<NotificationsProvider>();
+    final provider = context.read<ActivityFeedProvider>();
     final userId = auth.currentUser?.userId;
     if (userId == null || !mounted) return;
 
@@ -118,7 +118,7 @@ class _NotificationScreenState extends State<NotificationScreen>
               pinned: true,
               floating: true,
               actions: [
-                Consumer<NotificationsProvider>(
+                Consumer<ActivityFeedProvider>(
                   builder: (context, provider, _) {
                     return IconButton(
                       icon: Icon(
@@ -146,7 +146,7 @@ class _NotificationScreenState extends State<NotificationScreen>
             ),
           ];
         },
-        body: Consumer2<NotificationsProvider, AuthProvider>(
+        body: Consumer2<ActivityFeedProvider, AuthProvider>(
           builder: (context, provider, authProvider, _) {
             if (provider.isLoading && provider.activities.isEmpty) {
               return const Center(

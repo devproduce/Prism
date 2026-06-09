@@ -5,12 +5,12 @@ import 'package:prism/models/friend_model.dart';
 import 'package:prism/models/notification_model.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-/// Unified activity feed state — ports notifications-context.tsx merge logic.
+/// Unified activity feed state - ports notifications-context.tsx merge logic.
 class ActivityFeedProvider with ChangeNotifier {
   final ApiClient _apiClient = ApiClient();
 
   List<NotificationModel> _notifications = [];
-  List<FriendRequest> _pendingRequests = [];
+  List<FriendRequest> _receivedRequests = [];
   List<FriendRequest> _sentRequests = [];
   List<ActivityItem> _activities = [];
   String? _currentUserProfilePicId;
@@ -20,27 +20,22 @@ class ActivityFeedProvider with ChangeNotifier {
 
   List<NotificationModel> get notifications => _notifications;
 
-  List<NotificationModel> get activityFeedNotifications => _notifications
-      .where((n) => !(n.type == 'retroactive_share_prompt' && n.isRead))
-      .toList();
-
   List<ActivityItem> get activities => _activities;
 
-  List<FriendRequest> get pendingRequests => _pendingRequests;
-  List<FriendRequest> get receivedRequests => _pendingRequests;
+  List<FriendRequest> get receivedRequests => _receivedRequests;
   List<FriendRequest> get sentRequests => _sentRequests;
 
   bool get isLoading => _isLoading;
   String? get error => _error;
 
   int get unreadCount =>
-      _notifications.where((n) => !n.isRead).length + _pendingRequests.length;
+      _notifications.where((n) => !n.isRead).length + _receivedRequests.length;
 
   List<FriendRequest> friendRequestsPreview({int limit = 3}) {
-    if (_pendingRequests.length <= limit) {
-      return List<FriendRequest>.from(_pendingRequests);
+    if (_receivedRequests.length <= limit) {
+      return List<FriendRequest>.from(_receivedRequests);
     }
-    return _pendingRequests.sublist(0, limit);
+    return _receivedRequests.sublist(0, limit);
   }
 
   Map<ActivityTimeBucket, List<ActivityItem>> get groupedActivities =>
@@ -72,7 +67,7 @@ class ActivityFeedProvider with ChangeNotifier {
     _activities = ActivityItemBuilder.build(
       notifications: _notifications,
       sentRequests: _sentRequests,
-      receivedRequests: _pendingRequests,
+      receivedRequests: _receivedRequests,
       currentUserProfilePicId: _currentUserProfilePicId,
     );
   }
@@ -82,9 +77,8 @@ class ActivityFeedProvider with ChangeNotifier {
     return status.isGranted;
   }
 
-  Future<void> refetch(String userId) => fetchNotifications(userId);
+  Future<void> refetch(String userId) async {
 
-  Future<void> fetchNotifications(String userId) async {
     try {
       _setLoading(true);
       _setError(null);
@@ -108,7 +102,7 @@ class ActivityFeedProvider with ChangeNotifier {
           .where((n) => !(n.type == 'retroactive_share_prompt' && n.isRead))
           .toList();
 
-      _pendingRequests =
+      _receivedRequests =
           pendingData.map((json) => FriendRequest.fromJson(json)).toList();
 
       _sentRequests =
@@ -125,7 +119,6 @@ class ActivityFeedProvider with ChangeNotifier {
     }
   }
 
-  Future<void> refresh(String userId) => refetch(userId);
 
   Future<bool> acceptFriendRequest(
     String friendshipId,
@@ -216,7 +209,7 @@ class ActivityFeedProvider with ChangeNotifier {
   }
 
   void _optimisticallyRemoveReceivedRequest(String friendshipId) {
-    _pendingRequests.removeWhere((r) => r.friendshipId == friendshipId);
+    _receivedRequests.removeWhere((r) => r.friendshipId == friendshipId);
     _rebuildActivities();
     notifyListeners();
   }
@@ -329,44 +322,6 @@ class ActivityFeedProvider with ChangeNotifier {
           type: 'error',
         );
       }
-      return false;
-    }
-  }
-
-  Future<bool> sendFriendRequestFromNotification({
-    required BuildContext context,
-    required String userId,
-    required String username,
-  }) async {
-    try {
-      _setError(null);
-      await _apiClient.sendFriendRequest(
-        userId: userId,
-        targetUsername: username,
-      );
-      if (context.mounted) {
-        showInAppNotification(
-          context,
-          title: 'Request sent',
-          message: 'Friend request sent to @$username',
-          type: 'success',
-        );
-      }
-      await refetch(userId);
-      return true;
-    } on ApiException catch (e) {
-      _setError(e.message);
-      if (context.mounted) {
-        showInAppNotification(
-          context,
-          title: 'Error',
-          message: e.message,
-          type: 'error',
-        );
-      }
-      return false;
-    } catch (e) {
-      _setError('Failed to send friend request: ${e.toString()}');
       return false;
     }
   }
