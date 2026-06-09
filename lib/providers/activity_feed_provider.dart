@@ -4,6 +4,7 @@ import 'package:prism/models/activity_item.dart';
 import 'package:prism/models/friend_model.dart';
 import 'package:prism/models/notification_model.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:prism/utils/in_app_notification.dart';
 
 /// Unified activity feed state - ports notifications-context.tsx merge logic.
 class ActivityFeedProvider with ChangeNotifier {
@@ -137,7 +138,7 @@ class ActivityFeedProvider with ChangeNotifier {
       await refetch(userId);
 
       if (context.mounted) {
-        showInAppNotification(
+        InAppNotification.show(
           context,
           title: 'Success',
           message: 'Friend request accepted',
@@ -149,7 +150,7 @@ class ActivityFeedProvider with ChangeNotifier {
       _setError(e.message);
       await refetch(userId);
       if (context.mounted) {
-        showInAppNotification(
+        InAppNotification.show(
           context,
           title: 'Error',
           message: e.message,
@@ -161,7 +162,7 @@ class ActivityFeedProvider with ChangeNotifier {
       _setError('Failed to accept friend request: ${e.toString()}');
       await refetch(userId);
       if (context.mounted) {
-        showInAppNotification(
+        InAppNotification.show(
           context,
           title: 'Error',
           message: 'Failed to accept request',
@@ -189,7 +190,7 @@ class ActivityFeedProvider with ChangeNotifier {
       await refetch(userId);
 
       if (context.mounted) {
-        showInAppNotification(
+        InAppNotification.show(
           context,
           title: 'Rejected',
           message: 'Friend request rejected',
@@ -290,7 +291,7 @@ class ActivityFeedProvider with ChangeNotifier {
 
       if (context.mounted) {
         final count = response['shared_count'] as int? ?? imageIds.length;
-        showInAppNotification(
+        InAppNotification.show(
           context,
           title: 'Memories shared',
           message:
@@ -302,7 +303,7 @@ class ActivityFeedProvider with ChangeNotifier {
     } on ApiException catch (e) {
       _setError(e.message);
       if (context.mounted) {
-        showInAppNotification(
+        InAppNotification.show(
           context,
           title: 'Could not share memories',
           message: e.message.contains('No valid pending')
@@ -315,7 +316,7 @@ class ActivityFeedProvider with ChangeNotifier {
     } catch (e) {
       _setError('Failed to accept retroactive share: ${e.toString()}');
       if (context.mounted) {
-        showInAppNotification(
+        InAppNotification.show(
           context,
           title: 'Error',
           message: 'Failed to share memories. Please try again.',
@@ -355,61 +356,5 @@ class ActivityFeedProvider with ChangeNotifier {
     } catch (e) {
       debugPrint('Failed to mark all as read: $e');
     }
-  }
-
-  void showInAppNotification(
-    BuildContext context, {
-    required String title,
-    required String message,
-    required String type,
-  }) {
-    Color backgroundColor;
-    IconData icon;
-
-    switch (type) {
-      case 'success':
-        backgroundColor = Colors.green;
-        icon = Icons.check_circle;
-        break;
-      case 'error':
-        backgroundColor = Colors.red;
-        icon = Icons.error;
-        break;
-      case 'info':
-      default:
-        backgroundColor = Colors.blue;
-        icon = Icons.info;
-        break;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(icon, color: Colors.white),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  Text(message, style: const TextStyle(color: Colors.white)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: backgroundColor,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 3),
-      ),
-    );
   }
 }

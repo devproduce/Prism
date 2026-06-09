@@ -952,54 +952,6 @@ class ApiClient {
     }
   }
 
-  /// Accept friend request from notification
-  /// POST /notifications/{notification_id}/accept
-  Future<Map<String, dynamic>> acceptFriendRequestFromNotification({
-    required String notificationId,
-    required String userId,
-  }) async {
-    try {
-      final uri = Uri.parse(
-        '${ApiConstants.baseUrl}/notifications/$notificationId/accept',
-      );
-      final response = await _client.post(
-        uri,
-        headers: _getHeaders(),
-        body: json.encode({'user_id': userId}),
-      );
-
-      final data = _handleResponse(response);
-      return data as Map<String, dynamic>;
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException('Failed to accept friend request: ${e.toString()}');
-    }
-  }
-
-  /// Reject friend request from notification
-  /// POST /notifications/{notification_id}/reject
-  Future<Map<String, dynamic>> rejectFriendRequestFromNotification({
-    required String notificationId,
-    required String userId,
-  }) async {
-    try {
-      final uri = Uri.parse(
-        '${ApiConstants.baseUrl}/notifications/$notificationId/reject',
-      );
-      final response = await _client.post(
-        uri,
-        headers: _getHeaders(),
-        body: json.encode({'user_id': userId}),
-      );
-
-      final data = _handleResponse(response);
-      return data as Map<String, dynamic>;
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException('Failed to reject friend request: ${e.toString()}');
-    }
-  }
-
   /// Get blocked users
   /// GET /friends/blocked
   Future<List<dynamic>> getBlockedUsers({required String userId}) async {

@@ -72,14 +72,17 @@ class EmptyStateWidget extends StatelessWidget {
     );
   }
 
-  /// Creates an empty state for no notifications
-  factory EmptyStateWidget.noNotifications() {
+  /// Creates an empty state for the activity feed (matches web copy).
+  factory EmptyStateWidget.noActivity() {
     return const EmptyStateWidget(
       icon: Icons.notifications_off_outlined,
-      title: 'No Notifications',
-      message: 'When you have new activity, you\'ll see it here.',
+      title: 'No new activity',
+      message: 'When something happens, you\'ll see it here.',
     );
   }
+
+  /// @deprecated Use [noActivity] for the unified activity feed screen.
+  factory EmptyStateWidget.noNotifications() => EmptyStateWidget.noActivity();
 
   /// Creates an empty state for no collections
   factory EmptyStateWidget.noCollections({VoidCallback? onCreateCollection}) {

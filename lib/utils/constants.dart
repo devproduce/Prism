@@ -44,9 +44,5 @@ class ApiConstants {
 
   // Notifications endpoints
   static const String getNotifications = '/notifications';
-  static const String acceptNotification =
-      '/notifications/'; // + notification_id + /accept
-  static const String rejectNotification =
-      '/notifications/'; // + notification_id + /reject
   static const String markNotificationsRead = '/notifications/mark-read';
 }

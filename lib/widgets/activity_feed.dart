@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:prism/models/activity_item.dart';
 import 'package:prism/models/friend_model.dart';
-import 'package:prism/screens/friends_screen.dart';
+import 'package:prism/screens/notification_screen.dart';
 import 'package:prism/services/fcm_navigation_service.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
@@ -13,7 +13,7 @@ import 'package:prism/widgets/activity_title.dart';
 import 'package:prism/widgets/friend_requests_header.dart';
 import 'package:prism/widgets/retroactive_share_card.dart';
 
-/// Ports activity-feed.tsx Ã¢â‚¬â€ unified grouped activity timeline.
+/// Ports activity-feed.tsx ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â unified grouped activity timeline.
 class ActivityFeed extends StatelessWidget {
   final List<ActivityItem> activities;
   final Map<ActivityTimeBucket, List<ActivityItem>> groupedActivities;
@@ -67,8 +67,8 @@ class ActivityFeed extends StatelessWidget {
                 () {
                   Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => const FriendsScreen(
-                        openRequestsDirectly: true,
+                      builder: (_) => const NotificationScreen(
+                        highlightFriendRequests: true,
                       ),
                     ),
                   );

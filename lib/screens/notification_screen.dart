@@ -8,8 +8,6 @@ import 'package:prism/widgets/empty_state_widget.dart';
 import 'package:prism/providers/activity_feed_provider.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
-import 'package:prism/screens/friends_screen.dart';
-
 class NotificationScreen extends StatefulWidget {
   final bool highlightFriendRequests;
 
@@ -184,7 +182,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                 provider.activities.isNotEmpty || provider.receivedRequests.isNotEmpty;
 
             if (!hasContent) {
-              return EmptyStateWidget.noNotifications();
+              return EmptyStateWidget.noActivity();
             }
 
             return RefreshIndicator(
@@ -210,15 +208,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                     friendRequestsPreview: provider.friendRequestsPreview(),
                     onAccept: _handleAccept,
                     onDecline: _handleDecline,
-                    onNavigateToRequests: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const FriendsScreen(
-                            openRequestsDirectly: true,
-                          ),
-                        ),
-                      );
-                    },
+                    onNavigateToRequests: _scrollToTop,
                     onRetroactiveSuccess: _loadNotifications,
                   ),
                 ],
