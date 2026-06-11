@@ -1113,7 +1113,7 @@ class ApiClient {
       final response = await http.Response.fromStream(streamedResponse);
 
       debugPrint('✅ [ApiClient] Upload response: ${response.statusCode}');
-      debugPrint('   Body: ${response.body}');
+      _logExactBackendJson('POST /images/upload', response.body);
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1140,7 +1140,7 @@ class ApiClient {
       final response = await _client.get(uri, headers: _getHeaders());
 
       debugPrint('✅ [ApiClient] Batch status response: ${response.statusCode}');
-      debugPrint('   Body: ${response.body}');
+      _logExactBackendJson('GET /images/batch/$batchId', response.body);
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1407,6 +1407,31 @@ class ApiClient {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to update sync status: ${e.toString()}');
     }
+  }
+
+  /// Logs the exact backend JSON without [debugPrint] line truncation.
+  void _logExactBackendJson(String label, String body) {
+    if (!kDebugMode) return;
+
+    debugPrint('┌─── BACKEND JSON: $label ───');
+    try {
+      final decoded = jsonDecode(body);
+      const encoder = JsonEncoder.withIndent('  ');
+      final pretty = encoder.convert(decoded);
+      const chunkSize = 900;
+      for (var i = 0; i < pretty.length; i += chunkSize) {
+        final end = i + chunkSize < pretty.length ? i + chunkSize : pretty.length;
+        debugPrint(pretty.substring(i, end));
+      }
+    } catch (e) {
+      debugPrint('(could not parse as JSON: $e)');
+      const chunkSize = 900;
+      for (var i = 0; i < body.length; i += chunkSize) {
+        final end = i + chunkSize < body.length ? i + chunkSize : body.length;
+        debugPrint(body.substring(i, end));
+      }
+    }
+    debugPrint('└─── END BACKEND JSON: $label ───');
   }
 
   // Dispose method to close the client

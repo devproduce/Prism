@@ -15,7 +15,8 @@ import 'package:prism/widgets/recipient_selector_sheet.dart';
 import 'package:prism/widgets/review/review_bottom_bar.dart';
 import 'package:prism/widgets/review/review_no_face_send_all.dart';
 import 'package:prism/widgets/review/review_person_section.dart';
-import 'package:prism/widgets/review/review_suggestions_strip.dart';
+import 'package:prism/widgets/review/review_found_contacts_section.dart';
+import 'package:prism/widgets/review/review_unknown_faces_section.dart';
 import 'package:prism/widgets/shimmer_placeholder.dart';
 
 class ConfirmSharingScreen extends StatefulWidget {
@@ -31,7 +32,7 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
   bool _isSharing = false;
   bool _isLoadingBatch = false;
   bool _expandedInitialized = false;
-  final ScrollController _suggestionsScrollController = ScrollController();
+  int _lastAppliedUnknownCount = -1;
   final Set<String> _expandedGroupIds = {};
 
   @override
@@ -41,11 +42,6 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadReviewContext());
   }
 
-  @override
-  void dispose() {
-    _suggestionsScrollController.dispose();
-    super.dispose();
-  }
 
   Future<void> _loadReviewContext() async {
     final userId = context.read<AuthProvider>().currentUser?.userId;
@@ -53,7 +49,35 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
 
     final friendsProvider = context.read<FriendsProvider>();
     await friendsProvider.syncFriendshipsIfStale(userId);
+
     await friendsProvider.loadRecommendations(userId);
+
+    await friendsProvider.loadBatchUnknownFaces(userId);
+    if (!mounted) return;
+    _applyDiscoveryEnrichment();
+  }
+
+  void _applyDiscoveryEnrichment() {
+    final userId = context.read<AuthProvider>().currentUser?.userId;
+    final sharingProvider = context.read<SharingProvider>();
+    final friendsProvider = context.read<FriendsProvider>();
+    final batch = sharingProvider.batchStatus;
+
+    if (userId == null || batch == null || !batch.isCompleted) return;
+
+    final beforeUnknowns = batch.unknowns.length;
+    sharingProvider.applyDiscoveryEnrichment(
+      friendUserIds: friendsProvider.friends.map((friend) => friend.userId).toSet(),
+      onPlatformUsers: friendsProvider.contactSyncResult?.onPlatform ?? const [],
+    );
+
+    final afterUnknowns = sharingProvider.batchStatus?.unknowns.length ?? beforeUnknowns;
+    if (afterUnknowns != _lastAppliedUnknownCount) {
+      _lastAppliedUnknownCount = afterUnknowns;
+      if (mounted) {
+        setState(() => _ensureDefaultExpanded(sharingProvider));
+      }
+    }
   }
 
   Future<void> _loadBatchStatusIfNeeded() async {
@@ -97,11 +121,11 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
   void _ensureDefaultExpanded(SharingProvider sharingProvider) {
     if (_expandedInitialized) return;
 
-    final topGroup = sharingProvider.friendPhotoGroups.firstOrNull;
-    if (topGroup == null) return;
+    final defaultGroup = sharingProvider.reviewLayout?.defaultExpandedGroup;
+    if (defaultGroup == null) return;
 
     _expandedInitialized = true;
-    _expandedGroupIds.add(topGroup.id);
+    _expandedGroupIds.add(defaultGroup.id);
   }
 
   Future<void> _exitReview() async {
@@ -180,15 +204,6 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
     );
   }
 
-  void _scrollSuggestionsToEnd() {
-    if (!_suggestionsScrollController.hasClients) return;
-    _suggestionsScrollController.animateTo(
-      _suggestionsScrollController.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 350),
-      curve: Curves.easeOut,
-    );
-  }
-
   void _toggleGroup(String groupId) {
     HapticFeedback.selectionClick();
     setState(() {
@@ -228,11 +243,15 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
     final sharingProvider = context.watch<SharingProvider>();
     final friendsProvider = context.watch<FriendsProvider>();
     final batchStatus = sharingProvider.batchStatus;
+    final layout = sharingProvider.reviewLayout;
 
-    if (batchStatus != null && !_expandedInitialized) {
+    if (batchStatus != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _expandedInitialized) return;
-        setState(() => _ensureDefaultExpanded(sharingProvider));
+        if (!mounted) return;
+        if (batchStatus.isCompleted) _applyDiscoveryEnrichment();
+        if (!_expandedInitialized) {
+          setState(() => _ensureDefaultExpanded(sharingProvider));
+        }
       });
     }
 
@@ -262,11 +281,16 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
       );
     }
 
-    final friendGroups = sharingProvider.friendPhotoGroups;
-    final noFaceGroup = sharingProvider.noFaceGroup;
-    final suggestions = friendsProvider.visibleBatchSuggestions(
-      sharingProvider.batchContactSuggestions,
-    );
+    final userId = context.read<AuthProvider>().currentUser?.userId;
+    final foundContacts = userId == null
+        ? const <ReviewSuggestion>[]
+        : friendsProvider.mergeBatchSuggestions(
+            fromBatch: sharingProvider.batchContactSuggestions,
+            batch: batchStatus,
+            currentUserId: userId,
+          );
+    final sections = layout?.orderedSections ?? const <ReviewPersonGroup>[];
+    final unknownFaces = batchStatus.unknowns;
 
     return PopScope(
       canPop: false,
@@ -289,15 +313,13 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
             Expanded(
               child: CustomScrollView(
                 slivers: [
-                  if (suggestions.isNotEmpty)
+                  if (foundContacts.isNotEmpty)
                     SliverToBoxAdapter(
                       child: Center(
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 800),
-                          child: ReviewSuggestionsStrip(
-                            suggestions: suggestions,
-                            scrollController: _suggestionsScrollController,
-                            onViewAll: _scrollSuggestionsToEnd,
+                          child: ReviewFoundContactsSection(
+                            contacts: foundContacts,
                             onAddTap: _handleAddSuggestion,
                             statusFor: (userId, username) =>
                                 friendsProvider.friendshipDisplayStatusFor(
@@ -308,47 +330,45 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
                         ),
                       ),
                     ),
-                  if (friendGroups.isEmpty && noFaceGroup == null)
-                    const SliverToBoxAdapter(
-                      child: _EmptyReviewState(),
-                    ),
-                  SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) => Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 800),
-                          child: _ReviewGroupTile(
-                            group: friendGroups[index],
-                            isExpanded:
-                                _expandedGroupIds.contains(friendGroups[index].id),
-                            onToggle: () => _toggleGroup(friendGroups[index].id),
-                            onImageTap: _showRecipientSelector,
-                            headersForUrl: _headersForUrl,
-                            recipientCountForImage:
-                                sharingProvider.recipientCountForImage,
-                          ),
-                        ),
-                      ),
-                      childCount: friendGroups.length,
-                    ),
-                  ),
-                  if (noFaceGroup != null)
+                  if (unknownFaces.isNotEmpty)
                     SliverToBoxAdapter(
                       child: Center(
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 800),
-                          child: _ReviewGroupTile(
-                            group: noFaceGroup,
-                            isExpanded:
-                                _expandedGroupIds.contains(noFaceGroup.id),
-                            onToggle: () => _toggleGroup(noFaceGroup.id),
-                            onImageTap: _showRecipientSelector,
-                            headersForUrl: _headersForUrl,
-                            recipientCountForImage:
-                                sharingProvider.recipientCountForImage,
-                            expandedHeaderExtra: const ReviewNoFaceSendAllTile(),
+                          child: ReviewUnknownFacesSection(
+                            unknowns: unknownFaces,
                           ),
                         ),
+                      ),
+                    ),
+                  if (!(layout?.hasPhotos ?? false))
+                    const SliverToBoxAdapter(child: _NoPhotosState())
+                  else
+                    SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final group = sections[index];
+                          return Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 800),
+                              child: ReviewPersonSection(
+                                group: group,
+                                isExpanded:
+                                    _expandedGroupIds.contains(group.id),
+                                onToggle: () => _toggleGroup(group.id),
+                                onImageTap: _showRecipientSelector,
+                                fixUrl: MediaUrlUtils.resolve,
+                                headersForUrl: _headersForUrl,
+                                recipientCountForImage:
+                                    sharingProvider.recipientCountForImage,
+                                expandedHeaderExtra: group.isNoFace
+                                    ? const ReviewNoFaceSendAllTile()
+                                    : null,
+                              ),
+                            ),
+                          );
+                        },
+                        childCount: sections.length,
                       ),
                     ),
                   const SliverToBoxAdapter(child: SizedBox(height: 16)),
@@ -377,58 +397,24 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
   }
 }
 
-class _ReviewGroupTile extends StatelessWidget {
-  final ReviewPersonGroup group;
-  final bool isExpanded;
-  final VoidCallback onToggle;
-  final void Function(String imageId) onImageTap;
-  final Map<String, String>? Function(String? url) headersForUrl;
-  final int Function(String imageId) recipientCountForImage;
-  final Widget? expandedHeaderExtra;
-
-  const _ReviewGroupTile({
-    required this.group,
-    required this.isExpanded,
-    required this.onToggle,
-    required this.onImageTap,
-    required this.headersForUrl,
-    required this.recipientCountForImage,
-    this.expandedHeaderExtra,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ReviewPersonSection(
-      group: group,
-      isExpanded: isExpanded,
-      onToggle: onToggle,
-      onImageTap: onImageTap,
-      fixUrl: MediaUrlUtils.resolve,
-      headersForUrl: headersForUrl,
-      recipientCountForImage: recipientCountForImage,
-      expandedHeaderExtra: expandedHeaderExtra,
-    );
-  }
-}
-
-class _EmptyReviewState extends StatelessWidget {
-  const _EmptyReviewState();
+class _NoPhotosState extends StatelessWidget {
+  const _NoPhotosState();
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.all(32),
+      padding: const EdgeInsets.all(32),
       child: Center(
         child: Column(
           children: [
             Icon(
-              Icons.person_off_outlined,
+              Icons.photo_library_outlined,
               size: 48,
               color: PrismColors.secondaryText,
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             Text(
-              'No friends detected in these photos',
+              'No photos in this batch',
               style: PrismTextStyles.bodyMedium.copyWith(
                 color: PrismColors.secondaryText,
               ),

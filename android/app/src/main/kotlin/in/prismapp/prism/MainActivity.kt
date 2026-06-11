@@ -1,9 +1,14 @@
 package `in`.prismapp.prism
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.ContactsContract
+import android.telephony.SubscriptionManager
+import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -13,6 +18,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "in.prismapp.prism/share_handler"
+    private val DEVICE_PHONE_CHANNEL = "in.prismapp.prism/device_phone"
     private val STORAGE_PERMISSION_CODE = 1001
     private val TAG = "MainActivity"
     
@@ -39,6 +45,21 @@ class MainActivity : FlutterActivity() {
         // Handle initial intent
         handleIntent(intent)
         
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            DEVICE_PHONE_CHANNEL
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getProfilePhoneNumbers" -> {
+                    result.success(getProfilePhoneNumbers())
+                }
+                "getSimPhoneNumbers" -> {
+                    result.success(getSimPhoneNumbers())
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         methodChannel?.setMethodCallHandler { call, result ->
             Log.d(TAG, "MethodChannel call: ${call.method}")
             
@@ -243,6 +264,135 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Error getting processing state: ${e.message}")
             null
+        }
+    }
+
+    /**
+     * Android "Me" profile — separate from the regular phonebook list.
+     * Uses READ_CONTACTS permission already requested for contact sync.
+     */
+    private fun getProfilePhoneNumbers(): List<Map<String, String>> {
+        val numbers = mutableListOf<Map<String, String>>()
+        try {
+            val profileCursor = contentResolver.query(
+                ContactsContract.Profile.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.Contacts._ID,
+                    ContactsContract.Contacts.DISPLAY_NAME
+                ),
+                null,
+                null,
+                null
+            ) ?: return numbers
+
+            if (!profileCursor.moveToFirst()) {
+                profileCursor.close()
+                return numbers
+            }
+
+            val contactId = profileCursor.getString(
+                profileCursor.getColumnIndexOrThrow(ContactsContract.Contacts._ID)
+            )
+            val displayName = profileCursor.getString(
+                profileCursor.getColumnIndexOrThrow(ContactsContract.Contacts.DISPLAY_NAME)
+            ) ?: "Me"
+            profileCursor.close()
+
+            val phoneCursor = contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.NUMBER,
+                    ContactsContract.CommonDataKinds.Phone.NORMALIZED_NUMBER
+                ),
+                "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
+                arrayOf(contactId),
+                null
+            ) ?: return numbers
+
+            phoneCursor.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val number = cursor.getString(
+                        cursor.getColumnIndexOrThrow(
+                            ContactsContract.CommonDataKinds.Phone.NUMBER
+                        )
+                    )
+                    if (!number.isNullOrBlank()) {
+                        numbers.add(
+                            mapOf(
+                                "number" to number,
+                                "displayName" to displayName,
+                                "source" to "android_profile"
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Profile phone read failed: ${e.message}")
+        }
+        return numbers
+    }
+
+    @SuppressLint("MissingPermission", "HardwareIds")
+    private fun getSimPhoneNumbers(): List<Map<String, String>> {
+        val numbers = mutableListOf<Map<String, String>>()
+        if (!hasPhonePermission()) return numbers
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                val subscriptionManager =
+                    getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE)
+                        as SubscriptionManager
+                val subscriptions = subscriptionManager.activeSubscriptionInfoList
+                    ?: emptyList()
+
+                for (subscription in subscriptions) {
+                    val number = subscription.number
+                    if (!number.isNullOrBlank()) {
+                        val label = subscription.displayName?.toString()
+                            ?: "SIM ${subscription.simSlotIndex + 1}"
+                        numbers.add(
+                            mapOf(
+                                "number" to number,
+                                "displayName" to label,
+                                "source" to "sim"
+                            )
+                        )
+                    }
+                }
+            }
+
+            if (numbers.isEmpty()) {
+                val telephonyManager =
+                    getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+                val line1 = telephonyManager.line1Number
+                if (!line1.isNullOrBlank()) {
+                    numbers.add(
+                        mapOf(
+                            "number" to line1,
+                            "displayName" to "Me",
+                            "source" to "sim"
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "SIM phone read failed: ${e.message}")
+        }
+        return numbers
+    }
+
+    private fun hasPhonePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_PHONE_NUMBERS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_PHONE_STATE
+            ) == PackageManager.PERMISSION_GRANTED
         }
     }
 

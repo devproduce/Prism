@@ -220,11 +220,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
           ),
 
           if (_searchController.text.isEmpty)
-            UnknownFacesStrip(
-              faces: friendsProvider
-                      .contactSyncResult?.unknownFaceRecommendations ??
-                  const [],
-            ),
+            UnknownFacesStrip(faces: friendsProvider.displayUnknownFaces),
 
           Expanded(
             child: _searchController.text.isNotEmpty
@@ -869,11 +865,16 @@ class _FriendsScreenState extends State<FriendsScreen> {
     final isSyncing = provider.isSyncingContacts;
     final isLoadingRecs = provider.isLoadingRecommendations;
 
+    final side = _discoverSidePadding(context);
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+      padding: EdgeInsets.fromLTRB(side, 8, side, 0),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: _discoverContentWidth(context)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
           // ── Sync Banner ──────────────────────────────────────────
           if (!provider.hasSynced) ...[
             PrismCard(
@@ -926,8 +927,23 @@ class _FriendsScreenState extends State<FriendsScreen> {
                               onPressed: userId == null
                                   ? null
                                   : () async {
+                                      final user =
+                                          authProvider.currentUser;
+                                      final ownerName = user != null
+                                          ? '${user.firstName} ${user.lastName ?? ''}'
+                                              .trim()
+                                          : '';
                                       final res = await provider
-                                          .syncAndGetRecommendations(userId);
+                                          .syncAndGetRecommendations(
+                                        userId,
+                                        accountCountryCode:
+                                            user?.countryCode,
+                                        accountPhone: user?.phoneNumber,
+                                        accountDisplayName:
+                                            ownerName.isNotEmpty
+                                                ? ownerName
+                                                : user?.username,
+                                      );
                                       if (!mounted) return;
                                       if (res == null) {
                                         ErrorHandler.showErrorSnackbar(
@@ -988,13 +1004,28 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 ),
               ),
           ],
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
 
   /// "People You May Know" sliver — uses SliverChildListDelegate so Flutter
   /// knows the exact scroll extent and can lazily dispose off-screen renders.
+  double _discoverSidePadding(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    if (width < 360) return 12;
+    if (width <= 720) return 16;
+    return ((width - 640) / 2).clamp(16, 80);
+  }
+
+  double _discoverContentWidth(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final side = _discoverSidePadding(context);
+    return width - (side * 2);
+  }
+
   Widget _buildOnPlatformSliver(
     FriendsProvider provider,
     AuthProvider authProvider,
@@ -1004,13 +1035,22 @@ class _FriendsScreenState extends State<FriendsScreen> {
       return const SliverToBoxAdapter(child: SizedBox.shrink());
     }
 
+    final side = _discoverSidePadding(context);
+
     return SliverPadding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      padding: EdgeInsets.fromLTRB(side, 10, side, 8),
       sliver: SliverList(
         delegate: SliverChildListDelegate(
           suggestions.map((user) => Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: _buildOnPlatformCard(user, provider, authProvider),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: _discoverContentWidth(context),
+                ),
+                child: _buildOnPlatformCard(user, provider, authProvider),
+              ),
+            ),
           )).toList(),
           addRepaintBoundaries: true,
         ),
@@ -1156,7 +1196,19 @@ class _FriendsScreenState extends State<FriendsScreen> {
     FriendsProvider provider,
     AuthProvider authProvider,
   ) {
-    final isFriend = provider.friends.any((f) => f.username == user.username);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final isCompact = screenWidth < 380;
+    final avatarRadius = isCompact ? 20.0 : 24.0;
+    final cardPaddingH = isCompact ? 10.0 : 14.0;
+    final cardPaddingV = isCompact ? 10.0 : 12.0;
+
+    final status = provider.friendshipDisplayStatusFor(
+      userId: user.userId,
+      username: user.username,
+    );
+    final displayName = user.contactName?.trim().isNotEmpty == true
+        ? user.contactName!.trim()
+        : '@${user.username}';
 
     return PrismCard(
       padding: EdgeInsets.zero,
@@ -1174,109 +1226,136 @@ class _FriendsScreenState extends State<FriendsScreen> {
           );
         },
         borderRadius: BorderRadius.circular(16),
-        child: ListTile(
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: CircleAvatar(
-          backgroundColor: PrismColors.inputGray,
-          backgroundImage: user.profilePictureUrl.isNotEmpty
-              ? CachedNetworkImageProvider(user.profilePictureUrl)
-              : null,
-          child: user.profilePictureUrl.isEmpty
-              ? Text(
-                  user.username[0].toUpperCase(),
-                  style: const TextStyle(color: PrismColors.white),
-                )
-              : null,
-        ),
-        title: Text('@${user.username}', style: PrismTextStyles.bodyLarge),
-        subtitle: user.mutualContactCount > 0
-            ? Row(
-                children: [
-                  const Icon(
-                    Icons.people_outline_rounded,
-                    size: 13,
-                    color: PrismColors.secondaryText,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${user.mutualContactCount} mutual contact${user.mutualContactCount > 1 ? 's' : ''}',
-                    style: PrismTextStyles.bodySmall.copyWith(
-                      color: PrismColors.secondaryText,
-                    ),
-                  ),
-                ],
-              )
-            : null,
-        trailing: isFriend
-            ? const Icon(
-                Icons.check_circle_rounded,
-                color: PrismColors.successGreen,
-              )
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: 'Dismiss suggestion',
-                    icon: const Icon(
-                      Icons.close_rounded,
-                      color: PrismColors.secondaryText,
-                      size: 20,
-                    ),
-                    onPressed: () async {
-                      if (authProvider.currentUser == null) return;
-                      HapticFeedback.selectionClick();
-                      await provider.dismissRecommendation(
-                        authProvider.currentUser!.userId,
-                        user.userId,
-                      );
-                    },
-                  ),
-                  SizedBox(
-                    height: 32,
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        if (authProvider.currentUser != null) {
-                          final ok = await provider.sendFriendRequest(
-                            authProvider.currentUser!.userId,
-                            user.username,
-                          );
-                          if (ok && context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Request sent to @${user.username}',
-                                  style: PrismTextStyles.bodySmall.copyWith(
-                                    color: PrismColors.black,
-                                  ),
-                                ),
-                                backgroundColor: PrismColors.prismYellow,
-                                behavior: SnackBarBehavior.floating,
-                                duration: const Duration(seconds: 2),
-                              ),
-                            );
-                          }
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: PrismColors.prismYellow,
-                        foregroundColor: PrismColors.black,
-                        elevation: 0,
-                        shape: const StadiumBorder(),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                      ),
-                      child: const Text(
-                        'Add',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: PrismColors.black,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: cardPaddingH,
+            vertical: cardPaddingV,
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: avatarRadius,
+                backgroundColor: PrismColors.inputGray,
+                backgroundImage: user.profilePictureUrl.isNotEmpty
+                    ? CachedNetworkImageProvider(user.profilePictureUrl)
+                    : null,
+                child: user.profilePictureUrl.isEmpty
+                    ? Text(
+                        user.username.isNotEmpty
+                            ? user.username[0].toUpperCase()
+                            : '?',
+                        style: const TextStyle(color: PrismColors.white),
+                      )
+                    : null,
               ),
+              SizedBox(width: isCompact ? 10 : 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      displayName,
+                      style: PrismTextStyles.bodyLarge.copyWith(
+                        fontSize: isCompact ? 14 : 16,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (user.contactName?.trim().isNotEmpty == true) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '@${user.username}',
+                        style: PrismTextStyles.bodySmall.copyWith(
+                          color: PrismColors.secondaryText,
+                          fontSize: isCompact ? 11 : 12,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    if (user.mutualContactCount > 0) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.people_outline_rounded,
+                            size: isCompact ? 12 : 13,
+                            color: PrismColors.secondaryText,
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              '${user.mutualContactCount} mutual contact${user.mutualContactCount > 1 ? 's' : ''}',
+                              style: PrismTextStyles.bodySmall.copyWith(
+                                color: PrismColors.secondaryText,
+                                fontSize: isCompact ? 11 : 12,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (status != FriendshipDisplayStatus.friend &&
+                  status != FriendshipDisplayStatus.pendingSent)
+                IconButton(
+                  tooltip: 'Dismiss suggestion',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(
+                    minWidth: isCompact ? 32 : 40,
+                    minHeight: isCompact ? 32 : 40,
+                  ),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: PrismColors.secondaryText,
+                    size: isCompact ? 18 : 20,
+                  ),
+                  onPressed: () async {
+                    if (authProvider.currentUser == null) return;
+                    HapticFeedback.selectionClick();
+                    await provider.dismissRecommendation(
+                      authProvider.currentUser!.userId,
+                      user.userId,
+                    );
+                  },
+                ),
+              FriendshipActionPill(
+                status: status,
+                style: isCompact
+                    ? FriendshipActionStyle.compact
+                    : FriendshipActionStyle.pill,
+                onAddTap: status == FriendshipDisplayStatus.none
+                    ? () async {
+                        if (authProvider.currentUser == null) return;
+                        final ok = await provider.sendFriendRequest(
+                          authProvider.currentUser!.userId,
+                          user.username,
+                        );
+                        if (ok && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Request sent to @${user.username}',
+                                style: PrismTextStyles.bodySmall.copyWith(
+                                  color: PrismColors.black,
+                                ),
+                              ),
+                              backgroundColor: PrismColors.prismYellow,
+                              behavior: SnackBarBehavior.floating,
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      }
+                    : null,
+              ),
+            ],
+          ),
         ),
       ),
     );

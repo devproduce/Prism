@@ -75,14 +75,28 @@ class ReviewPersonSection extends StatelessWidget {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              group.photoCountLabel,
+                              group.subtitle ?? group.photoCountLabel,
                               style: PrismTextStyles.bodySmall.copyWith(
-                                color: PrismColors.prismYellow,
+                                color: group.subtitle != null
+                                    ? PrismColors.secondaryText
+                                    : PrismColors.prismYellow,
                                 fontWeight: FontWeight.w600,
-                                letterSpacing: 0.8,
+                                letterSpacing: group.subtitle != null ? 0 : 0.8,
                                 fontSize: 11,
                               ),
                             ),
+                            if (group.subtitle != null) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                group.photoCountLabel,
+                                style: PrismTextStyles.bodySmall.copyWith(
+                                  color: PrismColors.prismYellow,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.8,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -151,6 +165,25 @@ class _SectionAvatar extends StatelessWidget {
         child: const Icon(
           Icons.photo_filter_rounded,
           color: PrismColors.electricCyan,
+          size: 22,
+        ),
+      );
+    }
+
+    if (group.isAssignRecipients) {
+      return Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: PrismColors.prismYellow.withValues(alpha: 0.12),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: PrismColors.prismYellow.withValues(alpha: 0.25),
+          ),
+        ),
+        child: const Icon(
+          Icons.person_add_alt_1_rounded,
+          color: PrismColors.prismYellow,
           size: 22,
         ),
       );

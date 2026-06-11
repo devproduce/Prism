@@ -3,9 +3,13 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:prism/api/api_client.dart';
 import 'package:prism/models/contact_sync_result.dart';
+import 'package:prism/models/resolved_phone.dart';
+import 'package:prism/services/device_phone_resolver.dart';
+import 'package:prism/utils/phone_parser.dart';
 
 class ContactService {
   final ApiClient _apiClient = ApiClient();
+  final DevicePhoneResolver _devicePhoneResolver = DevicePhoneResolver();
 
   /// Request contacts permission from the user
   Future<bool> requestContactsPermission() async {
@@ -55,30 +59,30 @@ class ContactService {
   /// for the V2 /contacts/sync bulk payload. Extracts ALL phone numbers from the contact.
   Iterable<Map<String, String>> _buildContactPayloads(Contact contact) {
     return contact.phones.map((phoneData) {
-      final phone = phoneData.number;
-      String countryCode = '91'; // Default country code for local numbers
-      String rawPhone = phone;
-
-      if (phone.startsWith('+')) {
-        final match = RegExp(r'^\+(\d{1,3})(.+)').firstMatch(phone);
-        if (match != null) {
-          countryCode = match.group(1)!;
-          rawPhone = match.group(2)!.replaceAll(RegExp(r'[^\d]'), '');
-        }
-      } else {
-        rawPhone = phone.replaceAll(RegExp(r'[^\d]'), '');
-        // Strip leading zero if present (common local formatting)
-        if (rawPhone.startsWith('0')) {
-          rawPhone = rawPhone.substring(1);
-        }
-      }
-
+      final parsed = PhoneParser.parse(phoneData.number);
       return {
         'display_name': contact.displayName,
-        'raw_phone': rawPhone,
-        'country_code': countryCode,
+        'raw_phone': parsed.rawPhone,
+        'country_code': parsed.countryCode,
       };
     });
+  }
+
+  /// Ensures the device owner's number is present in the sync payload.
+  /// The phonebook alone does not include Android's "Me" profile contact.
+  List<Map<String, String>> _withOwnerPhone(
+    List<Map<String, String>> payload,
+    ResolvedPhone ownerPhone,
+  ) {
+    final alreadyPresent = payload.any((entry) {
+      final cc = entry['country_code'] ?? '';
+      final raw = entry['raw_phone'] ?? '';
+      return '$cc$raw' == ownerPhone.dedupeKey;
+    });
+
+    if (alreadyPresent) return payload;
+
+    return [ownerPhone.toSyncPayload(), ...payload];
   }
 
   Future<ContactSyncResult> _enrichWithAllLocalContacts(ContactSyncResult result) async {
@@ -124,23 +128,38 @@ class ContactService {
   /// V2 Bulk sync: upload entire phonebook.
   /// We send the entire payload in a single request because /contacts/sync
   /// typically performs a full replacement on the backend.
-  Future<ContactSyncResult?> syncContactsToBackend(String userId) async {
+  Future<ContactSyncResult?> syncContactsToBackend(
+    String userId, {
+    String? accountCountryCode,
+    String? accountPhone,
+    String? accountDisplayName,
+  }) async {
     try {
       final contacts = await getPhoneContacts();
 
-      if (contacts.isEmpty) {
-        debugPrint('[ContactService] No contacts to sync');
-        return ContactSyncResult(onPlatform: [], notOnPlatform: []);
-      }
-
       // Build payload — expand all valid phone numbers for each contact
-      final payload = contacts
+      var payload = contacts
           .where((c) => c.phones.isNotEmpty && c.displayName.isNotEmpty)
           .expand(_buildContactPayloads)
           .toList();
 
+      final ownerPhone = await _devicePhoneResolver.resolve(
+        accountCountryCode: accountCountryCode,
+        accountPhone: accountPhone,
+        accountDisplayName: accountDisplayName,
+      );
+      if (ownerPhone != null) {
+        payload = _withOwnerPhone(payload, ownerPhone);
+      }
+
+      if (payload.isEmpty) {
+        debugPrint('[ContactService] No contacts or owner phone to sync');
+        return ContactSyncResult(onPlatform: [], notOnPlatform: []);
+      }
+
       debugPrint(
-        '[ContactService] Syncing ${payload.length} phone numbers via POST /contacts/sync',
+        '[ContactService] Syncing ${payload.length} phone numbers via POST /contacts/sync'
+        '${ownerPhone != null ? ' (owner via ${ownerPhone.source.name})' : ''}',
       );
 
       final result = await _apiClient.syncContacts(
@@ -165,17 +184,26 @@ class ContactService {
 
   /// Full sync flow: request permission → sync contacts → return result
   Future<ContactSyncResult?> requestPermissionAndSyncContacts(
-    String userId,
-  ) async {
+    String userId, {
+    String? accountCountryCode,
+    String? accountPhone,
+    String? accountDisplayName,
+  }) async {
     final hasPermission = await requestContactsPermission();
     if (!hasPermission) {
       debugPrint('[ContactService] Contacts permission denied');
       return null;
     }
-    return await syncContactsToBackend(userId);
+    return await syncContactsToBackend(
+      userId,
+      accountCountryCode: accountCountryCode,
+      accountPhone: accountPhone,
+      accountDisplayName: accountDisplayName,
+    );
   }
 
-  /// Fetch cached recommendations from the backend (no re-read of phonebook)
+  /// Fetch cached recommendations from the backend (no re-read of phonebook).
+  /// Same data source the web uses for on-platform / invite discovery.
   Future<ContactSyncResult?> getRecommendations(String userId) async {
     try {
       final result = await _apiClient.getContactRecommendations(userId: userId);
@@ -186,8 +214,31 @@ class ContactService {
     }
   }
 
-  /// Check if user has contacts synced in backend
+  /// True when the backend already has this user's phonebook on file.
+  /// Uses GET /contacts/sync-status (contact_count / last_synced_at).
+  Future<bool> hasContactsStoredOnBackend(String userId) async {
+    try {
+      final status = await _apiClient.getContactSyncStatus(userId: userId);
+      final count = (status['contact_count'] as num?)?.toInt() ?? 0;
+      final lastSynced = status['last_synced_at'];
+      final hasSyncedBefore = lastSynced != null &&
+          lastSynced.toString().isNotEmpty &&
+          lastSynced.toString() != 'null';
+      final stored = count > 0 || hasSyncedBefore;
+      debugPrint(
+        '[ContactService] Backend sync-status: count=$count '
+        'last_synced_at=$lastSynced stored=$stored',
+      );
+      return stored;
+    } catch (e) {
+      debugPrint('[ContactService] Error checking sync-status: $e');
+      return false;
+    }
+  }
+
+  /// Legacy check — prefer [hasContactsStoredOnBackend].
   Future<bool> hasContactsInBackend(String userId) async {
+    if (await hasContactsStoredOnBackend(userId)) return true;
     try {
       final contacts = await _apiClient.getContacts(userId: userId);
       return contacts.isNotEmpty;

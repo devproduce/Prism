@@ -2,14 +2,19 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:prism/api/api_client.dart';
+import 'package:prism/models/review_layout.dart';
 import 'package:prism/models/review_models.dart';
+import 'package:prism/models/contact_sync_result.dart';
 import 'package:prism/models/sharing_models.dart';
 import 'package:prism/services/batch_status_stream.dart';
+import 'package:prism/services/batch_unknown_faces_store.dart';
+import 'package:prism/services/contact_service.dart';
 import 'package:prism/services/local_notification_service.dart';
 import 'package:prism/utils/globals.dart';
 
 class SharingProvider extends ChangeNotifier {
   final ApiClient _apiClient = ApiClient();
+  final ContactService _contactService = ContactService();
   final LocalNotificationService _notificationService =
       LocalNotificationService();
 
@@ -31,6 +36,7 @@ class SharingProvider extends ChangeNotifier {
   String? _currentBatchId;
   String? _userId; // Added for batch authorization
   BatchStatusResponse? _batchStatus;
+  Map<String, dynamic>? _lastBatchRawJson;
   Timer? _pollingTimer;
   BatchStatusStream? _batchStatusStream;
   String? _sseStatusMessage;
@@ -86,11 +92,15 @@ class SharingProvider extends ChangeNotifier {
 
   /// Photos with no detected faces — mutually exclusive with [faceDetectedImages].
   List<BatchImage> get noFaceImages =>
-      _batchStatus?.images.where((img) => img.hasNoFaces).toList() ?? [];
+      _batchStatus?.reviewIndex.noFaceImages ?? [];
 
   /// Photos with at least one detected face — mutually exclusive with [noFaceImages].
-  List<BatchImage> get faceDetectedImages =>
-      _batchStatus?.images.where((img) => !img.hasNoFaces).toList() ?? [];
+  List<BatchImage> get faceDetectedImages {
+    final batch = _batchStatus;
+    if (batch == null) return [];
+    final noFaceIds = batch.reviewIndex.noFaceImageIds;
+    return batch.images.where((img) => !noFaceIds.contains(img.id)).toList();
+  }
 
   bool get hasNoFaceImages => noFaceImages.isNotEmpty;
 
@@ -149,68 +159,36 @@ class SharingProvider extends ChangeNotifier {
     return suggestions;
   }
 
-  /// Friend groups for accordion sections, sorted by photo count descending.
-  List<ReviewPersonGroup> get friendPhotoGroups {
+  /// Full review layout — every uploaded image is placed in exactly one section.
+  ReviewLayout? get reviewLayout {
     final batch = _batchStatus;
-    if (batch == null) return [];
+    if (batch == null || _userId == null) return null;
 
-    final groups = batch.recipients
-        .where((recipient) => recipient.userId != _userId)
-        .map((recipient) {
-          final images = imagesForUserId(recipient.userId);
-          return ReviewPersonGroup(
-            id: recipient.userId,
-            displayName: recipient.username,
-            profilePicId: recipient.profilePicId,
-            photoCount: images.isNotEmpty ? images.length : recipient.count,
-            images: images,
-            type: ReviewGroupType.friend,
-          );
-        })
-        .toList();
+    final friendUserIds = {
+      ..._allFriends.map((f) => f.userId),
+      for (final recipient in batch.recipients)
+        if (recipient.userId != _userId) recipient.userId,
+    };
 
-    groups.sort((a, b) => b.photoCount.compareTo(a.photoCount));
-    return groups;
-  }
-
-  /// No-face photos as a single accordion group, or null when none exist.
-  ReviewPersonGroup? get noFaceGroup {
-    final images = noFaceImages;
-    if (images.isEmpty) return null;
-
-    return ReviewPersonGroup(
-      id: kReviewNoFaceGroupId,
-      displayName: 'No faces detected',
-      photoCount: images.length,
-      images: images,
-      type: ReviewGroupType.noFace,
+    return ReviewLayout.fromBatch(
+      batch,
+      _userId!,
+      friendUserIds: friendUserIds,
     );
   }
 
   List<BatchImage> imagesForUserId(String userId) {
     final batch = _batchStatus;
-    if (batch == null) return [];
+    if (batch == null || _userId == null) return [];
 
-    final result = <BatchImage>[];
-    final seen = <String>{};
-
-    for (final image in batch.images) {
-      if (image.hasNoFaces) continue;
-
-      if (image.recognizedUserIds.contains(userId) && seen.add(image.id)) {
-        result.add(image);
-        continue;
-      }
-
-      final assigned = _imageRecipientMap[image.id];
-      if (assigned != null &&
-          assigned.contains(userId) &&
-          seen.add(image.id)) {
-        result.add(image);
-      }
-    }
-
-    return result;
+    return batch.images
+        .where((image) {
+          if (batch.reviewIndex.unknownFaceImageIds.contains(image.id)) {
+            return false;
+          }
+          return image.recognizedUserIds.contains(userId);
+        })
+        .toList();
   }
 
   int photoCountForUserId(String userId) => imagesForUserId(userId).length;
@@ -440,17 +418,19 @@ class SharingProvider extends ChangeNotifier {
         userId: userId,
       );
 
-      _batchStatus = BatchStatusResponse.fromJson(response);
+      _applyBatchStatusResponse(response);
 
-      // Auto-select detected recipients for each image
-      _autoSelectDetectedRecipients();
-
-      // Fetch all friends for the recipient selector
-      await _fetchAllFriends();
+      if (_batchStatus!.isCompleted) {
+        await _persistBatchUnknownFaces();
+        _autoSelectDetectedRecipients();
+        await _fetchAllFriends();
+      }
 
       debugPrint('✅ [SharingProvider] Batch status loaded successfully');
       debugPrint('   Images: ${_batchStatus!.images.length}');
       debugPrint('   Recipients: ${_batchStatus!.recipients.length}');
+      debugPrint('   Contacts: ${_batchStatus!.contacts.length}');
+      debugPrint('   Unknowns: ${_batchStatus!.unknowns.length}');
 
       notifyListeners();
       return true;
@@ -744,7 +724,7 @@ class SharingProvider extends ChangeNotifier {
 
       debugPrint('📦 [SharingProvider] Batch status response received');
 
-      _batchStatus = BatchStatusResponse.fromJson(response);
+      _applyBatchStatusResponse(response);
 
       debugPrint('   Status: ${_batchStatus!.status}');
       debugPrint('   Images: ${_batchStatus!.images.length}');
@@ -772,10 +752,10 @@ class SharingProvider extends ChangeNotifier {
         debugPrint(
           '✅ [SharingProvider] Batch processing completed successfully',
         );
-        // Auto-select detected recipients for each image
+        await _fetchAllFriends();
+        await _autoEnrichDiscoveryAfterBatch();
+        await _persistBatchUnknownFaces();
         _autoSelectDetectedRecipients();
-        // Fetch all friends when batch is complete
-        _fetchAllFriends();
       }
 
       notifyListeners();
@@ -791,28 +771,101 @@ class SharingProvider extends ChangeNotifier {
     }
   }
 
+  void _applyBatchStatusResponse(Map<String, dynamic> response) {
+    _lastBatchRawJson = response;
+    _imageRecipientMap.clear();
+    _batchStatus = BatchStatusResponse.fromJson(response);
+  }
+
+  /// Cross-reference detected faces with synced contacts (page.tsx Group B/C).
+  void applyDiscoveryEnrichment({
+    required Set<String> friendUserIds,
+    required List<OnPlatformUser> onPlatformUsers,
+  }) {
+    if (_batchStatus == null || _userId == null || _lastBatchRawJson == null) {
+      return;
+    }
+
+    final enriched = _batchStatus!.enrichDiscovery(
+      currentUserId: _userId!,
+      friendUserIds: friendUserIds,
+      onPlatformUsers: onPlatformUsers,
+      rawJson: _lastBatchRawJson,
+    );
+
+    if (identical(enriched, _batchStatus)) return;
+
+    final beforeContacts = _batchStatus!.contacts.length;
+    final beforeUnknowns = _batchStatus!.unknowns.length;
+    _batchStatus = enriched;
+
+    if (_batchStatus!.contacts.length != beforeContacts ||
+        _batchStatus!.unknowns.length != beforeUnknowns) {
+      debugPrint(
+        '✨ [SharingProvider] Discovery enriched — '
+        'contacts: ${_batchStatus!.contacts.length}, '
+        'unknowns: ${_batchStatus!.unknowns.length}',
+      );
+    }
+
+    if (_batchStatus!.isCompleted) {
+      _autoSelectDetectedRecipients();
+      unawaited(_persistBatchUnknownFaces());
+    }
+    notifyListeners();
+  }
+
+  Future<void> _autoEnrichDiscoveryAfterBatch() async {
+    if (_userId == null || _batchStatus == null || !_batchStatus!.isCompleted) {
+      return;
+    }
+
+    try {
+      final recs = await _contactService.getRecommendations(_userId!);
+      applyDiscoveryEnrichment(
+        friendUserIds: _allFriends.map((f) => f.userId).toSet(),
+        onPlatformUsers: recs?.onPlatform ?? const [],
+      );
+    } catch (e) {
+      debugPrint('⚠️ [SharingProvider] Auto discovery enrich failed: $e');
+    }
+  }
+
+  Future<void> _persistBatchUnknownFaces() async {
+    final batch = _batchStatus;
+    if (batch == null || _userId == null || batch.unknowns.isEmpty) return;
+
+    await BatchUnknownFacesStore.appendFromBatch(
+      userId: _userId!,
+      batchId: batch.batchId,
+      unknowns: batch.unknowns,
+    );
+  }
+
   // Auto-select detected recipients
   void _autoSelectDetectedRecipients() {
     if (_batchStatus == null || _userId == null) return;
 
-    for (var image in _batchStatus!.images) {
-      if (image.hasNoFaces) continue;
+    void assignRecipient(String imageId, String userId) {
+      if (userId == _userId) return;
+
+      if (!_imageRecipientMap.containsKey(imageId)) {
+        _imageRecipientMap[imageId] = [];
+      }
+      if (!_imageRecipientMap[imageId]!.contains(userId)) {
+        _imageRecipientMap[imageId]!.add(userId);
+        debugPrint('Auto-selected recipient $userId for image $imageId');
+      }
+    }
+
+    for (final image in _batchStatus!.images) {
+      if (_batchStatus!.reviewIndex.isNoFace(image.id)) continue;
+      if (_batchStatus!.reviewIndex.unknownFaceImageIds.contains(image.id)) {
+        continue;
+      }
 
       for (final userId in image.recognizedUserIds) {
-        if (userId == _userId) {
-          debugPrint('⏭️ Skipping current user from recipients: $userId');
-          continue;
-        }
-
-        if (!_imageRecipientMap.containsKey(image.id)) {
-          _imageRecipientMap[image.id] = [];
-        }
-        if (!_imageRecipientMap[image.id]!.contains(userId)) {
-          _imageRecipientMap[image.id]!.add(userId);
-          debugPrint(
-            '✅ Auto-selected recipient $userId for image ${image.id}',
-          );
-        }
+        assignRecipient(image.id, userId);
       }
     }
   }

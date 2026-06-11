@@ -3,6 +3,8 @@ import 'package:prism/api/api_client.dart';
 import 'package:prism/models/friend_model.dart';
 import 'package:prism/models/contact_sync_result.dart';
 import 'package:prism/models/review_models.dart';
+import 'package:prism/models/sharing_models.dart';
+import 'package:prism/services/batch_unknown_faces_store.dart';
 import 'package:prism/services/contact_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -23,6 +25,7 @@ class FriendsProvider with ChangeNotifier {
   bool _isSyncingContacts = false;
   DateTime? _lastSyncedAt;
   bool _hasSynced = false;
+  List<UnknownFaceRecommendation> _batchUnknownFaces = [];
 
   bool _isLoading = false;
   bool _isSearching = false;
@@ -40,6 +43,20 @@ class FriendsProvider with ChangeNotifier {
 
   // Getters — V2 discovery
   ContactSyncResult? get contactSyncResult => _contactSyncResult;
+
+  /// Unknown faces from batch uploads + recommendations API (deduped by face id).
+  List<UnknownFaceRecommendation> get displayUnknownFaces {
+    final byFaceId = <String, UnknownFaceRecommendation>{};
+    for (final face in _contactSyncResult?.unknownFaceRecommendations ?? const []) {
+      if (face.faceId.isNotEmpty) byFaceId[face.faceId] = face;
+    }
+    for (final face in _batchUnknownFaces) {
+      if (face.faceId.isNotEmpty) {
+        byFaceId.putIfAbsent(face.faceId, () => face);
+      }
+    }
+    return byFaceId.values.toList();
+  }
   bool get isLoadingRecommendations => _isLoadingRecommendations;
   bool get isSyncingContacts => _isSyncingContacts;
   DateTime? get lastSyncedAt => _lastSyncedAt;
@@ -82,6 +99,118 @@ class FriendsProvider with ChangeNotifier {
       return FriendshipDisplayStatus.pendingSent;
     }
     return FriendshipDisplayStatus.none;
+  }
+
+  /// Merges batch API contacts with face matches cross-referenced against synced contacts.
+  List<ReviewSuggestion> mergeBatchSuggestions({
+    required List<ReviewSuggestion> fromBatch,
+    required BatchStatusResponse batch,
+    required String currentUserId,
+  }) {
+    final byUserId = {
+      for (final suggestion in fromBatch) suggestion.userId: suggestion,
+    };
+
+    final onPlatform = _contactSyncResult?.onPlatform ?? const [];
+
+    void addContactSuggestion({
+      required String userId,
+      required String username,
+      String? profilePicId,
+      String? contactName,
+      required int photoCount,
+    }) {
+      if (userId == currentUserId || byUserId.containsKey(userId)) return;
+      if (_isAlreadyFriend(userId, username)) return;
+      if (batch.recipients.any((r) => r.userId == userId)) return;
+
+      byUserId[userId] = ReviewSuggestion(
+        userId: userId,
+        username: username,
+        profilePicId: profilePicId,
+        contactName: contactName,
+        photoCount: photoCount,
+      );
+    }
+
+    for (final contact in batch.contacts) {
+      if (contact.userId == currentUserId) continue;
+      if (_isAlreadyFriend(contact.userId, contact.username)) continue;
+
+      final platformUser = onPlatform
+          .where((user) => user.userId == contact.userId)
+          .firstOrNull;
+
+      addContactSuggestion(
+        userId: contact.userId,
+        username: contact.username,
+        profilePicId: contact.profilePicId ?? platformUser?.profilePicId,
+        contactName: platformUser?.contactName,
+        photoCount: batch.images
+            .where(
+              (image) =>
+                  !batch.reviewIndex.unknownFaceImageIds.contains(image.id) &&
+                  image.recognizedUserIds.contains(contact.userId),
+            )
+            .length,
+      );
+    }
+
+    for (final userIds in batch.reviewIndex.explicitImageToUserIds.values) {
+      for (final userId in userIds) {
+        if (userId == currentUserId || byUserId.containsKey(userId)) continue;
+        if (_isAlreadyFriend(userId, '')) continue;
+
+        final platformUser =
+            onPlatform.where((user) => user.userId == userId).firstOrNull;
+        if (platformUser == null) continue;
+
+        addContactSuggestion(
+          userId: userId,
+          username: platformUser.username,
+          profilePicId: platformUser.profilePicId,
+          contactName: platformUser.contactName,
+          photoCount: batch.images
+              .where(
+                (image) =>
+                    !batch.reviewIndex.unknownFaceImageIds.contains(image.id) &&
+                    image.recognizedUserIds.contains(userId),
+              )
+              .length,
+        );
+      }
+    }
+
+    for (final image in batch.images) {
+      for (final face in image.detectedFaces ?? const <dynamic>[]) {
+        final userId = BatchFaceParser.userId(face);
+        if (userId == null || userId.isEmpty) continue;
+        if (userId == currentUserId || byUserId.containsKey(userId)) continue;
+        if (_isAlreadyFriend(userId, '')) continue;
+
+        final platformUser =
+            onPlatform.where((user) => user.userId == userId).firstOrNull;
+        if (platformUser == null) continue;
+
+        addContactSuggestion(
+          userId: userId,
+          username: platformUser.username,
+          profilePicId: platformUser.profilePicId,
+          contactName: platformUser.contactName,
+          photoCount: batch.images
+              .where(
+                (image) =>
+                    !batch.reviewIndex.unknownFaceImageIds.contains(image.id) &&
+                    image.recognizedUserIds.contains(userId),
+              )
+              .length,
+        );
+      }
+    }
+
+    final merged = byUserId.values.toList()
+      ..sort((a, b) => b.photoCount.compareTo(a.photoCount));
+    return visibleBatchSuggestions(merged);
   }
 
   /// Batch contact suggestions excluding friends, enriched with phonebook names.
@@ -461,10 +590,16 @@ class FriendsProvider with ChangeNotifier {
   }
 
   /// Refresh all friend data (now handled by single fetchFriends call)
+  Future<void> loadBatchUnknownFaces(String userId) async {
+    _batchUnknownFaces = await BatchUnknownFacesStore.load(userId);
+    notifyListeners();
+  }
+
   Future<void> refreshAll(String userId) async {
     await Future.wait([
       fetchFriends(userId),
       loadRecommendations(userId),
+      loadBatchUnknownFaces(userId),
     ]);
   }
 
@@ -583,18 +718,16 @@ class FriendsProvider with ChangeNotifier {
   }
   // ==================== V2 CONTACT DISCOVERY METHODS ====================
 
-  /// Load cached recommendations from backend (no phonebook re-read)
+  /// Load on-platform contacts from the backend — no phonebook re-read.
+  /// Matches the web: stored contacts live on the server; we only POST /contacts/sync
+  /// when the user explicitly taps "Sync Contacts" or has never synced.
   Future<void> loadRecommendations(String userId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      _hasSynced = prefs.getBool('contacts_synced_$userId') ?? false;
-      notifyListeners();
-      
-      if (!_hasSynced) return;
-
       _isLoadingRecommendations = true;
       _setError(null);
       notifyListeners();
+
+      await _resolveSyncedState(userId);
 
       final result = await _contactService.getRecommendations(userId);
       if (result != null) {
@@ -608,8 +741,33 @@ class FriendsProvider with ChangeNotifier {
     }
   }
 
+  /// Whether this user has phonebook data on the backend (local flag or API).
+  Future<void> _resolveSyncedState(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final localFlag = prefs.getBool('contacts_synced_$userId') ?? false;
+    if (localFlag) {
+      _hasSynced = true;
+      return;
+    }
+
+    final storedOnBackend =
+        await _contactService.hasContactsStoredOnBackend(userId);
+    if (storedOnBackend) {
+      _hasSynced = true;
+      await prefs.setBool('contacts_synced_$userId', true);
+      debugPrint(
+        '[FriendsProvider] Backend already has contacts — skipping sync prompt',
+      );
+    }
+  }
+
   /// Full sync: reads phonebook → POST /contacts/sync → updates discovery lists
-  Future<ContactSyncResult?> syncAndGetRecommendations(String userId) async {
+  Future<ContactSyncResult?> syncAndGetRecommendations(
+    String userId, {
+    String? accountCountryCode,
+    String? accountPhone,
+    String? accountDisplayName,
+  }) async {
     try {
       _isSyncingContacts = true;
       _setError(null);
@@ -617,6 +775,9 @@ class FriendsProvider with ChangeNotifier {
 
       final result = await _contactService.requestPermissionAndSyncContacts(
         userId,
+        accountCountryCode: accountCountryCode,
+        accountPhone: accountPhone,
+        accountDisplayName: accountDisplayName,
       );
 
       if (result != null) {

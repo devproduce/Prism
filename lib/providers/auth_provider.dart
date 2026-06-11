@@ -73,7 +73,7 @@ class AuthProvider with ChangeNotifier {
         if (user != null) {
           _currentUser = user;
           _isAuthenticated = true;
-          _contactsSynced = await _databaseService.hasContactsSynced();
+          await _hydrateContactsSyncedState(user.userId);
 
           // Restore auth token from SharedPreferences
           // This was saved during login and needs to be restored for API calls
@@ -262,8 +262,7 @@ class AuthProvider with ChangeNotifier {
         // Continue with login even if profile fetch fails
       }
 
-      // Check if contacts have been synced
-      _contactsSynced = await _databaseService.hasContactsSynced();
+      await _hydrateContactsSyncedState(response.user.userId);
 
       // Register FCM token
       NotificationService.registerDeviceToken(response.user.userId);
@@ -364,8 +363,15 @@ class AuthProvider with ChangeNotifier {
     }
 
     try {
+      final user = _currentUser!;
+      final fullName = '${user.firstName} ${user.lastName ?? ''}'.trim();
+      final ownerName = fullName.isNotEmpty ? fullName : user.username;
+
       final result = await _contactService.requestPermissionAndSyncContacts(
-        _currentUser!.userId,
+        user.userId,
+        accountCountryCode: user.countryCode,
+        accountPhone: user.phoneNumber,
+        accountDisplayName: ownerName,
       );
 
       // result is null if permission was denied; non-null means sync succeeded
@@ -390,23 +396,44 @@ class AuthProvider with ChangeNotifier {
   /// Check if contacts are already synced in backend
   Future<bool> checkBackendContacts() async {
     if (_currentUser == null) return false;
+    await _hydrateContactsSyncedState(_currentUser!.userId);
+    return _contactsSynced;
+  }
+
+  /// Align local flags with backend when the user already synced on another device
+  /// or after reinstall (SharedPreferences / SQLite may be empty).
+  Future<void> _hydrateContactsSyncedState(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('contacts_synced_$userId') ?? false) {
+      _contactsSynced = true;
+      await _databaseService.markContactsSynced();
+      return;
+    }
+
+    if (await _databaseService.hasContactsSynced()) {
+      _contactsSynced = true;
+      await prefs.setBool('contacts_synced_$userId', true);
+      return;
+    }
 
     try {
-      final hasContacts = await _contactService.hasContactsInBackend(
-        _currentUser!.userId,
-      );
-      if (hasContacts) {
+      final storedOnBackend =
+          await _contactService.hasContactsStoredOnBackend(userId);
+      if (storedOnBackend) {
         _contactsSynced = true;
         await _databaseService.markContactsSynced();
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('contacts_synced_${_currentUser!.userId}', true);
-        notifyListeners();
+        await prefs.setBool('contacts_synced_$userId', true);
+        debugPrint(
+          '[AuthProvider] Restored contacts-synced state from backend',
+        );
+      } else {
+        _contactsSynced = false;
       }
-      return hasContacts;
     } catch (e) {
-      debugPrint('Error checking backend contacts: $e');
-      return false;
+      debugPrint('[AuthProvider] hydrateContactsSyncedState: $e');
+      _contactsSynced = await _databaseService.hasContactsSynced();
     }
+    notifyListeners();
   }
 
   /// Clear database before new registration to remove old user data

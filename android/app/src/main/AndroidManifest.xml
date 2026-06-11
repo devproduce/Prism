@@ -3,6 +3,11 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Contact permission for syncing user contacts -->
     <uses-permission android:name="android.permission.READ_CONTACTS"/>
+    <!-- Optional: SIM line number fallback for owner phone resolution (Android only) -->
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS"/>
+    <uses-permission
+        android:name="android.permission.READ_PHONE_STATE"
+        android:maxSdkVersion="32"/>
     <!-- Storage/Media permissions -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />

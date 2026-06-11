@@ -29,12 +29,13 @@ class UnknownFacesStrip extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Text(
-            'UNKNOWN FACES',
+            faces.length == 1
+                ? '1 person found in your images — invite them to Prism!'
+                : '${faces.length} people found in your images — invite them to Prism!',
             style: PrismTextStyles.bodySmall.copyWith(
-              color: PrismColors.secondaryText,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.1,
-              fontSize: 11,
+              color: PrismColors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
             ),
           ),
         ),

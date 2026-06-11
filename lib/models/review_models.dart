@@ -3,12 +3,16 @@ import 'package:prism/models/sharing_models.dart';
 /// Sentinel id for the no-face accordion group on the review screen.
 const String kReviewNoFaceGroupId = '__no_face__';
 
-enum ReviewGroupType { friend, noFace }
+/// Sentinel id for photos that need manual recipient assignment.
+const String kReviewAssignGroupId = '__assign__';
 
-/// One expandable person block on the review screen (friend or no-face).
+enum ReviewGroupType { friend, noFace, assignRecipients }
+
+/// One expandable block on the review screen.
 class ReviewPersonGroup {
   final String id;
   final String displayName;
+  final String? subtitle;
   final String? profilePicId;
   final int photoCount;
   final List<BatchImage> images;
@@ -17,6 +21,7 @@ class ReviewPersonGroup {
   const ReviewPersonGroup({
     required this.id,
     required this.displayName,
+    this.subtitle,
     this.profilePicId,
     required this.photoCount,
     required this.images,
@@ -24,6 +29,8 @@ class ReviewPersonGroup {
   });
 
   bool get isNoFace => type == ReviewGroupType.noFace;
+
+  bool get isAssignRecipients => type == ReviewGroupType.assignRecipients;
 
   String get photoCountLabel {
     final n = photoCount;
