@@ -7,6 +7,7 @@ import 'package:prism/models/sharing_models.dart';
 import 'package:prism/services/batch_unknown_faces_store.dart';
 import 'package:prism/services/contact_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:prism/utils/debug_session_log.dart';
 
 enum FriendshipDisplayStatus { none, pendingSent, friend }
 
@@ -729,10 +730,39 @@ class FriendsProvider with ChangeNotifier {
 
       await _resolveSyncedState(userId);
 
+      // #region agent log
+      DebugSessionLog.log(
+        location: 'friends_provider.dart:loadRecommendations',
+        message: 'After resolveSyncedState',
+        hypothesisId: 'B,E',
+        data: {
+          'userId': userId,
+          'hasSynced': _hasSynced,
+          'contactSyncResultNull': _contactSyncResult == null,
+        },
+      );
+      // #endregion
+
       final result = await _contactService.getRecommendations(userId);
       if (result != null) {
         _contactSyncResult = result;
       }
+
+      // #region agent log
+      DebugSessionLog.log(
+        location: 'friends_provider.dart:loadRecommendations',
+        message: 'After getRecommendations',
+        hypothesisId: 'A,C,D',
+        data: {
+          'userId': userId,
+          'apiReturnedNull': result == null,
+          'onPlatformCount': _contactSyncResult?.onPlatform.length ?? 0,
+          'notOnPlatformCount': _contactSyncResult?.notOnPlatform.length ?? 0,
+          'visibleOnPlatformCount': visibleOnPlatformRecommendations.length,
+          'friendsCount': _friends.length,
+        },
+      );
+      // #endregion
     } catch (e) {
       _setError('Failed to load recommendations: ${e.toString()}');
     } finally {
@@ -747,6 +777,14 @@ class FriendsProvider with ChangeNotifier {
     final localFlag = prefs.getBool('contacts_synced_$userId') ?? false;
     if (localFlag) {
       _hasSynced = true;
+      // #region agent log
+      DebugSessionLog.log(
+        location: 'friends_provider.dart:_resolveSyncedState',
+        message: 'Local SharedPreferences flag true',
+        hypothesisId: 'B',
+        data: {'userId': userId, 'localFlag': true},
+      );
+      // #endregion
       return;
     }
 
@@ -758,6 +796,23 @@ class FriendsProvider with ChangeNotifier {
       debugPrint(
         '[FriendsProvider] Backend already has contacts — skipping sync prompt',
       );
+      // #region agent log
+      DebugSessionLog.log(
+        location: 'friends_provider.dart:_resolveSyncedState',
+        message: 'Backend has contacts, set local flag',
+        hypothesisId: 'B,E',
+        data: {'userId': userId, 'storedOnBackend': true},
+      );
+      // #endregion
+    } else {
+      // #region agent log
+      DebugSessionLog.log(
+        location: 'friends_provider.dart:_resolveSyncedState',
+        message: 'No local or backend sync evidence',
+        hypothesisId: 'B,E',
+        data: {'userId': userId, 'localFlag': false, 'storedOnBackend': false},
+      );
+      // #endregion
     }
   }
 

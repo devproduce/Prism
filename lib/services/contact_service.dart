@@ -6,6 +6,7 @@ import 'package:prism/models/contact_sync_result.dart';
 import 'package:prism/models/resolved_phone.dart';
 import 'package:prism/services/device_phone_resolver.dart';
 import 'package:prism/utils/phone_parser.dart';
+import 'package:prism/utils/debug_session_log.dart';
 
 class ContactService {
   final ApiClient _apiClient = ApiClient();
@@ -207,9 +208,30 @@ class ContactService {
   Future<ContactSyncResult?> getRecommendations(String userId) async {
     try {
       final result = await _apiClient.getContactRecommendations(userId: userId);
-      return await _enrichWithAllLocalContacts(result);
+      final enriched = await _enrichWithAllLocalContacts(result);
+      // #region agent log
+      DebugSessionLog.log(
+        location: 'contact_service.dart:getRecommendations',
+        message: 'Recommendations API success',
+        hypothesisId: 'A,C',
+        data: {
+          'userId': userId,
+          'onPlatformCount': enriched.onPlatform.length,
+          'notOnPlatformCount': enriched.notOnPlatform.length,
+        },
+      );
+      // #endregion
+      return enriched;
     } catch (e) {
       debugPrint('[ContactService] Error fetching recommendations: $e');
+      // #region agent log
+      DebugSessionLog.log(
+        location: 'contact_service.dart:getRecommendations',
+        message: 'Recommendations API failed',
+        hypothesisId: 'A',
+        data: {'userId': userId, 'error': e.toString()},
+      );
+      // #endregion
       return null;
     }
   }
@@ -229,6 +251,19 @@ class ContactService {
         '[ContactService] Backend sync-status: count=$count '
         'last_synced_at=$lastSynced stored=$stored',
       );
+      // #region agent log
+      DebugSessionLog.log(
+        location: 'contact_service.dart:hasContactsStoredOnBackend',
+        message: 'Backend sync-status check',
+        hypothesisId: 'B,E',
+        data: {
+          'userId': userId,
+          'contactCount': count,
+          'lastSyncedAt': lastSynced?.toString(),
+          'storedOnBackend': stored,
+        },
+      );
+      // #endregion
       return stored;
     } catch (e) {
       debugPrint('[ContactService] Error checking sync-status: $e');

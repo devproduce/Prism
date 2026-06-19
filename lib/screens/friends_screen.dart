@@ -22,6 +22,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:prism/widgets/friendship_action_pill.dart';
 import 'package:prism/widgets/unknown_faces_strip.dart';
+import 'package:prism/utils/debug_session_log.dart';
 
 class FriendsScreen extends StatefulWidget {
   final bool openRequestsDirectly;
@@ -864,6 +865,23 @@ class _FriendsScreenState extends State<FriendsScreen> {
     final result = provider.contactSyncResult;
     final isSyncing = provider.isSyncingContacts;
     final isLoadingRecs = provider.isLoadingRecommendations;
+
+    // #region agent log
+    DebugSessionLog.log(
+      location: 'friends_screen.dart:_buildDiscoverHeader',
+      message: 'Friends discover UI state',
+      hypothesisId: 'A,C,D',
+      data: {
+        'hasSynced': provider.hasSynced,
+        'isLoadingRecs': isLoadingRecs,
+        'contactSyncResultNull': result == null,
+        'onPlatformCount': result?.onPlatform.length ?? 0,
+        'notOnPlatformCount': result?.notOnPlatform.length ?? 0,
+        'visibleOnPlatformCount':
+            provider.visibleOnPlatformRecommendations.length,
+      },
+    );
+    // #endregion
 
     final side = _discoverSidePadding(context);
 

@@ -32,12 +32,7 @@ class BatchReviewPartition {
     }
 
     final selfIds = {currentUserId, if (batch.sharedBy != null) batch.sharedBy!};
-    final unknownRepImageIds = {
-      for (final unknown in batch.unknowns)
-        if (unknown.representativeImageId != null &&
-            unknown.representativeImageId!.isNotEmpty)
-          unknown.representativeImageId!,
-    };
+    final index = batch.reviewIndex;
 
     final claimed = <String>{};
     final friendImages = <String, List<BatchImage>>{};
@@ -45,32 +40,20 @@ class BatchReviewPartition {
     for (final friendId in friendUserIds) {
       if (selfIds.contains(friendId)) continue;
 
-      final matched = <BatchImage>[];
-      for (final image in images) {
-        if (unknownRepImageIds.contains(image.id)) continue;
-        if (!_imageHasUserId(image, friendId)) continue;
-        matched.add(image);
-        claimed.add(image.id);
-      }
-
+      final matched =
+          index.imagesForFriendIdExplicit(friendId, currentUserId);
       if (matched.isNotEmpty) {
         friendImages[friendId] = matched;
+        claimed.addAll(matched.map((img) => img.id));
       }
     }
 
-    final unknowns = <UnknownFace>[];
-    for (final unknown in batch.unknowns) {
-      final rep = unknown.representativeImageId;
-      if (rep != null && rep.isNotEmpty) {
-        claimed.add(rep);
-      }
-      unknowns.add(unknown);
-    }
+    final unknowns = List<UnknownFace>.from(batch.unknowns);
 
     final noFaceImages = images
         .where((image) {
           if (claimed.contains(image.id)) return false;
-          return batch.reviewIndex.isNoFace(image.id);
+          return index.isNoFace(image.id);
         })
         .toList();
     claimed.addAll(noFaceImages.map((img) => img.id));
@@ -78,11 +61,24 @@ class BatchReviewPartition {
     final assignImages = images
         .where((image) {
           if (claimed.contains(image.id)) return false;
-          if (unknownRepImageIds.contains(image.id)) return false;
-          if (batch.reviewIndex.isNoFace(image.id)) return false;
+          if (index.isNoFace(image.id)) return false;
           return true;
         })
         .toList();
+
+    final gridImageIds = <String>{
+      ...friendImages.values.expand((list) => list.map((i) => i.id)),
+      ...noFaceImages.map((i) => i.id),
+      ...assignImages.map((i) => i.id),
+    };
+    final orphanImageIds = images
+        .map((i) => i.id)
+        .where((id) => !gridImageIds.contains(id))
+        .toList();
+    assert(
+      orphanImageIds.isEmpty,
+      'Every image must appear in exactly one grid bucket; orphans: $orphanImageIds',
+    );
 
     return BatchReviewPartition(
       allImages: images,
@@ -91,12 +87,5 @@ class BatchReviewPartition {
       assignImages: assignImages,
       noFaceImages: noFaceImages,
     );
-  }
-
-  static bool _imageHasUserId(BatchImage image, String userId) {
-    for (final face in image.detectedFaces ?? const <dynamic>[]) {
-      if (BatchFaceParser.userId(face) == userId) return true;
-    }
-    return false;
   }
 }

@@ -47,6 +47,7 @@ class SharingProvider extends ChangeNotifier {
   bool _sendNoFaceToAll = false;
   final Set<String> _bulkAssignedNoFaceImageIds = {};
   static const Set<String> _specialFlags = {'archive', 'favourite', 'bin'};
+  List<OnPlatformUser> _cachedOnPlatformUsers = const [];
 
   // Getters
   List<File> get selectedImages => _selectedImages;
@@ -128,14 +129,15 @@ class SharingProvider extends ChangeNotifier {
   /// True when at least one image is assigned to a friend recipient.
   bool get hasValidShareRecipients {
     if (_userId == null) return false;
+    var valid = false;
     for (final recipients in _imageRecipientMap.values) {
       for (final recipient in recipients) {
         if (!_specialFlags.contains(recipient) && recipient != _userId) {
-          return true;
+          valid = true;
         }
       }
     }
-    return false;
+    return valid;
   }
 
   /// Contacts detected in this batch who are on Prism but not yet friends.
@@ -164,11 +166,7 @@ class SharingProvider extends ChangeNotifier {
     final batch = _batchStatus;
     if (batch == null || _userId == null) return null;
 
-    final friendUserIds = {
-      ..._allFriends.map((f) => f.userId),
-      for (final recipient in batch.recipients)
-        if (recipient.userId != _userId) recipient.userId,
-    };
+    final friendUserIds = _allFriends.map((f) => f.userId).toSet();
 
     return ReviewLayout.fromBatch(
       batch,
@@ -176,6 +174,7 @@ class SharingProvider extends ChangeNotifier {
       friendUserIds: friendUserIds,
     );
   }
+
 
   List<BatchImage> imagesForUserId(String userId) {
     final batch = _batchStatus;
@@ -786,10 +785,17 @@ class SharingProvider extends ChangeNotifier {
       return;
     }
 
+    if (onPlatformUsers.isNotEmpty) {
+      _cachedOnPlatformUsers = onPlatformUsers;
+    }
+    final effectiveOnPlatform = onPlatformUsers.isNotEmpty
+        ? onPlatformUsers
+        : _cachedOnPlatformUsers;
+
     final enriched = _batchStatus!.enrichDiscovery(
       currentUserId: _userId!,
       friendUserIds: friendUserIds,
-      onPlatformUsers: onPlatformUsers,
+      onPlatformUsers: effectiveOnPlatform,
       rawJson: _lastBatchRawJson,
     );
 
@@ -820,14 +826,20 @@ class SharingProvider extends ChangeNotifier {
       return;
     }
 
+    final friendUserIds = _allFriends.map((f) => f.userId).toSet();
+
     try {
       final recs = await _contactService.getRecommendations(_userId!);
       applyDiscoveryEnrichment(
-        friendUserIds: _allFriends.map((f) => f.userId).toSet(),
-        onPlatformUsers: recs?.onPlatform ?? const [],
+        friendUserIds: friendUserIds,
+        onPlatformUsers: recs?.onPlatform ?? _cachedOnPlatformUsers,
       );
     } catch (e) {
       debugPrint('⚠️ [SharingProvider] Auto discovery enrich failed: $e');
+      applyDiscoveryEnrichment(
+        friendUserIds: friendUserIds,
+        onPlatformUsers: _cachedOnPlatformUsers,
+      );
     }
   }
 
