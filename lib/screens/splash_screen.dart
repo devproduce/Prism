@@ -5,8 +5,11 @@ import 'package:prism/screens/home_screen.dart';
 import 'package:prism/screens/share_upload_screen.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
+import 'package:prism/models/auth_gate.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/activity_feed_provider.dart';
+import 'package:prism/screens/secure_account_screen.dart';
+import 'package:prism/screens/verify_email_screen.dart';
 import 'package:prism/services/share_handler_service.dart';
 import 'package:provider/provider.dart';
 
@@ -64,11 +67,23 @@ class _SplashScreenState extends State<SplashScreen> {
       // Determine navigation destination
       if (authProvider.isAuthenticated && authProvider.currentUser != null) {
         try {
-          await authProvider.apiClient.getCurrentUser(
-            authProvider.currentUser!.userId,
-          );
+          await authProvider.apiClient.getCurrentUser();
 
           if (!mounted) return;
+
+          final gate = authProvider.authGate;
+          if (gate == AuthGate.verifyEmail) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => const VerifyEmailScreen()),
+            );
+            return;
+          }
+          if (gate == AuthGate.migrateAccount) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => const SecureAccountScreen()),
+            );
+            return;
+          }
 
           // If we have shared files, go to share screen
           if (sharedFiles.isNotEmpty) {
@@ -97,6 +112,21 @@ class _SplashScreenState extends State<SplashScreen> {
         } catch (e) {
           debugPrint('SplashScreen: Session validation failed: $e');
           if (!mounted) return;
+
+          final gate = authProvider.authGate;
+          if (gate == AuthGate.verifyEmail) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => const VerifyEmailScreen()),
+            );
+            return;
+          }
+          if (gate == AuthGate.migrateAccount) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => const SecureAccountScreen()),
+            );
+            return;
+          }
+
           Navigator.of(context).pushReplacement(
             PageRouteBuilder(
               pageBuilder: (_, __, ___) => const OnboardingScreen(),

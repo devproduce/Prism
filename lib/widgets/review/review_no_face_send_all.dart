@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
+import 'package:prism/utils/responsive_helper.dart';
 
 /// Compact "Send to all" toggle shown inside the no-face accordion body.
 class ReviewNoFaceSendAllTile extends StatelessWidget {
@@ -14,6 +15,7 @@ class ReviewNoFaceSendAllTile extends StatelessWidget {
     final sharingProvider = Provider.of<SharingProvider>(context);
     final recipientCount = sharingProvider.batchRecipientUserIds.length;
     final canBulkSend = sharingProvider.canSendNoFaceToAll;
+    final isCompact = ResponsiveHelper.isSmallScreen(context);
 
     final subtitle = recipientCount == 0
         ? 'Share with everyone detected in this batch'
@@ -34,7 +36,10 @@ class ReviewNoFaceSendAllTile extends StatelessWidget {
             : null,
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: EdgeInsets.symmetric(
+            horizontal: isCompact ? 10 : 12,
+            vertical: isCompact ? 8 : 10,
+          ),
           decoration: BoxDecoration(
             color: sharingProvider.sendNoFaceToAll
                 ? PrismColors.prismYellow.withValues(alpha: 0.08)

@@ -57,7 +57,7 @@ class ProfileProvider with ChangeNotifier {
 
       debugPrint('Fetching user profile for: $userId');
 
-      final user = await _apiClient.getCurrentUser(userId);
+      final user = await _apiClient.getCurrentUser();
 
       _currentUser = user;
 
@@ -92,7 +92,6 @@ class ProfileProvider with ChangeNotifier {
       debugPrint('Updating profile for user: $userId');
 
       final updatedUser = await _apiClient.updateProfile(
-        userId: userId,
         username: username,
         firstName: firstName,
         lastName: lastName,
@@ -135,7 +134,6 @@ class ProfileProvider with ChangeNotifier {
       debugPrint('Uploading profile picture for user: $userId');
 
       final updatedUser = await _apiClient.uploadProfilePicture(
-        userId: userId,
         profileImage: profileImage,
       );
 

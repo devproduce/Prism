@@ -9,6 +9,16 @@ class ApiConstants {
   // Auth endpoints
   static const String register = '/auth/register';
   static const String login = '/auth/login';
+  static const String loginVerify = '/auth/login/verify';
+  static const String refresh = '/auth/refresh';
+  static const String resolveUsername = '/auth/resolve-username';
+  static const String migrateEmail = '/auth/migrate-email';
+  static const String resendVerification = '/auth/resend-verification';
+  static const String forgotPassword = '/auth/forgot-password';
+  static const String googleLogin = '/auth/google-login';
+  static const String googleRegister = '/auth/google-register';
+  static const String deleteAccount = '/auth/delete-account';
+  static const String cancelDeletion = '/auth/cancel-deletion';
 
   // User endpoints
   static const String getCurrentUser = '/users/me';

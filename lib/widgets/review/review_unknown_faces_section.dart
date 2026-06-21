@@ -4,6 +4,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:prism/models/sharing_models.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
+import 'package:prism/utils/responsive_helper.dart';
 import 'package:prism/widgets/cropped_face.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -20,12 +21,14 @@ class ReviewUnknownFacesSection extends StatelessWidget {
   Widget build(BuildContext context) {
     if (unknowns.isEmpty) return const SizedBox.shrink();
 
+    final horizontalPadding = ResponsiveHelper.horizontalPadding(context);
+    final isCompact = ResponsiveHelper.isSmallScreen(context);
     final label = unknowns.length == 1
         ? '1 Person Found, Invite them to Prism!'
         : '${unknowns.length} People Found, Invite them to Prism!';
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      padding: EdgeInsets.fromLTRB(horizontalPadding, 8, horizontalPadding, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -34,15 +37,22 @@ class ReviewUnknownFacesSection extends StatelessWidget {
             style: PrismTextStyles.bodyMedium.copyWith(
               fontWeight: FontWeight.w600,
               color: PrismColors.white,
+              fontSize: ResponsiveHelper.scaledFontSize(context, 14),
             ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: isCompact ? 10 : 12),
           ...unknowns.asMap().entries.map((entry) {
             final index = entry.key;
             final face = entry.value;
             return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _UnknownFaceRow(face: face, personIndex: index + 1),
+              padding: EdgeInsets.only(bottom: isCompact ? 6 : 8),
+              child: _UnknownFaceRow(
+                face: face,
+                personIndex: index + 1,
+                isCompact: isCompact,
+              ),
             );
           }),
         ],
@@ -54,10 +64,12 @@ class ReviewUnknownFacesSection extends StatelessWidget {
 class _UnknownFaceRow extends StatelessWidget {
   final UnknownFace face;
   final int personIndex;
+  final bool isCompact;
 
   const _UnknownFaceRow({
     required this.face,
     required this.personIndex,
+    this.isCompact = false,
   });
 
   Future<void> _openLink(String link) async {
@@ -74,8 +86,13 @@ class _UnknownFaceRow extends StatelessWidget {
     final photoLabel =
         '${face.count} ${face.count == 1 ? 'photo' : 'photos'}';
 
+    final faceSize = isCompact ? 36.0 : 40.0;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: EdgeInsets.symmetric(
+        horizontal: isCompact ? 10 : 12,
+        vertical: isCompact ? 8 : 10,
+      ),
       decoration: BoxDecoration(
         color: PrismColors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(12),
@@ -87,11 +104,11 @@ class _UnknownFaceRow extends StatelessWidget {
             CroppedFace(
               imageId: imageId,
               bbox: face.bbox,
-              size: 40,
+              size: faceSize,
             )
           else
             CircleAvatar(
-              radius: 20,
+              radius: faceSize / 2,
               backgroundColor: PrismColors.inputGray,
               child: Icon(
                 Icons.person_outline,
@@ -99,7 +116,7 @@ class _UnknownFaceRow extends StatelessWidget {
                 size: 22,
               ),
             ),
-          const SizedBox(width: 12),
+          SizedBox(width: isCompact ? 10 : 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

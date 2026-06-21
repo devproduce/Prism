@@ -4,6 +4,7 @@ import 'package:prism/models/review_models.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/utils/constants.dart';
+import 'package:prism/utils/responsive_helper.dart';
 import 'package:prism/widgets/review/review_photo_grid.dart';
 
 /// Expandable friend or no-face block on the review screen.
@@ -31,12 +32,19 @@ class ReviewPersonSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final horizontalPadding = ResponsiveHelper.horizontalPadding(context);
+    final isCompact = ResponsiveHelper.isSmallScreen(context);
+    final sectionRadius = isCompact ? 14.0 : 16.0;
+    final headerPaddingH = isCompact ? 12.0 : 16.0;
+    final headerPaddingV = isCompact ? 12.0 : 14.0;
+    final bodyPadding = isCompact ? 12.0 : 16.0;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: EdgeInsets.fromLTRB(horizontalPadding, 0, horizontalPadding, 12),
       child: Container(
         decoration: BoxDecoration(
           color: PrismColors.surfaceGray,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(sectionRadius),
           border: Border.all(
             color: PrismColors.white.withValues(alpha: 0.08),
           ),
@@ -53,14 +61,14 @@ class ReviewPersonSection extends StatelessWidget {
                   onToggle();
                 },
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: headerPaddingH,
+                    vertical: headerPaddingV,
                   ),
                   child: Row(
                     children: [
-                      _SectionAvatar(group: group),
-                      const SizedBox(width: 12),
+                      _SectionAvatar(group: group, isCompact: isCompact),
+                      SizedBox(width: isCompact ? 10 : 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -69,6 +77,10 @@ class ReviewPersonSection extends StatelessWidget {
                               group.displayName,
                               style: PrismTextStyles.bodyLarge.copyWith(
                                 fontWeight: FontWeight.w700,
+                                fontSize: ResponsiveHelper.scaledFontSize(
+                                  context,
+                                  16,
+                                ),
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -105,7 +117,7 @@ class ReviewPersonSection extends StatelessWidget {
                             ? Icons.keyboard_arrow_up_rounded
                             : Icons.keyboard_arrow_down_rounded,
                         color: PrismColors.secondaryText,
-                        size: 24,
+                        size: isCompact ? 22 : 24,
                       ),
                     ],
                   ),
@@ -118,7 +130,7 @@ class ReviewPersonSection extends StatelessWidget {
                 color: PrismColors.white.withValues(alpha: 0.06),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                padding: EdgeInsets.fromLTRB(bodyPadding, 12, bodyPadding, bodyPadding),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -146,15 +158,22 @@ class ReviewPersonSection extends StatelessWidget {
 
 class _SectionAvatar extends StatelessWidget {
   final ReviewPersonGroup group;
+  final bool isCompact;
 
-  const _SectionAvatar({required this.group});
+  const _SectionAvatar({
+    required this.group,
+    this.isCompact = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final size = isCompact ? 40.0 : 44.0;
+    final iconSize = isCompact ? 20.0 : 22.0;
+
     if (group.isNoFace) {
       return Container(
-        width: 44,
-        height: 44,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
           color: PrismColors.electricCyan.withValues(alpha: 0.12),
           shape: BoxShape.circle,
@@ -162,18 +181,18 @@ class _SectionAvatar extends StatelessWidget {
             color: PrismColors.electricCyan.withValues(alpha: 0.25),
           ),
         ),
-        child: const Icon(
+        child: Icon(
           Icons.photo_filter_rounded,
           color: PrismColors.electricCyan,
-          size: 22,
+          size: iconSize,
         ),
       );
     }
 
     if (group.isAssignRecipients) {
       return Container(
-        width: 44,
-        height: 44,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
           color: PrismColors.prismYellow.withValues(alpha: 0.12),
           shape: BoxShape.circle,
@@ -181,10 +200,10 @@ class _SectionAvatar extends StatelessWidget {
             color: PrismColors.prismYellow.withValues(alpha: 0.25),
           ),
         ),
-        child: const Icon(
+        child: Icon(
           Icons.person_add_alt_1_rounded,
           color: PrismColors.prismYellow,
-          size: 22,
+          size: iconSize,
         ),
       );
     }
@@ -194,7 +213,7 @@ class _SectionAvatar extends StatelessWidget {
         : null;
 
     return CircleAvatar(
-      radius: 22,
+      radius: size / 2,
       backgroundColor: PrismColors.inputGray,
       backgroundImage:
           profilePicUrl != null ? NetworkImage(profilePicUrl) : null,

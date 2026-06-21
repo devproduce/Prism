@@ -7,7 +7,6 @@ import 'package:prism/models/sharing_models.dart';
 import 'package:prism/services/batch_unknown_faces_store.dart';
 import 'package:prism/services/contact_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:prism/utils/debug_session_log.dart';
 
 enum FriendshipDisplayStatus { none, pendingSent, friend }
 
@@ -26,6 +25,9 @@ class FriendsProvider with ChangeNotifier {
   bool _isSyncingContacts = false;
   DateTime? _lastSyncedAt;
   bool _hasSynced = false;
+  bool _hasContactsPermission = false;
+  bool _hasBackendContacts = false;
+  int _backendContactCount = 0;
   List<UnknownFaceRecommendation> _batchUnknownFaces = [];
 
   bool _isLoading = false;
@@ -48,7 +50,8 @@ class FriendsProvider with ChangeNotifier {
   /// Unknown faces from batch uploads + recommendations API (deduped by face id).
   List<UnknownFaceRecommendation> get displayUnknownFaces {
     final byFaceId = <String, UnknownFaceRecommendation>{};
-    for (final face in _contactSyncResult?.unknownFaceRecommendations ?? const []) {
+    for (final face
+        in _contactSyncResult?.unknownFaceRecommendations ?? const []) {
       if (face.faceId.isNotEmpty) byFaceId[face.faceId] = face;
     }
     for (final face in _batchUnknownFaces) {
@@ -58,10 +61,20 @@ class FriendsProvider with ChangeNotifier {
     }
     return byFaceId.values.toList();
   }
+
   bool get isLoadingRecommendations => _isLoadingRecommendations;
   bool get isSyncingContacts => _isSyncingContacts;
   DateTime? get lastSyncedAt => _lastSyncedAt;
   bool get hasSynced => _hasSynced;
+  bool get hasContactsPermission => _hasContactsPermission;
+
+  /// True when the backend already has this user's phonebook stored.
+  bool get hasBackendContacts => _hasBackendContacts;
+
+  int get backendContactCount => _backendContactCount;
+
+  /// Show sync CTA only when the backend phonebook column is empty.
+  bool get shouldPromptContactSync => !_hasBackendContacts;
 
   /// On-platform suggestions excluding friends and already-sent requests.
   List<OnPlatformUser> get visibleOnPlatformRecommendations {
@@ -74,9 +87,7 @@ class FriendsProvider with ChangeNotifier {
   }
 
   bool _isAlreadyFriend(String userId, String username) {
-    return _friends.any(
-      (f) => f.userId == userId || f.username == username,
-    );
+    return _friends.any((f) => f.userId == userId || f.username == username);
   }
 
   bool _hasPendingSentTo(String userId, String username) {
@@ -162,8 +173,9 @@ class FriendsProvider with ChangeNotifier {
         if (userId == currentUserId || byUserId.containsKey(userId)) continue;
         if (_isAlreadyFriend(userId, '')) continue;
 
-        final platformUser =
-            onPlatform.where((user) => user.userId == userId).firstOrNull;
+        final platformUser = onPlatform
+            .where((user) => user.userId == userId)
+            .firstOrNull;
         if (platformUser == null) continue;
 
         addContactSuggestion(
@@ -189,8 +201,9 @@ class FriendsProvider with ChangeNotifier {
         if (userId == currentUserId || byUserId.containsKey(userId)) continue;
         if (_isAlreadyFriend(userId, '')) continue;
 
-        final platformUser =
-            onPlatform.where((user) => user.userId == userId).firstOrNull;
+        final platformUser = onPlatform
+            .where((user) => user.userId == userId)
+            .firstOrNull;
         if (platformUser == null) continue;
 
         addContactSuggestion(
@@ -255,8 +268,7 @@ class FriendsProvider with ChangeNotifier {
     final now = DateTime.now();
     if (!force &&
         _lastFriendshipSyncAt != null &&
-        now.difference(_lastFriendshipSyncAt!) <
-            const Duration(seconds: 8)) {
+        now.difference(_lastFriendshipSyncAt!) < const Duration(seconds: 8)) {
       return;
     }
     _lastFriendshipSyncAt = now;
@@ -271,11 +283,14 @@ class FriendsProvider with ChangeNotifier {
     _contactSyncResult = ContactSyncResult(
       onPlatform: _contactSyncResult!.onPlatform
           .where(
-            (u) => u.username != username && (userId == null || u.userId != userId),
+            (u) =>
+                u.username != username &&
+                (userId == null || u.userId != userId),
           )
           .toList(),
       notOnPlatform: _contactSyncResult!.notOnPlatform,
-      unknownFaceRecommendations: _contactSyncResult!.unknownFaceRecommendations,
+      unknownFaceRecommendations:
+          _contactSyncResult!.unknownFaceRecommendations,
     );
   }
 
@@ -312,7 +327,7 @@ class FriendsProvider with ChangeNotifier {
       }
       _setError(null);
 
-      final data = await _apiClient.getFriends(userId: userId);
+      final data = await _apiClient.getFriends();
 
       // Parse and separate friendships
       final List<Friend> acceptedFriends = [];
@@ -342,7 +357,7 @@ class FriendsProvider with ChangeNotifier {
 
       // Fetch pending received requests from /friends/pending endpoint
       try {
-        final pendingData = await _apiClient.getPendingRequests(userId: userId);
+        final pendingData = await _apiClient.getPendingRequests();
         for (var json in pendingData) {
           pendingReceived.add(FriendRequest.fromJson(json));
         }
@@ -352,7 +367,7 @@ class FriendsProvider with ChangeNotifier {
 
       // Fetch sent requests separately from /friends/sent endpoint
       try {
-        final sentData = await _apiClient.getSentRequests(userId: userId);
+        final sentData = await _apiClient.getSentRequests();
         for (var json in sentData) {
           pendingSent.add(FriendRequest.fromJson(json));
         }
@@ -413,7 +428,7 @@ class FriendsProvider with ChangeNotifier {
       _setError(null);
 
       final results = await Future.wait([
-        _apiClient.searchUsers(username: username, userId: userId),
+        _apiClient.searchUsers(username: username),
         syncFriendshipsIfStale(userId),
       ]);
       final data = results.first as List<dynamic>;
@@ -441,7 +456,6 @@ class FriendsProvider with ChangeNotifier {
       _setError(null);
 
       final response = await _apiClient.sendFriendRequest(
-        userId: userId,
         targetUsername: targetUsername,
       );
 
@@ -514,7 +528,6 @@ class FriendsProvider with ChangeNotifier {
 
       await _apiClient.acceptFriendRequest(
         friendshipId: friendshipId,
-        userId: userId,
       );
 
       await fetchFriends(userId, showLoading: false);
@@ -561,7 +574,6 @@ class FriendsProvider with ChangeNotifier {
 
       await _apiClient.rejectFriendRequest(
         friendshipId: friendshipId,
-        userId: userId,
       );
 
       await fetchFriends(userId, showLoading: false);
@@ -618,7 +630,6 @@ class FriendsProvider with ChangeNotifier {
 
       await _apiClient.updateAutoCleanKeep(
         friendId: friendId,
-        userId: userId,
         keepStatus: keepStatus,
       );
 
@@ -644,7 +655,7 @@ class FriendsProvider with ChangeNotifier {
       _setLoading(true);
       _setError(null);
 
-      final data = await _apiClient.getBlockedUsers(userId: userId);
+      final data = await _apiClient.getBlockedUsers();
       _blockedUsers = data.map((json) => BlockedUser.fromJson(json)).toList();
 
       _setLoading(false);
@@ -662,7 +673,7 @@ class FriendsProvider with ChangeNotifier {
     try {
       _setError(null);
 
-      await _apiClient.blockUser(friendId: friendId, userId: userId);
+      await _apiClient.blockUser(friendId: friendId);
 
       // Refresh friends and blocked users
       await fetchBlockedUsers(userId);
@@ -683,7 +694,7 @@ class FriendsProvider with ChangeNotifier {
     try {
       _setError(null);
 
-      await _apiClient.unblockUser(friendId: friendId, userId: userId);
+      await _apiClient.unblockUser(friendId: friendId);
 
       // Refresh blocked users
       await fetchBlockedUsers(userId);
@@ -703,7 +714,7 @@ class FriendsProvider with ChangeNotifier {
     try {
       _setError(null);
 
-      await _apiClient.unfriend(friendId: friendId, userId: userId);
+      await _apiClient.unfriend(friendId: friendId);
 
       // Refresh friends
       await fetchFriends(userId);
@@ -719,50 +730,30 @@ class FriendsProvider with ChangeNotifier {
   }
   // ==================== V2 CONTACT DISCOVERY METHODS ====================
 
-  /// Load on-platform contacts from the backend — no phonebook re-read.
-  /// Matches the web: stored contacts live on the server; we only POST /contacts/sync
-  /// when the user explicitly taps "Sync Contacts" or has never synced.
+  /// Load discovery data: check backend sync-status first, then fetch recommendations
+  /// from GET /contacts/recommendations when the phonebook is already stored.
   Future<void> loadRecommendations(String userId) async {
     try {
       _isLoadingRecommendations = true;
       _setError(null);
       notifyListeners();
 
-      await _resolveSyncedState(userId);
+      _hasContactsPermission = await _contactService.hasContactsPermission();
+      final syncStatus = await _contactService.getContactSyncStatus(userId);
+      _backendContactCount = syncStatus.contactCount;
+      _hasBackendContacts = syncStatus.hasStoredContacts;
 
-      // #region agent log
-      DebugSessionLog.log(
-        location: 'friends_provider.dart:loadRecommendations',
-        message: 'After resolveSyncedState',
-        hypothesisId: 'B,E',
-        data: {
-          'userId': userId,
-          'hasSynced': _hasSynced,
-          'contactSyncResultNull': _contactSyncResult == null,
-        },
-      );
-      // #endregion
-
-      final result = await _contactService.getRecommendations(userId);
-      if (result != null) {
-        _contactSyncResult = result;
+      if (_hasBackendContacts) {
+        final result = await _contactService.getRecommendations(userId);
+        if (result != null) {
+          _contactSyncResult = result;
+        }
+        _hasSynced = true;
+        _lastSyncedAt = _parseLastSyncedAt(syncStatus.lastSyncedAt);
+      } else {
+        _contactSyncResult = null;
+        _hasSynced = false;
       }
-
-      // #region agent log
-      DebugSessionLog.log(
-        location: 'friends_provider.dart:loadRecommendations',
-        message: 'After getRecommendations',
-        hypothesisId: 'A,C,D',
-        data: {
-          'userId': userId,
-          'apiReturnedNull': result == null,
-          'onPlatformCount': _contactSyncResult?.onPlatform.length ?? 0,
-          'notOnPlatformCount': _contactSyncResult?.notOnPlatform.length ?? 0,
-          'visibleOnPlatformCount': visibleOnPlatformRecommendations.length,
-          'friendsCount': _friends.length,
-        },
-      );
-      // #endregion
     } catch (e) {
       _setError('Failed to load recommendations: ${e.toString()}');
     } finally {
@@ -771,53 +762,10 @@ class FriendsProvider with ChangeNotifier {
     }
   }
 
-  /// Whether this user has phonebook data on the backend (local flag or API).
-  Future<void> _resolveSyncedState(String userId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final localFlag = prefs.getBool('contacts_synced_$userId') ?? false;
-    if (localFlag) {
-      _hasSynced = true;
-      // #region agent log
-      DebugSessionLog.log(
-        location: 'friends_provider.dart:_resolveSyncedState',
-        message: 'Local SharedPreferences flag true',
-        hypothesisId: 'B',
-        data: {'userId': userId, 'localFlag': true},
-      );
-      // #endregion
-      return;
-    }
-
-    final storedOnBackend =
-        await _contactService.hasContactsStoredOnBackend(userId);
-    if (storedOnBackend) {
-      _hasSynced = true;
-      await prefs.setBool('contacts_synced_$userId', true);
-      debugPrint(
-        '[FriendsProvider] Backend already has contacts — skipping sync prompt',
-      );
-      // #region agent log
-      DebugSessionLog.log(
-        location: 'friends_provider.dart:_resolveSyncedState',
-        message: 'Backend has contacts, set local flag',
-        hypothesisId: 'B,E',
-        data: {'userId': userId, 'storedOnBackend': true},
-      );
-      // #endregion
-    } else {
-      // #region agent log
-      DebugSessionLog.log(
-        location: 'friends_provider.dart:_resolveSyncedState',
-        message: 'No local or backend sync evidence',
-        hypothesisId: 'B,E',
-        data: {'userId': userId, 'localFlag': false, 'storedOnBackend': false},
-      );
-      // #endregion
-    }
-  }
-
-  /// Full sync: reads phonebook → POST /contacts/sync → updates discovery lists
-  Future<ContactSyncResult?> syncAndGetRecommendations(
+  /// Full sync: reads phonebook → POST /contacts/sync → updates discovery lists.
+  /// If the backend already stores the phonebook, skips upload and refreshes from
+  /// GET /contacts/recommendations instead.
+  Future<ContactSyncOutcome> syncAndGetRecommendations(
     String userId, {
     String? accountCountryCode,
     String? accountPhone,
@@ -828,30 +776,84 @@ class FriendsProvider with ChangeNotifier {
       _setError(null);
       notifyListeners();
 
-      final result = await _contactService.requestPermissionAndSyncContacts(
+      final existingStatus = await _contactService.getContactSyncStatus(userId);
+      _backendContactCount = existingStatus.contactCount;
+      _hasBackendContacts = existingStatus.hasStoredContacts;
+
+      if (_hasBackendContacts) {
+        final result = await _contactService.getRecommendations(userId);
+        if (result != null) {
+          _contactSyncResult = result;
+          _hasSynced = true;
+          _lastSyncedAt = _parseLastSyncedAt(existingStatus.lastSyncedAt);
+          return ContactSyncOutcome(result: result);
+        }
+        _setError('Could not load contacts from the server. Please try again.');
+        return const ContactSyncOutcome(issue: ContactSyncIssue.uploadFailed);
+      }
+
+      final outcome = await _contactService.requestPermissionAndSyncContacts(
         userId,
         accountCountryCode: accountCountryCode,
         accountPhone: accountPhone,
         accountDisplayName: accountDisplayName,
       );
 
+      final result = outcome.result;
       if (result != null) {
         _contactSyncResult = result;
         _lastSyncedAt = DateTime.now();
-        
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('contacts_synced_$userId', true);
-        _hasSynced = true;
+        _hasContactsPermission = true;
+
+        final syncStatus = await _contactService.getContactSyncStatus(userId);
+        _backendContactCount = syncStatus.contactCount;
+        _hasBackendContacts = syncStatus.hasStoredContacts;
+        if (_hasBackendContacts) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('contacts_synced_$userId', true);
+          _hasSynced = true;
+        }
+      } else {
+        _hasContactsPermission =
+            await _contactService.hasContactsPermission();
+        final syncStatus = await _contactService.getContactSyncStatus(userId);
+        _backendContactCount = syncStatus.contactCount;
+        _hasBackendContacts = syncStatus.hasStoredContacts;
+        if (_hasBackendContacts) {
+          final refreshed = await _contactService.getRecommendations(userId);
+          if (refreshed != null) {
+            _contactSyncResult = refreshed;
+            _hasSynced = true;
+            _lastSyncedAt = _parseLastSyncedAt(syncStatus.lastSyncedAt);
+          }
+        }
+        if (outcome.issue == ContactSyncIssue.permissionDenied) {
+          _setError('Contacts permission is required to sync your phonebook.');
+        } else if (outcome.issue == ContactSyncIssue.noContacts) {
+          _setError('No contacts found on this device to sync.');
+        } else if (outcome.issue == ContactSyncIssue.uploadFailed) {
+          if (_hasBackendContacts && _contactSyncResult != null) {
+            _setError(null);
+            return ContactSyncOutcome(result: _contactSyncResult);
+          } else {
+            _setError('Could not upload contacts. Please try again.');
+          }
+        }
       }
 
-      return result;
+      return outcome;
     } catch (e) {
       _setError('Failed to sync contacts: ${e.toString()}');
-      return null;
+      return const ContactSyncOutcome(issue: ContactSyncIssue.uploadFailed);
     } finally {
       _isSyncingContacts = false;
       notifyListeners();
     }
+  }
+
+  DateTime? _parseLastSyncedAt(String? value) {
+    if (value == null || value.isEmpty) return null;
+    return DateTime.tryParse(value);
   }
 
   /// Tell backend about permission state change
@@ -871,7 +873,6 @@ class FriendsProvider with ChangeNotifier {
     try {
       _setError(null);
       await _apiClient.dismissRecommendation(
-        userId: userId,
         dismissedUserId: dismissedUserId,
       );
 

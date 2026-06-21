@@ -192,6 +192,47 @@ class SharingProvider extends ChangeNotifier {
 
   int photoCountForUserId(String userId) => imagesForUserId(userId).length;
 
+  /// Snapshot of friends who received photos — call before [clearBatch].
+  List<DetectedRecipient> collectConfirmedRecipients() {
+    if (_batchStatus == null || _userId == null) return [];
+
+    final recipientIds = <String>{};
+    for (final recipients in _imageRecipientMap.values) {
+      for (final id in recipients) {
+        if (!_specialFlags.contains(id) && id != _userId) {
+          recipientIds.add(id);
+        }
+      }
+    }
+
+    final lookup = {
+      for (final recipient in allPotentialRecipients) recipient.userId: recipient,
+    };
+
+    final result = recipientIds.map((id) {
+      final existing = lookup[id];
+      final count = _photoCountInRecipientMap(id);
+      return DetectedRecipient(
+        userId: id,
+        username: existing?.username ?? 'Friend',
+        profilePicId: existing?.profilePicId,
+        count: count,
+        isSelected: true,
+      );
+    }).toList();
+
+    result.sort((a, b) => b.count.compareTo(a.count));
+    return result;
+  }
+
+  int _photoCountInRecipientMap(String userId) {
+    var count = 0;
+    for (final recipients in _imageRecipientMap.values) {
+      if (recipients.contains(userId)) count++;
+    }
+    return count;
+  }
+
   // Check if all images are marked for archive
   bool get areAllArchived {
     if (_batchStatus?.images.isEmpty ?? true) return false;
@@ -414,7 +455,6 @@ class SharingProvider extends ChangeNotifier {
 
       final response = await _apiClient.getBatchStatus(
         batchId: batchId,
-        userId: userId,
       );
 
       _applyBatchStatusResponse(response);
@@ -488,7 +528,6 @@ class SharingProvider extends ChangeNotifier {
       debugPrint('🔄 [SharingProvider] Calling uploadImagesBatch API...');
       final response = await _apiClient
           .uploadImagesBatch(
-            userId: userId,
             images: _selectedImages,
             description: _description.isNotEmpty ? _description : null,
           )
@@ -712,7 +751,6 @@ class SharingProvider extends ChangeNotifier {
       final response = await _apiClient
           .getBatchStatus(
             batchId: _currentBatchId!,
-            userId: _userId!, // Added for authorization
           )
           .timeout(
             const Duration(seconds: 30),
@@ -886,7 +924,7 @@ class SharingProvider extends ChangeNotifier {
   Future<void> _fetchAllFriends() async {
     if (_userId == null) return;
     try {
-      final friendsJson = await _apiClient.getFriends(userId: _userId!);
+      final friendsJson = await _apiClient.getFriends();
       // Convert to DetectedRecipient format
       _allFriends = friendsJson.map((f) {
         // extract friend details from the friend object
@@ -981,7 +1019,6 @@ class SharingProvider extends ChangeNotifier {
       final response = await _apiClient
           .confirmShare(
             batchId: _currentBatchId!,
-            userId: _userId!, // Added for authorization
             recipients: recipientIdsList,
             autoClean: _autoClean,
             imageRecipientMap: _imageRecipientMap.isEmpty
@@ -1060,7 +1097,6 @@ class SharingProvider extends ChangeNotifier {
         );
         await _apiClient.cancelBatch(
           batchId: _currentBatchId!,
-          userId: _userId!,
         );
         debugPrint('✅ [SharingProvider] Backend cancel successful');
       } catch (e) {

@@ -18,12 +18,12 @@ class ForgotPasswordScreen extends StatefulWidget {
 
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _identifierController = TextEditingController();
   bool _isLoading = false;
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _identifierController.dispose();
     super.dispose();
   }
 
@@ -33,27 +33,18 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     HapticFeedback.mediumImpact();
     setState(() => _isLoading = true);
 
-    try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      await authProvider.forgotPassword(_emailController.text);
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    await authProvider.forgotPassword(_identifierController.text);
 
-      if (mounted) {
-        setState(() => _isLoading = false);
+    if (mounted) {
+      setState(() => _isLoading = false);
 
-        ErrorHandler.showSuccessSnackbar(
-          context,
-          message: 'Password reset link sent to your email',
-        );
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ErrorHandler.showErrorSnackbar(
-          context,
-          message: ErrorHandler.getErrorMessage(e),
-        );
-      }
+      ErrorHandler.showSuccessSnackbar(
+        context,
+        message:
+            'If that account exists, a reset link has been sent.',
+      );
+      Navigator.pop(context);
     }
   }
 
@@ -142,7 +133,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       const SizedBox(height: 12),
 
                       Text(
-                        'Enter your email address and we\'ll send you a link to reset your password.',
+                        'Enter your username or email and we\'ll send a reset link if an account exists.',
                         textAlign: TextAlign.center,
                         style: PrismTextStyles.bodyMedium.copyWith(
                           color: PrismColors.secondaryText,
@@ -152,25 +143,22 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       const SizedBox(height: 32),
 
                       Text(
-                        'Email Address',
+                        'Username or email',
                         style: PrismTextStyles.bodyMedium,
                       ).animate().fadeIn(delay: 300.ms),
                       const SizedBox(height: 8),
 
                       TextFormField(
-                        controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
+                        controller: _identifierController,
+                        keyboardType: TextInputType.text,
                         style: PrismTextStyles.bodyLarge,
                         decoration: _prismInputDecoration(
-                          'Enter your email',
-                          Icons.email_outlined,
+                          'Enter username or email',
+                          Icons.person_outline_rounded,
                         ),
                         validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter your email';
-                          }
-                          if (!value.contains('@')) {
-                            return 'Please enter a valid email';
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter your username or email';
                           }
                           return null;
                         },

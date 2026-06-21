@@ -116,7 +116,7 @@ class GalleryProvider with ChangeNotifier {
       _setLoading(true);
       _setError(null);
 
-      final data = await _apiClient.getGallery(userId: userId);
+      final data = await _apiClient.getGallery();
 
       debugPrint('Gallery API Response: ${data.length} items received');
       if (data.isNotEmpty) {
@@ -236,7 +236,6 @@ class GalleryProvider with ChangeNotifier {
     try {
       final newValue = await _apiClient.toggleImageStatus(
         imageId: imageId,
-        userId: userId,
         field: field,
       );
 
@@ -298,7 +297,6 @@ class GalleryProvider with ChangeNotifier {
     try {
       await _apiClient.updateImageDescription(
         imageId: imageId,
-        userId: userId,
         description: description,
       );
 
@@ -366,7 +364,6 @@ class GalleryProvider with ChangeNotifier {
   }) async {
     try {
       await _apiClient.batchUpdateStatus(
-        userId: userId,
         imageIds: imageIds,
         field: field,
         value: value,
@@ -418,7 +415,6 @@ class GalleryProvider with ChangeNotifier {
       // Toggle bin to false (restore)
       await _apiClient.toggleImageStatus(
         imageId: imageId,
-        userId: userId,
         field: 'bin',
       );
 
@@ -641,7 +637,7 @@ class GalleryProvider with ChangeNotifier {
     _setError(null);
 
     try {
-      final data = await _apiClient.getGallery(userId: userId);
+      final data = await _apiClient.getGallery();
 
       debugPrint(
         '📥 [GalleryProvider] Received ${data.length} images from backend',
@@ -884,7 +880,7 @@ class GalleryProvider with ChangeNotifier {
       await _gallerySaveService.refreshLocalImageCache();
 
       // Fetch fresh data from backend
-      final data = await _apiClient.getGallery(userId: userId);
+      final data = await _apiClient.getGallery();
 
       debugPrint(
         '📥 [GalleryProvider] Received ${data.length} images from backend',

@@ -40,6 +40,44 @@ class ContactSyncResult {
   bool get isNotEmpty => !isEmpty;
 }
 
+enum ContactSyncIssue {
+  permissionDenied,
+  noContacts,
+  uploadFailed,
+}
+
+class ContactSyncOutcome {
+  final ContactSyncResult? result;
+  final ContactSyncIssue? issue;
+
+  const ContactSyncOutcome({this.result, this.issue});
+
+  bool get isSuccess => result != null;
+}
+
+/// Response from GET /contacts/sync-status
+class ContactSyncStatus {
+  final int contactCount;
+  final String? permissionStatus;
+  final String? lastSyncedAt;
+
+  const ContactSyncStatus({
+    required this.contactCount,
+    this.permissionStatus,
+    this.lastSyncedAt,
+  });
+
+  bool get hasStoredContacts => contactCount > 0;
+
+  factory ContactSyncStatus.fromJson(Map<String, dynamic> json) {
+    return ContactSyncStatus(
+      contactCount: (json['contact_count'] as num?)?.toInt() ?? 0,
+      permissionStatus: json['permission_status'] as String?,
+      lastSyncedAt: json['last_synced_at']?.toString(),
+    );
+  }
+}
+
 /// A Prism user found via phonebook matching
 class OnPlatformUser {
   final String userId;

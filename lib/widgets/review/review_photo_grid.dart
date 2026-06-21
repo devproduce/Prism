@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:prism/models/sharing_models.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
+import 'package:prism/utils/responsive_helper.dart';
 import 'package:prism/widgets/prism_media_preview.dart';
 
 /// Three-column square thumbnail grid for review accordion bodies.
@@ -21,8 +22,16 @@ class ReviewPhotoGrid extends StatelessWidget {
     this.recipientCountForImage,
   });
 
-  static const int _columns = 3;
-  static const double _spacing = 8;
+  static double _spacing(BuildContext context) {
+    return ResponsiveHelper.isSmallScreen(context) ? 6 : 8;
+  }
+
+  static int _columns(BuildContext context) {
+    final width = ResponsiveHelper.screenWidth(context);
+    if (width >= ResponsiveHelper.tablet) return 4;
+    if (width < ResponsiveHelper.smallScreen) return 2;
+    return 3;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -30,12 +39,14 @@ class ReviewPhotoGrid extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        final columns = _columns(context);
+        final spacing = _spacing(context);
         final cellSize =
-            (constraints.maxWidth - _spacing * (_columns - 1)) / _columns;
+            (constraints.maxWidth - spacing * (columns - 1)) / columns;
 
         return Wrap(
-          spacing: _spacing,
-          runSpacing: _spacing,
+          spacing: spacing,
+          runSpacing: spacing,
           children: images.map((image) {
             final recipientCount = recipientCountForImage?.call(image.id) ?? 0;
             final imageUrl = fixUrl(image.url ?? image.thumbUrl);

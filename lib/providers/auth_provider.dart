@@ -2,31 +2,43 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:prism/utils/constants.dart';
 import 'package:prism/utils/error_handler.dart';
+import 'package:prism/utils/auth_constants.dart';
+import 'package:prism/models/auth_gate.dart';
+import 'package:prism/models/resolve_username_result.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:prism/api/api_client.dart';
 import 'package:prism/models/user_model.dart';
+import 'package:prism/models/auth_response.dart';
 import 'package:prism/services/database_service.dart';
 import 'package:prism/services/contact_service.dart';
+import 'package:prism/services/token_storage_service.dart';
+import 'package:prism/services/auth_session_store.dart';
+import 'package:prism/services/firebase_auth_service.dart';
 import 'package:prism/providers/profile_provider.dart';
 import 'package:prism/services/notification_service.dart';
-
-// SharedPreferences keys for native Android access
-// These must match the keys used in BackgroundShareService.kt
-const String kPrefAuthToken = 'prism_auth_token';
-const String kPrefUserId = 'prism_user_id';
-const String kPrefBaseUrl = 'prism_base_url';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class AuthProvider with ChangeNotifier {
+  AuthProvider() {
+    _apiClient.onSessionExpired = _handleSessionExpired;
+    _apiClient.onAuthGateRequired = _handleAuthGateRequired;
+  }
+
   final ApiClient _apiClient = ApiClient();
   final DatabaseService _databaseService = DatabaseService.instance;
   final ContactService _contactService = ContactService();
+  final TokenStorageService _tokenStorage = TokenStorageService.instance;
+  final AuthSessionStore _sessionStore = AuthSessionStore.instance;
+  final FirebaseAuthService _firebaseAuth = FirebaseAuthService.instance;
 
   UserModel? _currentUser;
   bool _isLoading = false;
   String? _error;
   bool _isAuthenticated = false;
   bool _contactsSynced = false;
+  AuthGate _authGate = AuthGate.none;
+  bool _sessionExpired = false;
 
   bool _phoneSyncWarning = false;
 
@@ -36,6 +48,8 @@ class AuthProvider with ChangeNotifier {
   String? get error => _error;
   bool get isAuthenticated => _isAuthenticated;
   bool get contactsSynced => _contactsSynced;
+  AuthGate get authGate => _authGate;
+  bool get sessionExpired => _sessionExpired;
   /// True when the backend could not normalize the phone number on registration.
   bool get phoneSyncWarning => _phoneSyncWarning;
   ApiClient get apiClient => _apiClient;
@@ -67,37 +81,373 @@ class AuthProvider with ChangeNotifier {
   /// Initialize authentication state from database
   Future<void> initializeAuth() async {
     try {
+      _sessionExpired = false;
       final isLoggedIn = await _databaseService.isUserLoggedIn();
       if (isLoggedIn) {
         final user = await _databaseService.getUserSession();
         if (user != null) {
           _currentUser = user;
           _isAuthenticated = true;
+          await _sessionStore.bindUser(user.userId);
+          _authGate = _sessionStore.authGate;
           await _hydrateContactsSyncedState(user.userId);
 
-          // Restore auth token from SharedPreferences
-          // This was saved during login and needs to be restored for API calls
-          final prefs = await SharedPreferences.getInstance();
-          final savedToken = prefs.getString(kPrefAuthToken);
-          if (savedToken != null && savedToken.isNotEmpty) {
-            _apiClient.setAuthToken(savedToken);
-            debugPrint('✅ Restored auth token from SharedPreferences');
+          final accessToken = await _tokenStorage.getAccessToken();
+          if (accessToken != null && accessToken.isNotEmpty) {
+            _apiClient.setAuthToken(accessToken);
+            debugPrint('✅ Restored access token from storage');
           } else {
-            debugPrint('⚠️ No saved auth token found in SharedPreferences');
+            debugPrint('⚠️ No saved access token found');
           }
 
-          // Ensure credentials are in SharedPreferences for native Android share receiver
           await _saveCredentialsForNativeAccess();
-
-          // Register FCM token
           NotificationService.registerDeviceToken(user.userId);
-
           notifyListeners();
         }
       }
     } catch (e) {
       debugPrint('Failed to initialize auth: $e');
     }
+  }
+
+  void _handleSessionExpired() {
+    _sessionExpired = true;
+    _isAuthenticated = false;
+    _authGate = AuthGate.none;
+    notifyListeners();
+  }
+
+  void _handleAuthGateRequired(AuthGate gate) {
+    _authGate = gate;
+    _sessionStore.setAuthGate(gate);
+    notifyListeners();
+  }
+
+  void clearSessionExpiredFlag() {
+    _sessionExpired = false;
+  }
+
+  void clearAuthGate() {
+    _authGate = AuthGate.none;
+    _sessionStore.setAuthGate(AuthGate.none);
+    notifyListeners();
+  }
+
+  Future<bool> _finalizeAuthenticatedSession(AuthResponse response) async {
+    _currentUser = response.user;
+    _isAuthenticated = true;
+    _authGate = AuthGate.none;
+    _sessionStore.setAuthGate(AuthGate.none);
+
+    if (response.accessToken != null && response.accessToken!.isNotEmpty) {
+      debugPrint('✅ Auth tokens persisted from response');
+    } else {
+      debugPrint('⚠️ No access token in auth response');
+    }
+
+    await _sessionStore.bindUser(response.user.userId);
+    await _databaseService.saveUserSession(response.user);
+    await _saveCredentialsForNativeAccess();
+
+    try {
+      final freshUser = await _apiClient.getCurrentUser();
+      _currentUser = freshUser;
+      await _databaseService.updateUserSession(freshUser);
+    } catch (e) {
+      if (e is ApiException && e.statusCode == 403) {
+        debugPrint('Session active but email verification required: $e');
+      } else {
+        debugPrint('Warning: Could not fetch fresh profile: $e');
+      }
+    }
+
+    await _hydrateContactsSyncedState(response.user.userId);
+    NotificationService.registerDeviceToken(response.user.userId);
+    notifyListeners();
+    return true;
+  }
+
+  Future<ResolveUsernameResult> resolveUsername(String username) async {
+    return _apiClient.resolveUsername(username);
+  }
+
+  Future<bool> loginWithFirebaseEmail({
+    required String email,
+    required String password,
+    bool manageLoadingState = true,
+  }) async {
+    try {
+      if (manageLoadingState) {
+        _setLoading(true);
+        _setError(null);
+      }
+
+      await _firebaseAuth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      final idToken = await _firebaseAuth.getIdToken();
+      final response = await _apiClient.loginVerify(idToken: idToken);
+      await _finalizeAuthenticatedSession(response);
+      if (manageLoadingState) _setLoading(false);
+      return true;
+    } on FirebaseAuthException catch (e) {
+      _setError(_firebaseAuth.friendlyError(e));
+      if (manageLoadingState) _setLoading(false);
+      return false;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      if (manageLoadingState) _setLoading(false);
+      return false;
+    } catch (e) {
+      _setError(ErrorHandler.getErrorMessage(e));
+      if (manageLoadingState) _setLoading(false);
+      return false;
+    }
+  }
+
+  Future<bool> _recoverRegistrationSession({
+    required UserModel registeredUser,
+    required String username,
+    required String password,
+    String? email,
+  }) async {
+    var loginEmail = email?.trim().isNotEmpty == true
+        ? email!.trim()
+        : (registeredUser.email.isNotEmpty ? registeredUser.email : null);
+
+    if (loginEmail == null || loginEmail.isEmpty) {
+      try {
+        final resolved = await _apiClient.resolveUsername(username);
+        loginEmail = resolved.email;
+      } catch (e) {
+        debugPrint('Could not resolve email after registration: $e');
+      }
+    }
+
+    if (loginEmail == null || loginEmail.isEmpty) {
+      _setError(
+        'Registration succeeded but sign-in failed. Please log in with your username.',
+      );
+      return false;
+    }
+
+    return loginWithFirebaseEmail(
+      email: loginEmail,
+      password: password,
+      manageLoadingState: false,
+    );
+  }
+
+  UserModel _mergeRegisteredUserData(
+    UserModel? current,
+    UserModel registeredUser,
+  ) {
+    final merged = current ?? registeredUser;
+    return merged.copyWith(
+      firstName: merged.firstName.isEmpty
+          ? registeredUser.firstName
+          : merged.firstName,
+      lastName: merged.lastName ?? registeredUser.lastName,
+      phoneNumber: merged.phoneNumber ?? registeredUser.phoneNumber,
+      countryCode: merged.countryCode ?? registeredUser.countryCode,
+      email: merged.email.isEmpty ? registeredUser.email : merged.email,
+      username:
+          merged.username.isEmpty ? registeredUser.username : merged.username,
+    );
+  }
+
+  Future<bool> migrateLegacyAccount({
+    required String email,
+    required String password,
+  }) async {
+    final migrationToken = _sessionStore.migrationToken;
+    if (migrationToken == null || migrationToken.isEmpty) {
+      _setError('Migration session expired. Please log in again.');
+      return false;
+    }
+
+    try {
+      _setLoading(true);
+      _setError(null);
+
+      final response = await _apiClient.migrateEmail(
+        migrationToken: migrationToken,
+        email: email,
+        password: password,
+      );
+
+      if (_currentUser != null) {
+        await _sessionStore.setHasFirebaseAccount(_currentUser!.userId, true);
+      } else {
+        await _sessionStore.setHasFirebaseAccount(
+          response.user.userId,
+          true,
+        );
+      }
+
+      _sessionStore.setMigrationToken(null);
+      await _finalizeAuthenticatedSession(response);
+      _authGate = AuthGate.verifyEmail;
+      _sessionStore.setAuthGate(AuthGate.verifyEmail);
+      _setLoading(false);
+      return true;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      _setLoading(false);
+      return false;
+    } catch (e) {
+      _setError(ErrorHandler.getErrorMessage(e));
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  Future<void> resendVerificationEmail() async {
+    await _apiClient.resendVerificationEmail();
+  }
+
+  Future<bool> confirmEmailVerified() async {
+    try {
+      _setLoading(true);
+      await _firebaseAuth.reloadCurrentUser();
+      if (!_firebaseAuth.isEmailVerified) {
+        _setLoading(false);
+        return false;
+      }
+
+      final idToken = await _firebaseAuth.getIdToken(forceRefresh: true);
+      final response = await _apiClient.loginVerify(idToken: idToken);
+      await _finalizeAuthenticatedSession(response);
+      clearAuthGate();
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _setError(ErrorHandler.getErrorMessage(e));
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  void beginLegacyMigration(ResolveUsernameResult result) {
+    _sessionStore.setMigrationToken(result.migrationToken);
+    _sessionStore.hasFirebaseAccount = result.hasFirebaseAccount;
+    _authGate = AuthGate.migrateAccount;
+    _sessionStore.setAuthGate(AuthGate.migrateAccount);
+    notifyListeners();
+  }
+
+  /// Google sign-in for returning users. Returns false when registration is required.
+  Future<bool> loginWithGoogle() async {
+    try {
+      _setLoading(true);
+      _setError(null);
+
+      await _firebaseAuth.signInWithGoogle();
+      final idToken = await _firebaseAuth.getIdToken();
+      final response = await _apiClient.googleLogin(idToken: idToken);
+
+      if (response.exists == false) {
+        _pendingGoogleIdToken = idToken;
+        _googleRegistrationRequired = true;
+        _setError(null);
+        _setLoading(false);
+        return false;
+      }
+
+      await _finalizeAuthenticatedSession(response);
+      _setLoading(false);
+      return true;
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'google-sign-in-cancelled') {
+        _setError(null);
+      } else {
+        _setError(_firebaseAuth.friendlyError(e));
+      }
+      _setLoading(false);
+      return false;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      _setLoading(false);
+      return false;
+    } catch (e) {
+      _setError(ErrorHandler.getErrorMessage(e));
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  /// Returns true when [loginWithGoogle] found no existing Prism account.
+  bool get googleRegistrationRequired => _googleRegistrationRequired;
+  bool _googleRegistrationRequired = false;
+  String? _pendingGoogleIdToken;
+
+  bool get usesGoogleAuth {
+    final provider = _currentUser?.authProvider?.toLowerCase();
+    if (provider != null && provider.isNotEmpty) {
+      return provider == 'google';
+    }
+    return _firebaseAuth.isGoogleLinked;
+  }
+
+  void clearGoogleRegistrationRequired() {
+    _googleRegistrationRequired = false;
+    _pendingGoogleIdToken = null;
+  }
+
+  Future<bool> completeGoogleRegistration({
+    required String username,
+    List<String>? faceIds,
+    File? profileImage,
+  }) async {
+    try {
+      _setLoading(true);
+      _setError(null);
+
+      final idToken = _pendingGoogleIdToken ??
+          await _firebaseAuth.getIdToken(forceRefresh: true);
+      final response = await _apiClient.googleRegister(
+        idToken: idToken,
+        username: username,
+        faceIds: faceIds,
+        profileImage: profileImage,
+      );
+
+      _pendingGoogleIdToken = null;
+      _googleRegistrationRequired = false;
+      await _finalizeAuthenticatedSession(response);
+      _setLoading(false);
+      return true;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      _setLoading(false);
+      return false;
+    } catch (e) {
+      _setError(ErrorHandler.getErrorMessage(e));
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  Future<String> _reauthenticateForSensitiveAction({String? password}) async {
+    if (usesGoogleAuth) {
+      await _firebaseAuth.reauthenticateWithGoogle();
+    } else {
+      final email =
+          _currentUser?.email ?? _firebaseAuth.currentUser?.email ?? '';
+      if (email.isEmpty || password == null || password.isEmpty) {
+        throw StateError('Password is required to confirm this action.');
+      }
+      await _firebaseAuth.reauthenticateWithPassword(
+        email: email,
+        password: password,
+      );
+    }
+    return _firebaseAuth.getIdToken(forceRefresh: true);
+  }
+
+  Future<void> forceLogout(BuildContext context) async {
+    await logout(context);
   }
 
   /// Register a new user (V2 — phone-first)
@@ -130,7 +480,7 @@ class AuthProvider with ChangeNotifier {
       );
 
       _currentUser = response.user;
-      final token = response.token;
+      final token = response.accessToken;
 
       // Check phone_synced flag
       if (response.phoneSynced == false) {
@@ -153,61 +503,27 @@ class AuthProvider with ChangeNotifier {
       }
 
       if (needsAutoLogin) {
-        debugPrint('🔄 Initiating Auto-Login Sequence...');
-        
-        // Save the full registration user data before login potentially wipes it
-        final registeredUser = _currentUser;
-        
-        // Try login with username (phone login not yet supported on login endpoint)
-        final loginSuccess = await login(identifier: username, password: password);
-        
-        // If login succeeded but wiped our data (e.g. getCurrentUser failed), restore it!
-        if (loginSuccess && registeredUser != null) {
-           _currentUser = _currentUser?.copyWith(
-             firstName: (_currentUser?.firstName.isEmpty ?? true) ? registeredUser.firstName : null,
-             lastName: _currentUser?.lastName ?? registeredUser.lastName,
-             phoneNumber: _currentUser?.phoneNumber ?? registeredUser.phoneNumber,
-             countryCode: _currentUser?.countryCode ?? registeredUser.countryCode,
-             email: (_currentUser?.email.isEmpty ?? true) ? registeredUser.email : null,
-             // In case username also got wiped somehow
-             username: (_currentUser?.username.isEmpty ?? true) ? registeredUser.username : null,
-           ) ?? registeredUser;
-           
-           // Ensure the database has the merged data
-           await _databaseService.updateUserSession(_currentUser!);
+        debugPrint('🔄 Initiating Firebase recovery after registration...');
+
+        final registeredUser = _currentUser ?? response.user;
+        final loginSuccess = await _recoverRegistrationSession(
+          registeredUser: registeredUser,
+          username: username,
+          password: password,
+          email: email,
+        );
+
+        if (loginSuccess) {
+          _currentUser = _mergeRegisteredUserData(_currentUser, registeredUser);
+          await _databaseService.updateUserSession(_currentUser!);
         }
-        
+
+        _setLoading(false);
         return loginSuccess;
       }
 
-      _isAuthenticated = true;
-
-      // Set auth token in ApiClient if provided by backend
-      if (token != null && token.isNotEmpty) {
-        _apiClient.setAuthToken(token);
-        debugPrint('✅ Auth token set from register response');
-      }
-
-      // Save user session to database
-      await _databaseService.saveUserSession(response.user);
-
-      // Save credentials to SharedPreferences for native Android access
-      await _saveCredentialsForNativeAccess();
-
-      // Fetch fresh profile from backend to ensure latest data
-      try {
-        final freshUser = await _apiClient.getCurrentUser(response.user.userId);
-        _currentUser = freshUser;
-        await _databaseService.updateUserSession(freshUser);
-      } catch (e) {
-        debugPrint('Warning: Could not fetch fresh profile: $e');
-      }
-
-      // Register FCM token
-      NotificationService.registerDeviceToken(response.user.userId);
-
+      await _finalizeAuthenticatedSession(response);
       _setLoading(false);
-
       return true;
     } on ApiException catch (e) {
       _setError(e.message);
@@ -221,67 +537,7 @@ class AuthProvider with ChangeNotifier {
   }
 
 
-  /// Login user
-  Future<bool> login({
-    required String identifier,
-    required String password,
-  }) async {
-    try {
-      _setLoading(true);
-      _setError(null);
-
-      final response = await _apiClient.login(
-        identifier: identifier,
-        password: password,
-      );
-
-      _currentUser = response.user;
-      _isAuthenticated = true;
-
-      // Set auth token in ApiClient if provided by backend
-      if (response.token != null && response.token!.isNotEmpty) {
-        _apiClient.setAuthToken(response.token!);
-        debugPrint('✅ Auth token set from login response');
-      } else {
-        debugPrint('⚠️ No auth token in login response');
-      }
-
-      // Save user session to database
-      await _databaseService.saveUserSession(response.user);
-
-      // Save credentials to SharedPreferences for native Android access
-      await _saveCredentialsForNativeAccess();
-
-      // Fetch fresh profile from backend to ensure latest data
-      try {
-        final freshUser = await _apiClient.getCurrentUser(response.user.userId);
-        _currentUser = freshUser;
-        await _databaseService.updateUserSession(freshUser);
-      } catch (e) {
-        debugPrint('Warning: Could not fetch fresh profile: $e');
-        // Continue with login even if profile fetch fails
-      }
-
-      await _hydrateContactsSyncedState(response.user.userId);
-
-      // Register FCM token
-      NotificationService.registerDeviceToken(response.user.userId);
-
-      _setLoading(false);
-
-      return true;
-    } on ApiException catch (e) {
-      _setError(e.message);
-      _setLoading(false);
-      return false;
-    } catch (e) {
-      _setError(ErrorHandler.getErrorMessage(e));
-      _setLoading(false);
-      return false;
-    }
-  }
-
-  /// Verify password for archive unlock
+  /// Verify password for archive unlock.
   /// Returns true if password is valid
   Future<bool> verifyPassword(String password) async {
     if (_currentUser == null) {
@@ -291,7 +547,6 @@ class AuthProvider with ChangeNotifier {
 
     try {
       final isValid = await _apiClient.verifyPassword(
-        userId: _currentUser!.userId,
         password: password,
       );
 
@@ -311,24 +566,23 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  /// Forgot password
-  Future<void> forgotPassword(String email) async {
+  /// Forgot password — accepts username or email.
+  Future<void> forgotPassword(String identifier) async {
     try {
       _setLoading(true);
       _setError(null);
 
-      await _apiClient.forgotPassword(email);
-    } catch (e) {
-      _setError(e.toString());
-      rethrow;
+      await _apiClient.forgotPassword(identifier.trim());
+    } catch (_) {
+      // Always show generic success per security policy.
     } finally {
       _setLoading(false);
     }
   }
 
-  /// Delete account
+  /// Delete account after Firebase re-authentication.
   Future<void> deleteAccount({
-    required String password,
+    String? password,
     required String reason,
     String? feedback,
     required BuildContext context,
@@ -339,16 +593,45 @@ class AuthProvider with ChangeNotifier {
       _setLoading(true);
       _setError(null);
 
+      final firebaseToken =
+          await _reauthenticateForSensitiveAction(password: password);
+
       await _apiClient.deleteAccount(
-        userId: _currentUser!.userId,
-        password: password,
+        firebaseToken: firebaseToken,
         reason: reason,
         feedback: feedback,
       );
 
       await logout(context);
+    } on FirebaseAuthException catch (e) {
+      _setError(_firebaseAuth.friendlyError(e));
+      rethrow;
     } catch (e) {
-      _setError(e.toString());
+      _setError(ErrorHandler.getErrorMessage(e));
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Cancel scheduled account deletion.
+  Future<void> cancelAccountDeletion({
+    String? password,
+    required BuildContext context,
+  }) async {
+    try {
+      _setLoading(true);
+      _setError(null);
+
+      final firebaseToken =
+          await _reauthenticateForSensitiveAction(password: password);
+      await _apiClient.cancelDeletion(firebaseToken: firebaseToken);
+      await refreshUser();
+    } on FirebaseAuthException catch (e) {
+      _setError(_firebaseAuth.friendlyError(e));
+      rethrow;
+    } catch (e) {
+      _setError(ErrorHandler.getErrorMessage(e));
       rethrow;
     } finally {
       _setLoading(false);
@@ -367,15 +650,14 @@ class AuthProvider with ChangeNotifier {
       final fullName = '${user.firstName} ${user.lastName ?? ''}'.trim();
       final ownerName = fullName.isNotEmpty ? fullName : user.username;
 
-      final result = await _contactService.requestPermissionAndSyncContacts(
+      final outcome = await _contactService.requestPermissionAndSyncContacts(
         user.userId,
         accountCountryCode: user.countryCode,
         accountPhone: user.phoneNumber,
         accountDisplayName: ownerName,
       );
 
-      // result is null if permission was denied; non-null means sync succeeded
-      final success = result != null;
+      final success = outcome.isSuccess;
 
       if (success) {
         await _databaseService.markContactsSynced();
@@ -405,34 +687,26 @@ class AuthProvider with ChangeNotifier {
   Future<void> _hydrateContactsSyncedState(String userId) async {
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool('contacts_synced_$userId') ?? false) {
-      _contactsSynced = true;
-      await _databaseService.markContactsSynced();
-      return;
-    }
-
-    if (await _databaseService.hasContactsSynced()) {
-      _contactsSynced = true;
-      await prefs.setBool('contacts_synced_$userId', true);
-      return;
-    }
-
-    try {
       final storedOnBackend =
           await _contactService.hasContactsStoredOnBackend(userId);
       if (storedOnBackend) {
         _contactsSynced = true;
         await _databaseService.markContactsSynced();
-        await prefs.setBool('contacts_synced_$userId', true);
-        debugPrint(
-          '[AuthProvider] Restored contacts-synced state from backend',
-        );
-      } else {
-        _contactsSynced = false;
       }
-    } catch (e) {
-      debugPrint('[AuthProvider] hydrateContactsSyncedState: $e');
-      _contactsSynced = await _databaseService.hasContactsSynced();
+      return;
     }
+
+    if (await _databaseService.hasContactsSynced()) {
+      final storedOnBackend =
+          await _contactService.hasContactsStoredOnBackend(userId);
+      if (storedOnBackend) {
+        _contactsSynced = true;
+        await prefs.setBool('contacts_synced_$userId', true);
+      }
+      return;
+    }
+
+    _contactsSynced = false;
     notifyListeners();
   }
 
@@ -441,10 +715,13 @@ class AuthProvider with ChangeNotifier {
     try {
       await _databaseService.clearAllData();
       await _clearCredentialsForNativeAccess();
+      await _sessionStore.clear();
+      await _firebaseAuth.signOut();
       _currentUser = null;
       _isAuthenticated = false;
       _contactsSynced = false;
-      _apiClient.clearAuthToken();
+      _authGate = AuthGate.none;
+      await _apiClient.clearAuthToken();
       notifyListeners();
     } catch (e) {
       debugPrint('Error clearing database: $e');
@@ -457,7 +734,10 @@ class AuthProvider with ChangeNotifier {
     _currentUser = null;
     _isAuthenticated = false;
     _contactsSynced = false;
-    _apiClient.clearAuthToken();
+    _authGate = AuthGate.none;
+    await _apiClient.clearAuthToken();
+    await _sessionStore.clear();
+    await _firebaseAuth.signOut();
 
     // Clear all database data (user session, gallery cache, etc.)
     await _databaseService.clearAllData();
@@ -495,9 +775,7 @@ class AuthProvider with ChangeNotifier {
         await prefs.setString(kPrefAuthToken, _apiClient.token!);
         debugPrint('✅ Saved auth token for native access');
       } else {
-        // No token from backend - save userId as token for now
-        await prefs.setString(kPrefAuthToken, _currentUser!.userId);
-        debugPrint('⚠️ No backend token - using userId as auth credential');
+        debugPrint('⚠️ No backend token available for native access');
       }
 
       await prefs.setString(
@@ -547,7 +825,6 @@ class AuthProvider with ChangeNotifier {
       _setError(null);
 
       final updatedUser = await _apiClient.updateProfile(
-        userId: _currentUser!.userId,
         username: username,
         firstName: firstName,
         lastName: lastName,
@@ -582,7 +859,7 @@ class AuthProvider with ChangeNotifier {
     if (_currentUser == null) return;
 
     try {
-      final updatedUser = await _apiClient.getCurrentUser(_currentUser!.userId);
+      final updatedUser = await _apiClient.getCurrentUser();
 
       // Preserve local archive PIN since backend doesn't know about it
       _currentUser = updatedUser.copyWith(archivePin: _currentUser!.archivePin);
@@ -607,7 +884,6 @@ class AuthProvider with ChangeNotifier {
       _setError(null);
 
       final updatedUser = await _apiClient.uploadProfilePicture(
-        userId: _currentUser!.userId,
         profileImage: profileImage,
       );
 
@@ -661,9 +937,7 @@ class AuthProvider with ChangeNotifier {
       _setLoading(true);
       _setError(null);
 
-      final response = await _apiClient.resetProfilePicture(
-        userId: _currentUser!.userId,
-      );
+      final response = await _apiClient.resetProfilePicture();
 
       // Update user with new default avatar profile_pic_id
       _currentUser = _currentUser!.copyWith(

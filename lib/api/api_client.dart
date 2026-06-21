@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -5,7 +6,11 @@ import 'package:http/http.dart' as http;
 import 'package:prism/utils/constants.dart';
 import 'package:prism/models/user_model.dart';
 import 'package:prism/models/auth_response.dart';
+import 'package:prism/models/auth_gate.dart';
 import 'package:prism/models/contact_sync_result.dart';
+import 'package:prism/models/resolve_username_result.dart';
+import 'package:prism/services/token_storage_service.dart';
+import 'package:prism/services/auth_session_store.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -23,7 +28,28 @@ class ApiClient {
   ApiClient._internal();
 
   final http.Client _client = http.Client();
+  final TokenStorageService _tokenStorage = TokenStorageService.instance;
   String? _authToken;
+
+  bool _isRefreshing = false;
+  final List<Completer<String?>> _refreshWaiters = [];
+
+  /// Called when refresh fails and the user must sign in again.
+  VoidCallback? onSessionExpired;
+
+  /// Called when backend returns 403 "Email not verified".
+  void Function(AuthGate gate)? onAuthGateRequired;
+
+  Future<void> saveAuthTokens({
+    required String accessToken,
+    String? refreshToken,
+  }) async {
+    _authToken = accessToken;
+    await _tokenStorage.saveAccessToken(accessToken);
+    if (refreshToken != null && refreshToken.isNotEmpty) {
+      await _tokenStorage.saveRefreshToken(refreshToken);
+    }
+  }
 
   // Set authentication token
   void setAuthToken(String token) {
@@ -31,8 +57,9 @@ class ApiClient {
   }
 
   // Clear authentication token
-  void clearAuthToken() {
+  Future<void> clearAuthToken() async {
     _authToken = null;
+    await _tokenStorage.clearAll();
   }
 
   // Get authentication token
@@ -45,6 +72,180 @@ class ApiClient {
       if (_authToken != null) 'Authorization': 'Bearer $_authToken',
     };
     return headers;
+  }
+
+  void _handle403EmailGate(http.Response response) {
+    final message = _extractErrorMessage(response.body, 403);
+    if (!message.toLowerCase().contains('email not verified')) {
+      return;
+    }
+
+    final gate = AuthSessionStore.instance.hasFirebaseAccount
+        ? AuthGate.verifyEmail
+        : AuthGate.migrateAccount;
+    AuthSessionStore.instance.setAuthGate(gate);
+    onAuthGateRequired?.call(gate);
+  }
+
+  void _completeRefreshWaiters(String? token) {
+    for (final waiter in _refreshWaiters) {
+      if (!waiter.isCompleted) {
+        waiter.complete(token);
+      }
+    }
+    _refreshWaiters.clear();
+  }
+
+  Future<String?> _refreshAccessToken() async {
+    if (_isRefreshing) {
+      final waiter = Completer<String?>();
+      _refreshWaiters.add(waiter);
+      return waiter.future;
+    }
+
+    _isRefreshing = true;
+    try {
+      final refreshToken = await _tokenStorage.getRefreshToken();
+      if (refreshToken == null || refreshToken.isEmpty) {
+        _completeRefreshWaiters(null);
+        await clearAuthToken();
+        onSessionExpired?.call();
+        return null;
+      }
+
+      final uri = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.refresh}');
+      final response = await _client.post(
+        uri,
+        headers: const {'Content-Type': 'application/json'},
+        body: json.encode({'refresh_token': refreshToken}),
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final accessToken = data['access_token'] as String?;
+        final newRefresh =
+            data['refresh_token'] as String? ?? refreshToken;
+        if (accessToken != null && accessToken.isNotEmpty) {
+          await saveAuthTokens(
+            accessToken: accessToken,
+            refreshToken: newRefresh,
+          );
+          _completeRefreshWaiters(accessToken);
+          return accessToken;
+        }
+      }
+
+      _completeRefreshWaiters(null);
+      await clearAuthToken();
+      onSessionExpired?.call();
+      return null;
+    } catch (e) {
+      debugPrint('Token refresh failed: $e');
+      _completeRefreshWaiters(null);
+      await clearAuthToken();
+      onSessionExpired?.call();
+      return null;
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+
+  Future<http.Response> _withAuthRetry(
+    Future<http.Response> Function() send, {
+    bool authenticated = true,
+  }) async {
+    var response = await send();
+
+    if (response.statusCode == 429) {
+      throw ApiException(
+        _extractErrorMessage(response.body, 429),
+        429,
+      );
+    }
+
+    if (response.statusCode == 403) {
+      _handle403EmailGate(response);
+    }
+
+    if (!authenticated || response.statusCode != 401) {
+      return response;
+    }
+
+    final newToken = await _refreshAccessToken();
+    if (newToken == null) {
+      throw ApiException(
+        'Your session has expired. Please log in again.',
+        401,
+      );
+    }
+
+    return send();
+  }
+
+  Future<http.Response> _get(
+    Uri uri, {
+    bool authenticated = true,
+  }) {
+    return _withAuthRetry(
+      () => _client.get(uri, headers: _getHeaders()),
+      authenticated: authenticated,
+    );
+  }
+
+  Future<http.Response> _post(
+    Uri uri, {
+    Object? body,
+    bool authenticated = true,
+  }) {
+    return _withAuthRetry(
+      () => _client.post(uri, headers: _getHeaders(), body: body),
+      authenticated: authenticated,
+    );
+  }
+
+  Future<http.Response> _delete(
+    Uri uri, {
+    Object? body,
+    bool authenticated = true,
+  }) {
+    return _withAuthRetry(
+      () => _client.delete(uri, headers: _getHeaders(), body: body),
+      authenticated: authenticated,
+    );
+  }
+
+  Future<http.Response> _put(
+    Uri uri, {
+    Object? body,
+    bool authenticated = true,
+  }) {
+    return _withAuthRetry(
+      () => _client.put(uri, headers: _getHeaders(), body: body),
+      authenticated: authenticated,
+    );
+  }
+
+  Future<http.Response> _patch(
+    Uri uri, {
+    Object? body,
+    bool authenticated = true,
+  }) {
+    return _withAuthRetry(
+      () => _client.patch(uri, headers: _getHeaders(), body: body),
+      authenticated: authenticated,
+    );
+  }
+
+  Future<http.Response> _sendMultipart(
+    Future<http.MultipartRequest> Function() buildRequest, {
+    bool authenticated = true,
+  }) {
+    return _withAuthRetry(() async {
+      final request = await buildRequest();
+      request.headers.addAll(_getHeaders(isMultipart: true));
+      final streamedResponse = await request.send();
+      return http.Response.fromStream(streamedResponse);
+    }, authenticated: authenticated);
   }
 
   // Handle API response
@@ -154,10 +355,7 @@ class ApiClient {
   Future<bool> checkUsernameAvailability(String username) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/auth/check-availability?type=username&value=$username');
-      final response = await _client.get(
-        uri,
-        headers: _getHeaders(),
-      );
+      final response = await _get(uri, authenticated: false);
       
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final data = json.decode(response.body);
@@ -173,18 +371,15 @@ class ApiClient {
 
   /// Register device token for FCM
   Future<void> registerDeviceToken({
-    required String userId,
     required String deviceId,
     required String fcmToken,
     required String platform,
   }) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/notifications/device/register');
-      final response = await _client.post(
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
         body: json.encode({
-          'user_id': userId,
           'device_id': deviceId,
           'fcm_token': fcmToken,
           'platform': platform,
@@ -251,33 +446,46 @@ class ApiClient {
       final response = await http.Response.fromStream(streamedResponse);
       final data = _handleResponse(response);
 
-      return AuthResponse.fromJson(data);
+      final authResponse = AuthResponse.fromJson(data);
+      await _persistAuthResponse(authResponse);
+      return authResponse;
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Registration failed: ${e.toString()}');
     }
   }
 
-  /// Login user
-  /// POST /auth/login
-  /// Now accepts either username OR email as identifier
+  Future<void> _persistAuthResponse(AuthResponse response) async {
+    final accessToken = response.accessToken;
+    if (accessToken != null && accessToken.isNotEmpty) {
+      await saveAuthTokens(
+        accessToken: accessToken,
+        refreshToken: response.refreshToken,
+      );
+    }
+  }
+
+  /// Legacy password login — prefer Firebase + [loginVerify].
+  @Deprecated('Use Firebase sign-in followed by POST /auth/login/verify')
   Future<AuthResponse> login({
     required String identifier, // Changed from 'email' to 'identifier'
     required String password,
   }) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.login}');
-      final response = await _client.post(
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
         body: json.encode({
-          'identifier': identifier, // Changed from 'email' to 'identifier'
+          'identifier': identifier,
           'password': password,
         }),
+        authenticated: false,
       );
 
       final data = _handleResponse(response);
-      return AuthResponse.fromJson(data);
+      final authResponse = AuthResponse.fromJson(data);
+      await _persistAuthResponse(authResponse);
+      return authResponse;
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Login failed: ${e.toString()}');
@@ -286,19 +494,14 @@ class ApiClient {
 
   /// Verify password for archive unlock
   /// POST /auth/verify-password
-  Future<bool> verifyPassword({
-    required String userId,
-    required String password,
-  }) async {
+  Future<bool> verifyPassword({required String password}) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/auth/verify-password');
-      final request = http.MultipartRequest('POST', uri);
-      request.headers.addAll(_getHeaders(isMultipart: true));
-      request.fields['user_id'] = userId;
-      request.fields['password'] = password;
-
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      final response = await _sendMultipart(() async {
+        final request = http.MultipartRequest('POST', uri);
+        request.fields['password'] = password;
+        return request;
+      });
       final data = _handleResponse(response);
 
       return data['valid'] as bool;
@@ -308,15 +511,15 @@ class ApiClient {
     }
   }
 
-  /// Forgot password
+  /// Forgot password — accepts username or email.
   /// POST /auth/forgot-password
-  Future<void> forgotPassword(String email) async {
+  Future<void> forgotPassword(String identifier) async {
     try {
-      final uri = Uri.parse('${ApiConstants.baseUrl}/auth/forgot-password');
-      final response = await _client.post(
+      final uri = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.forgotPassword}');
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
-        body: json.encode({'email': email}),
+        body: json.encode({'identifier': identifier}),
+        authenticated: false,
       );
 
       _handleResponse(response);
@@ -326,22 +529,19 @@ class ApiClient {
     }
   }
 
-  /// Delete account
+  /// Delete account — requires Firebase re-authentication token.
   /// DELETE /auth/delete-account
   Future<void> deleteAccount({
-    required String userId,
-    required String password,
+    required String firebaseToken,
     required String reason,
     String? feedback,
   }) async {
     try {
-      final uri = Uri.parse('${ApiConstants.baseUrl}/auth/delete-account');
-      final response = await _client.delete(
+      final uri = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.deleteAccount}');
+      final response = await _delete(
         uri,
-        headers: _getHeaders(),
         body: json.encode({
-          'user_id': userId,
-          'password': password,
+          'firebase_token': firebaseToken,
           'reason': reason,
           if (feedback != null && feedback.isNotEmpty) 'feedback': feedback,
         }),
@@ -351,6 +551,161 @@ class ApiClient {
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to delete account: ${e.toString()}');
+    }
+  }
+
+  /// POST /auth/cancel-deletion
+  Future<void> cancelDeletion({required String firebaseToken}) async {
+    try {
+      final uri =
+          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.cancelDeletion}');
+      final response = await _post(
+        uri,
+        body: json.encode({'firebase_token': firebaseToken}),
+      );
+      _handleResponse(response);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to cancel account deletion: ${e.toString()}');
+    }
+  }
+
+  /// Resolve username to determine login path.
+  /// POST /auth/resolve-username
+  Future<ResolveUsernameResult> resolveUsername(String username) async {
+    try {
+      final uri =
+          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.resolveUsername}');
+      final response = await _post(
+        uri,
+        body: json.encode({'username': username.trim()}),
+        authenticated: false,
+      );
+      final data = _handleResponse(response) as Map<String, dynamic>;
+      return ResolveUsernameResult.fromJson(data);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to resolve username: ${e.toString()}');
+    }
+  }
+
+  /// Exchange Firebase ID token for backend JWT pair.
+  /// POST /auth/login/verify
+  Future<AuthResponse> loginVerify({required String idToken}) async {
+    try {
+      final uri =
+          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.loginVerify}');
+      final response = await _post(
+        uri,
+        body: json.encode({'id_token': idToken}),
+        authenticated: false,
+      );
+      final data = _handleResponse(response);
+      final authResponse = AuthResponse.fromJson(data);
+      await _persistAuthResponse(authResponse);
+      return authResponse;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Login verification failed: ${e.toString()}');
+    }
+  }
+
+  /// Legacy account migration to Firebase email/password.
+  /// POST /auth/migrate-email
+  Future<AuthResponse> migrateEmail({
+    required String migrationToken,
+    required String email,
+    required String password,
+  }) async {
+    try {
+      final uri =
+          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.migrateEmail}');
+      final response = await _post(
+        uri,
+        body: json.encode({
+          'migration_token': migrationToken,
+          'email': email.trim(),
+          'password': password,
+        }),
+        authenticated: false,
+      );
+      final data = _handleResponse(response);
+      final authResponse = AuthResponse.fromJson(data);
+      await _persistAuthResponse(authResponse);
+      return authResponse;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Account migration failed: ${e.toString()}');
+    }
+  }
+
+  /// POST /auth/resend-verification
+  Future<void> resendVerificationEmail() async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}${ApiConstants.resendVerification}',
+      );
+      final response = await _post(uri);
+      _handleResponse(response);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to resend verification email: ${e.toString()}');
+    }
+  }
+
+  /// POST /auth/google-login
+  Future<AuthResponse> googleLogin({required String idToken}) async {
+    try {
+      final uri =
+          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.googleLogin}');
+      final response = await _post(
+        uri,
+        body: json.encode({'id_token': idToken}),
+        authenticated: false,
+      );
+      final data = _handleResponse(response);
+      final authResponse = AuthResponse.fromJson(data);
+      if (authResponse.exists != false) {
+        await _persistAuthResponse(authResponse);
+      }
+      return authResponse;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Google login failed: ${e.toString()}');
+    }
+  }
+
+  /// POST /auth/google-register
+  Future<AuthResponse> googleRegister({
+    required String idToken,
+    required String username,
+    List<String>? faceIds,
+    File? profileImage,
+  }) async {
+    try {
+      final uri =
+          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.googleRegister}');
+      final request = http.MultipartRequest('POST', uri);
+      request.fields['id_token'] = idToken;
+      request.fields['username'] = username;
+      if (faceIds != null && faceIds.isNotEmpty) {
+        request.fields['face_ids'] = json.encode(faceIds);
+      }
+      if (profileImage != null) {
+        request.files.add(
+          await http.MultipartFile.fromPath('image', profileImage.path),
+        );
+      }
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+      final data = _handleResponse(response);
+      final authResponse = AuthResponse.fromJson(data);
+      await _persistAuthResponse(authResponse);
+      return authResponse;
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Google registration failed: ${e.toString()}');
     }
   }
 
@@ -365,7 +720,7 @@ class ApiClient {
         '${ApiConstants.baseUrl}/auth/check-availability',
       ).replace(queryParameters: {'type': type, 'value': value});
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri, authenticated: false);
       final data = _handleResponse(response);
       return data['available'] as bool;
     } catch (e) {
@@ -378,13 +733,13 @@ class ApiClient {
 
   /// Get current user details
   /// GET /users/me
-  Future<UserModel> getCurrentUser(String userId) async {
+  Future<UserModel> getCurrentUser() async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}${ApiConstants.getCurrentUser}',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       final data = _handleResponse(response);
 
       return UserModel.fromJson(data);
@@ -402,7 +757,7 @@ class ApiClient {
       debugPrint('GET request to: $uri');
       debugPrint('Fetching user with ID: $userId');
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       debugPrint('Response status: ${response.statusCode}');
       debugPrint('Response body: ${response.body}');
 
@@ -418,7 +773,6 @@ class ApiClient {
   /// Update user profile
   /// PUT /users/me
   Future<UserModel> updateProfile({
-    required String userId,
     String? username,
     String? firstName,
     String? lastName,
@@ -432,23 +786,20 @@ class ApiClient {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}${ApiConstants.updateProfile}',
       );
-      final request = http.MultipartRequest('PUT', uri);
-      request.headers.addAll(_getHeaders(isMultipart: true));
-
-      request.fields['user_id'] = userId;
-      if (username != null) request.fields['username'] = username;
-      if (firstName != null) request.fields['first_name'] = firstName;
-      if (lastName != null) request.fields['last_name'] = lastName;
-      if (pronouns != null) request.fields['pronouns'] = pronouns;
-      if (bio != null) request.fields['bio'] = bio;
-      if (dob != null) {
-        request.fields['dob'] = dob.toIso8601String().split('T')[0];
-      }
-      if (countryCode != null) request.fields['country_code'] = countryCode;
-      if (phoneNumber != null) request.fields['phone_number'] = phoneNumber;
-
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      final response = await _sendMultipart(() async {
+        final request = http.MultipartRequest('PUT', uri);
+        if (username != null) request.fields['username'] = username;
+        if (firstName != null) request.fields['first_name'] = firstName;
+        if (lastName != null) request.fields['last_name'] = lastName;
+        if (pronouns != null) request.fields['pronouns'] = pronouns;
+        if (bio != null) request.fields['bio'] = bio;
+        if (dob != null) {
+          request.fields['dob'] = dob.toIso8601String().split('T')[0];
+        }
+        if (countryCode != null) request.fields['country_code'] = countryCode;
+        if (phoneNumber != null) request.fields['phone_number'] = phoneNumber;
+        return request;
+      });
       final data = _handleResponse(response);
 
       return UserModel.fromJson(data);
@@ -460,24 +811,18 @@ class ApiClient {
 
   /// Upload/Update profile picture
   /// PUT /users/me/profile-picture
-  Future<UserModel> uploadProfilePicture({
-    required String userId,
-    required File profileImage,
-  }) async {
+  Future<UserModel> uploadProfilePicture({required File profileImage}) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}${ApiConstants.uploadProfilePicture}',
       );
-      final request = http.MultipartRequest('POST', uri);
-      request.headers.addAll(_getHeaders(isMultipart: true));
-
-      request.fields['user_id'] = userId;
-      request.files.add(
-        await http.MultipartFile.fromPath('image', profileImage.path),
-      );
-
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      final response = await _sendMultipart(() async {
+        final request = http.MultipartRequest('POST', uri);
+        request.files.add(
+          await http.MultipartFile.fromPath('image', profileImage.path),
+        );
+        return request;
+      });
       final data = _handleResponse(response);
 
       return UserModel.fromJson(data);
@@ -489,18 +834,13 @@ class ApiClient {
 
   /// Reset profile picture to default avatar
   /// DELETE /users/me/profile-picture
-  Future<Map<String, dynamic>> resetProfilePicture({
-    required String userId,
-  }) async {
+  Future<Map<String, dynamic>> resetProfilePicture() async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/users/me/profile-picture');
-      // Use MultipartRequest for form data
-      final request = http.MultipartRequest('DELETE', uri);
-      request.headers.addAll(_getHeaders(isMultipart: true));
-      request.fields['user_id'] = userId;
-
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      final response = await _sendMultipart(() async {
+        final request = http.MultipartRequest('DELETE', uri);
+        return request;
+      });
       final data = _handleResponse(response);
 
       return data as Map<String, dynamic>;
@@ -515,13 +855,12 @@ class ApiClient {
   /// Get user's gallery images
   /// GET /images/gallery
   Future<List<dynamic>> getGallery({
-    required String userId,
     bool? favourite,
     bool? archive,
     bool? bin,
   }) async {
     try {
-      final queryParams = <String, String>{'user_id': userId};
+      final queryParams = <String, String>{};
       if (favourite != null) queryParams['favourite'] = favourite.toString();
       if (archive != null) queryParams['archive'] = archive.toString();
       if (bin != null) queryParams['bin'] = bin.toString();
@@ -531,7 +870,7 @@ class ApiClient {
       ).replace(queryParameters: queryParams);
 
       print('Gallery API Request: $uri');
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       print('Gallery API Status Code: ${response.statusCode}');
       print('Gallery API Response Body: ${response.body}');
 
@@ -561,7 +900,6 @@ class ApiClient {
   /// POST /images/{image_id}/toggle/{field}
   Future<bool> toggleImageStatus({
     required String imageId,
-    required String userId,
     required String field,
   }) async {
     try {
@@ -572,12 +910,9 @@ class ApiClient {
       print('Toggle API Request: $uri');
       print('Toggle field: $field for image: $imageId');
 
-      final request = http.MultipartRequest('POST', uri);
-      request.headers.addAll(_getHeaders(isMultipart: true));
-      request.fields['user_id'] = userId;
-
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      final response = await _sendMultipart(() async {
+        return http.MultipartRequest('POST', uri);
+      });
 
       print('Toggle API Status: ${response.statusCode}');
       print('Toggle API Response: ${response.body}');
@@ -612,17 +947,14 @@ class ApiClient {
 
   /// Get shared gallery with a friend
   /// GET /images/friend/{friend_id}
-  Future<List<dynamic>> getSharedGallery({
-    required String userId,
-    required String friendId,
-  }) async {
+  Future<List<dynamic>> getSharedGallery({required String friendId}) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}${ApiConstants.getSharedGallery}$friendId',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
       print('Shared Gallery API Request: $uri');
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       print('Shared Gallery API Status Code: ${response.statusCode}');
 
       if (response.body.isEmpty || response.body == '[]') {
@@ -647,20 +979,17 @@ class ApiClient {
   /// PATCH /images/{image_id}/description
   Future<Map<String, dynamic>> updateImageDescription({
     required String imageId,
-    required String userId,
     required String description,
   }) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}${ApiConstants.updateImageDescription}$imageId/description',
       );
-      final request = http.MultipartRequest('PATCH', uri);
-      request.headers.addAll(_getHeaders(isMultipart: true));
-      request.fields['user_id'] = userId;
-      request.fields['description'] = description;
-
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      final response = await _sendMultipart(() async {
+        final request = http.MultipartRequest('PATCH', uri);
+        request.fields['description'] = description;
+        return request;
+      });
       final data = _handleResponse(response);
 
       return data as Map<String, dynamic>;
@@ -673,7 +1002,6 @@ class ApiClient {
   /// Batch update image status
   /// POST /images/batch/update
   Future<void> batchUpdateStatus({
-    required String userId,
     required List<String> imageIds,
     required String field,
     required bool value,
@@ -682,11 +1010,9 @@ class ApiClient {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}${ApiConstants.batchUpdateStatus}',
       );
-      final response = await _client.post(
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
         body: json.encode({
-          'user_id': userId,
           'image_ids': imageIds,
           'field': field,
           'value': value,
@@ -705,24 +1031,21 @@ class ApiClient {
   /// Add a contact
   /// POST /users/me/contacts
   Future<void> addContact({
-    required String userId,
     required String fullName,
     required String phoneNumber,
     String? countryCode,
   }) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/users/me/contacts');
-      final request = http.MultipartRequest('POST', uri);
-      request.headers.addAll(_getHeaders(isMultipart: true));
-      request.fields['user_id'] = userId;
-      request.fields['full_name'] = fullName;
-      request.fields['phone_number'] = phoneNumber;
-      if (countryCode != null && countryCode.isNotEmpty) {
-        request.fields['country_code'] = countryCode;
-      }
-
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      final response = await _sendMultipart(() async {
+        final request = http.MultipartRequest('POST', uri);
+        request.fields['full_name'] = fullName;
+        request.fields['phone_number'] = phoneNumber;
+        if (countryCode != null && countryCode.isNotEmpty) {
+          request.fields['country_code'] = countryCode;
+        }
+        return request;
+      });
       _handleResponse(response);
     } catch (e) {
       if (e is ApiException) rethrow;
@@ -732,13 +1055,13 @@ class ApiClient {
 
   /// Get user contacts
   /// GET /users/me/contacts
-  Future<List<dynamic>> getContacts({required String userId}) async {
+  Future<List<dynamic>> getContacts() async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/users/me/contacts',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       final data = _handleResponse(response);
       return _coerceToList(
         data,
@@ -753,18 +1076,15 @@ class ApiClient {
   /// Add contacts in batch
   /// POST /users/me/contacts/batch
   Future<Map<String, dynamic>> addContactsBatch({
-    required String userId,
     required List<Map<String, dynamic>> contacts,
   }) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/users/me/contacts/batch');
-      final request = http.MultipartRequest('POST', uri);
-      request.headers.addAll(_getHeaders(isMultipart: true));
-      request.fields['user_id'] = userId;
-      request.fields['contacts'] = json.encode(contacts);
-
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      final response = await _sendMultipart(() async {
+        final request = http.MultipartRequest('POST', uri);
+        request.fields['contacts'] = json.encode(contacts);
+        return request;
+      });
       final data = _handleResponse(response);
 
       return data as Map<String, dynamic>;
@@ -779,13 +1099,13 @@ class ApiClient {
   /// Get list of all friendships (accepted and pending)
   /// GET /friends
   /// Returns all friendships where user is either requester or receiver
-  Future<List<dynamic>> getFriends({required String userId}) async {
+  Future<List<dynamic>> getFriends() async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       final data = _handleResponse(response);
       return _coerceToList(
         data,
@@ -799,16 +1119,13 @@ class ApiClient {
 
   /// Search users by username
   /// GET /friends/search
-  Future<List<dynamic>> searchUsers({
-    required String username,
-    required String userId,
-  }) async {
+  Future<List<dynamic>> searchUsers({required String username}) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/search',
-      ).replace(queryParameters: {'username': username, 'user_id': userId});
+      ).replace(queryParameters: {'username': username});
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       final data = _handleResponse(response);
       return _coerceToList(
         data,
@@ -823,15 +1140,13 @@ class ApiClient {
   /// Send friend request
   /// POST /friends/request
   Future<Map<String, dynamic>> sendFriendRequest({
-    required String userId,
     required String targetUsername,
   }) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/friends/request');
-      final response = await _client.post(
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
-        body: json.encode({'user_id': userId, 'username': targetUsername}),
+        body: json.encode({'username': targetUsername}),
       );
 
       final data = _handleResponse(response);
@@ -844,13 +1159,13 @@ class ApiClient {
 
   /// Get pending friend requests (received)
   /// GET /friends/pending
-  Future<List<dynamic>> getPendingRequests({required String userId}) async {
+  Future<List<dynamic>> getPendingRequests() async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/pending',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       final data = _handleResponse(response);
       return _coerceToList(
         data,
@@ -864,13 +1179,13 @@ class ApiClient {
 
   /// Get sent friend requests (pending)
   /// GET /friends/sent
-  Future<List<dynamic>> getSentRequests({required String userId}) async {
+  Future<List<dynamic>> getSentRequests() async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/sent',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       final data = _handleResponse(response);
       return _coerceToList(
         data,
@@ -884,18 +1199,14 @@ class ApiClient {
 
   /// Accept friend request
   /// POST /friends/{friendship_id}/accept
-  Future<Map<String, dynamic>> acceptFriendRequest({
-    required String friendshipId,
-    required String userId,
-  }) async {
+  Future<Map<String, dynamic>> acceptFriendRequest({required String friendshipId}) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendshipId/accept',
       );
-      final response = await _client.post(
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
-        body: json.encode({'user_id': userId}),
+        body: json.encode({}),
       );
 
       final data = _handleResponse(response);
@@ -908,18 +1219,14 @@ class ApiClient {
 
   /// Reject friend request
   /// POST /friends/{friendship_id}/reject
-  Future<Map<String, dynamic>> rejectFriendRequest({
-    required String friendshipId,
-    required String userId,
-  }) async {
+  Future<Map<String, dynamic>> rejectFriendRequest({required String friendshipId}) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendshipId/reject',
       );
-      final response = await _client.post(
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
-        body: json.encode({'user_id': userId}),
+        body: json.encode({}),
       );
 
       final data = _handleResponse(response);
@@ -934,13 +1241,13 @@ class ApiClient {
 
   /// Get notifications
   /// GET /notifications
-  Future<List<dynamic>> getNotifications({required String userId}) async {
+  Future<List<dynamic>> getNotifications() async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/notifications',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       final data = _handleResponse(response);
       return _coerceToList(
         data,
@@ -954,13 +1261,13 @@ class ApiClient {
 
   /// Get blocked users
   /// GET /friends/blocked
-  Future<List<dynamic>> getBlockedUsers({required String userId}) async {
+  Future<List<dynamic>> getBlockedUsers() async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/blocked',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       final data = _handleResponse(response);
       return _coerceToList(
         data,
@@ -974,16 +1281,13 @@ class ApiClient {
 
   /// Block a user
   /// POST /friends/{friend_id}/block
-  Future<Map<String, dynamic>> blockUser({
-    required String friendId,
-    required String userId,
-  }) async {
+  Future<Map<String, dynamic>> blockUser({required String friendId}) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendId/block',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.post(uri, headers: _getHeaders());
+      final response = await _post(uri);
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -995,16 +1299,13 @@ class ApiClient {
 
   /// Unblock a user
   /// POST /friends/{friend_id}/unblock
-  Future<Map<String, dynamic>> unblockUser({
-    required String friendId,
-    required String userId,
-  }) async {
+  Future<Map<String, dynamic>> unblockUser({required String friendId}) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendId/unblock',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.post(uri, headers: _getHeaders());
+      final response = await _post(uri);
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1016,16 +1317,13 @@ class ApiClient {
 
   /// Unfriend a user
   /// DELETE /friends/{friend_id}
-  Future<Map<String, dynamic>> unfriend({
-    required String friendId,
-    required String userId,
-  }) async {
+  Future<Map<String, dynamic>> unfriend({required String friendId}) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendId',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.delete(uri, headers: _getHeaders());
+      final response = await _delete(uri);
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1039,16 +1337,15 @@ class ApiClient {
   /// PUT /friends/{friend_id}/keep
   Future<Map<String, dynamic>> updateAutoCleanKeep({
     required String friendId,
-    required String userId,
     required String keepStatus,
   }) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/friends/$friendId/keep')
           .replace(
-            queryParameters: {'user_id': userId, 'keep_status': keepStatus},
+            queryParameters: {'keep_status': keepStatus},
           );
 
-      final response = await _client.put(uri, headers: _getHeaders());
+      final response = await _put(uri);
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1065,52 +1362,40 @@ class ApiClient {
   /// Upload images batch
   /// POST /images/upload
   Future<Map<String, dynamic>> uploadImagesBatch({
-    required String userId,
     required List<File> images,
     String? description,
   }) async {
     try {
       debugPrint('📤 [ApiClient] POST /images/upload');
-      debugPrint('   User ID: $userId');
       debugPrint('   Images: ${images.length}');
       debugPrint('   Description: ${description ?? "(none)"}');
 
       final uri = Uri.parse('${ApiConstants.baseUrl}/images/upload');
-      final request = http.MultipartRequest('POST', uri);
+      final response = await _sendMultipart(() async {
+        final request = http.MultipartRequest('POST', uri);
+        if (description != null && description.isNotEmpty) {
+          request.fields['description'] = description;
+        }
 
-      // Add headers
-      if (_authToken != null) {
-        request.headers['Authorization'] = 'Bearer $_authToken';
-      }
-
-      // Add user_id field
-      request.fields['user_id'] = userId;
-
-      // Add description if provided
-      if (description != null && description.isNotEmpty) {
-        request.fields['description'] = description;
-      }
-
-      // Add images
-      for (var i = 0; i < images.length; i++) {
-        final image = images[i];
-        final stream = http.ByteStream(image.openRead());
-        final length = await image.length();
-        debugPrint(
-          '   Image ${i + 1}: ${image.path.split('/').last} (${(length / 1024 / 1024).toStringAsFixed(2)} MB)',
-        );
-        final multipartFile = http.MultipartFile(
-          'images',
-          stream,
-          length,
-          filename: image.path.split('/').last,
-        );
-        request.files.add(multipartFile);
-      }
+        for (var i = 0; i < images.length; i++) {
+          final image = images[i];
+          final stream = http.ByteStream(image.openRead());
+          final length = await image.length();
+          debugPrint(
+            '   Image ${i + 1}: ${image.path.split('/').last} (${(length / 1024 / 1024).toStringAsFixed(2)} MB)',
+          );
+          final multipartFile = http.MultipartFile(
+            'images',
+            stream,
+            length,
+            filename: image.path.split('/').last,
+          );
+          request.files.add(multipartFile);
+        }
+        return request;
+      });
 
       debugPrint('🔄 [ApiClient] Sending upload request...');
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
 
       debugPrint('✅ [ApiClient] Upload response: ${response.statusCode}');
       _logExactBackendJson('POST /images/upload', response.body);
@@ -1125,19 +1410,15 @@ class ApiClient {
   }
 
   /// Get batch status
-  /// GET /images/batch/{batch_id}?user_id={user_id}
-  /// Requires user_id for authorization
-  Future<Map<String, dynamic>> getBatchStatus({
-    required String batchId,
-    required String userId, // Added for authorization
-  }) async {
+  /// GET /images/batch/{batch_id}
+  Future<Map<String, dynamic>> getBatchStatus({required String batchId}) async {
     try {
       debugPrint('🔄 [ApiClient] GET /images/batch/$batchId');
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/images/batch/$batchId',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
 
       debugPrint('✅ [ApiClient] Batch status response: ${response.statusCode}');
       _logExactBackendJson('GET /images/batch/$batchId', response.body);
@@ -1153,22 +1434,15 @@ class ApiClient {
 
   /// Cancel batch upload
   /// DELETE /images/batch/{batch_id}/cancel
-  Future<Map<String, dynamic>> cancelBatch({
-    required String batchId,
-    required String userId,
-  }) async {
+  Future<Map<String, dynamic>> cancelBatch({required String batchId}) async {
     try {
       debugPrint('🔄 [ApiClient] DELETE /images/batch/$batchId/cancel');
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/images/batch/$batchId/cancel',
       );
-      // Use MultipartRequest for form data
-      final request = http.MultipartRequest('DELETE', uri);
-      request.headers.addAll(_getHeaders(isMultipart: true));
-      request.fields['user_id'] = userId;
-
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      final response = await _sendMultipart(() async {
+        return http.MultipartRequest('DELETE', uri);
+      });
 
       debugPrint('✅ [ApiClient] Cancel batch response: ${response.statusCode}');
       debugPrint('   Body: ${response.body}');
@@ -1184,10 +1458,8 @@ class ApiClient {
 
   /// Confirm share
   /// POST /images/share/confirm
-  /// Requires user_id for authorization
   Future<Map<String, dynamic>> confirmShare({
     required String batchId,
-    required String userId,
     required List<String> recipients,
     required bool autoClean,
     Map<String, List<String>>? imageRecipientMap, // Added parameter
@@ -1195,7 +1467,6 @@ class ApiClient {
     try {
       debugPrint('📤 [ApiClient] POST /images/share/confirm');
       debugPrint('   Batch ID: $batchId');
-      debugPrint('   User ID: $userId');
       debugPrint('   Recipients: $recipients');
       debugPrint('   Auto Clean: $autoClean');
       if (imageRecipientMap != null) {
@@ -1203,12 +1474,10 @@ class ApiClient {
       }
 
       final uri = Uri.parse('${ApiConstants.baseUrl}/images/share/confirm');
-      final response = await _client.post(
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
         body: json.encode({
           'batch_id': batchId,
-          'user_id': userId,
           'recipients': recipients,
           'auto_clean': autoClean,
           if (imageRecipientMap != null)
@@ -1236,15 +1505,13 @@ class ApiClient {
   /// POST /contacts/sync
   /// Returns on_platform (Prism users) and not_on_platform (invite targets)
   Future<ContactSyncResult> syncContacts({
-    required String userId,
     required List<Map<String, String>> contacts,
   }) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/contacts/sync');
-      final response = await _client.post(
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
-        body: json.encode({'user_id': userId, 'contacts': contacts}),
+        body: json.encode({'contacts': contacts}),
       );
 
       final data = _handleResponse(response);
@@ -1256,16 +1523,14 @@ class ApiClient {
   }
 
   /// Fetch latest friend suggestions (cached by backend from last sync)
-  /// GET /contacts/recommendations?user_id=...
-  Future<ContactSyncResult> getContactRecommendations({
-    required String userId,
-  }) async {
+  /// GET /contacts/recommendations
+  Future<ContactSyncResult> getContactRecommendations() async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/contacts/recommendations',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       final data = _handleResponse(response);
       return ContactSyncResult.fromJson(data as Map<String, dynamic>);
     } catch (e) {
@@ -1277,17 +1542,14 @@ class ApiClient {
   /// Dismiss a "People You May Know" suggestion permanently
   /// POST /contacts/recommendations/dismiss
   Future<void> dismissRecommendation({
-    required String userId,
     required String dismissedUserId,
   }) async {
     try {
       final uri =
           Uri.parse('${ApiConstants.baseUrl}/contacts/recommendations/dismiss');
-      final response = await _client.post(
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
         body: json.encode({
-          'user_id': userId,
           'dismissed_user_id': dismissedUserId,
         }),
       );
@@ -1301,7 +1563,6 @@ class ApiClient {
   /// Link historical photo matches when two users become friends
   /// POST /friends/retroactive-share/accept
   Future<Map<String, dynamic>> acceptRetroactiveShare({
-    required String userId,
     required String friendId,
     required List<String> contactFaceIds,
     required List<String> unknownFaceIds,
@@ -1310,11 +1571,9 @@ class ApiClient {
     try {
       final uri =
           Uri.parse('${ApiConstants.baseUrl}/friends/retroactive-share/accept');
-      final response = await _client.post(
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
         body: json.encode({
-          'user_id': userId,
           'friend_id': friendId,
           'contact_face_ids': contactFaceIds,
           'unknown_face_ids': unknownFaceIds,
@@ -1331,15 +1590,14 @@ class ApiClient {
 
   /// Mark all notifications as read
   /// POST /notifications/mark-read
-  Future<void> markNotificationsRead({required String userId}) async {
+  Future<void> markNotificationsRead() async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/notifications/mark-read',
       );
-      final response = await _client.post(
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
-        body: json.encode({'user_id': userId}),
+        body: json.encode({}),
       );
       _handleResponse(response);
     } catch (e) {
@@ -1350,18 +1608,14 @@ class ApiClient {
 
   /// Mark a single notification as read
   /// POST /notifications/{notification_id}/mark-read
-  Future<void> markNotificationReadSingle({
-    required String notificationId,
-    required String userId,
-  }) async {
+  Future<void> markNotificationReadSingle({required String notificationId}) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/notifications/$notificationId/mark-read',
       );
-      final response = await _client.post(
+      final response = await _post(
         uri,
-        headers: _getHeaders(),
-        body: json.encode({'user_id': userId}),
+        body: json.encode({}),
       );
       _handleResponse(response);
     } catch (e) {
@@ -1371,16 +1625,14 @@ class ApiClient {
   }
 
   /// Check if user has already granted contacts permission
-  /// GET /contacts/sync-status?user_id=...
-  Future<Map<String, dynamic>> getContactSyncStatus({
-    required String userId,
-  }) async {
+  /// GET /contacts/sync-status
+  Future<Map<String, dynamic>> getContactSyncStatus() async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/contacts/sync-status',
-      ).replace(queryParameters: {'user_id': userId});
+      );
 
-      final response = await _client.get(uri, headers: _getHeaders());
+      final response = await _get(uri);
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
     } catch (e) {
@@ -1392,15 +1644,15 @@ class ApiClient {
   /// Update contacts permission state
   /// PATCH /contacts/sync-status
   Future<void> updateContactSyncStatus({
-    required String userId,
-    required String status, // e.g. 'granted', 'denied'
+    required String permissionStatus, // e.g. 'granted', 'denied'
   }) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/contacts/sync-status');
-      final response = await _client.patch(
+      final response = await _patch(
         uri,
-        headers: _getHeaders(),
-        body: json.encode({'user_id': userId, 'status': status}),
+        body: json.encode({
+          'permission_status': permissionStatus,
+        }),
       );
       _handleResponse(response);
     } catch (e) {

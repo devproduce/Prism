@@ -97,7 +97,6 @@ class NotificationService {
 
       if (token != null && deviceId != null) {
         await _apiClient.registerDeviceToken(
-          userId: userId,
           deviceId: deviceId,
           fcmToken: token,
           platform: Platform.isIOS ? 'ios' : 'android',
@@ -109,7 +108,6 @@ class NotificationService {
       _messaging.onTokenRefresh.listen((newToken) async {
         if (deviceId != null) {
           await _apiClient.registerDeviceToken(
-            userId: userId,
             deviceId: deviceId,
             fcmToken: newToken,
             platform: Platform.isIOS ? 'ios' : 'android',

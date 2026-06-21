@@ -9,8 +9,11 @@ import 'package:prism/widgets/prism_button.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/screens/forgot_password_screen.dart';
 import 'package:prism/screens/register_screen.dart';
-import 'package:prism/screens/home_screen.dart';
+import 'package:prism/screens/complete_profile_screen.dart';
+import 'package:prism/screens/secure_account_screen.dart';
+import 'package:prism/utils/auth_navigation.dart';
 import 'package:prism/utils/error_handler.dart';
+import 'package:prism/api/api_client.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -19,62 +22,193 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
+enum _LoginPhase { username, password, google }
+
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _identifierController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
+  _LoginPhase _phase = _LoginPhase.username;
+  String? _resolvedEmail;
+  bool _isResolving = false;
 
   @override
   void dispose() {
-    _identifierController.dispose();
+    _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
-  Future<void> _handleLogin() async {
+  void _resetToUsername() {
+    setState(() {
+      _phase = _LoginPhase.username;
+      _resolvedEmail = null;
+      _passwordController.clear();
+    });
+  }
+
+  Future<void> _handleContinueUsername() async {
+    if (_phase != _LoginPhase.username) return;
     if (!_formKey.currentState!.validate()) return;
 
-    // Add haptic feedback
     HapticFeedback.lightImpact();
+    final username = _usernameController.text.trim();
+    final authProvider = context.read<AuthProvider>();
 
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    setState(() => _isResolving = true);
+    authProvider.clearError();
 
     try {
-      final success = await authProvider.login(
-        identifier: _identifierController.text.trim(),
-        password: _passwordController.text,
-      );
+      final result = await authProvider.resolveUsername(username);
 
-      if (success && mounted) {
-        // Success haptic feedback
-        HapticFeedback.mediumImpact();
+      if (!mounted) return;
+
+      if (result.useGoogle) {
+        setState(() {
+          _phase = _LoginPhase.google;
+          _resolvedEmail = null;
+        });
+        return;
+      }
+
+      if (result.needsMigration) {
+        authProvider.beginLegacyMigration(result);
         Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (_, __, ___) =>
-                HomeScreen(key: HomeScreen.homeScreenKey),
-            transitionsBuilder: (_, animation, __, child) {
-              return FadeTransition(opacity: animation, child: child);
-            },
+          MaterialPageRoute(
+            builder: (_) => SecureAccountScreen(
+              prefilledEmail: result.prefilledEmail,
+            ),
           ),
         );
-      } else if (mounted) {
-        // Show error using centralized error handler
+        return;
+      }
+
+      final email = result.email;
+      if (email == null || email.isEmpty) {
         ErrorHandler.showErrorSnackbar(
           context,
-          message: authProvider.error ?? 'Login failed. Please try again.',
-          onRetry: _handleLogin,
+          message: 'Could not resolve this username. Please try again.',
+          onRetry: _handleContinueUsername,
         );
+        return;
       }
+
+      setState(() {
+        _phase = _LoginPhase.password;
+        _resolvedEmail = email;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ErrorHandler.showErrorSnackbar(
+        context,
+        message: e.statusCode == 429
+            ? 'Too many attempts. Please wait a moment and try again.'
+            : e.message,
+        onRetry: _handleContinueUsername,
+      );
     } catch (e) {
-      if (mounted) {
-        ErrorHandler.showErrorSnackbar(
-          context,
-          message: ErrorHandler.getErrorMessage(e),
-          onRetry: _handleLogin,
-        );
-      }
+      if (!mounted) return;
+      ErrorHandler.showErrorSnackbar(
+        context,
+        message: ErrorHandler.getErrorMessage(e),
+        onRetry: _handleContinueUsername,
+      );
+    } finally {
+      if (mounted) setState(() => _isResolving = false);
     }
+  }
+
+  Future<void> _handlePasswordLogin() async {
+    if (_phase != _LoginPhase.password) return;
+    if (!_formKey.currentState!.validate()) return;
+
+    final email = _resolvedEmail;
+    if (email == null || email.isEmpty) {
+      _resetToUsername();
+      return;
+    }
+
+    HapticFeedback.lightImpact();
+    final authProvider = context.read<AuthProvider>();
+
+    final success = await authProvider.loginWithFirebaseEmail(
+      email: email,
+      password: _passwordController.text,
+    );
+
+    if (!mounted) return;
+
+    if (success) {
+      HapticFeedback.mediumImpact();
+      navigateAfterAuthentication(context, authProvider);
+    } else if (authProvider.error != null && authProvider.error!.isNotEmpty) {
+      ErrorHandler.showErrorSnackbar(
+        context,
+        message: authProvider.error!,
+        onRetry: _handlePasswordLogin,
+      );
+    }
+  }
+
+  Future<void> _handleGoogleLogin() async {
+    HapticFeedback.lightImpact();
+    final authProvider = context.read<AuthProvider>();
+    authProvider.clearGoogleRegistrationRequired();
+
+    final success = await authProvider.loginWithGoogle();
+
+    if (!mounted) return;
+
+    if (success) {
+      HapticFeedback.mediumImpact();
+      navigateAfterAuthentication(context, authProvider);
+      return;
+    }
+
+    if (authProvider.googleRegistrationRequired) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const CompleteProfileScreen()),
+      );
+      return;
+    }
+
+    if (authProvider.error != null && authProvider.error!.isNotEmpty) {
+      ErrorHandler.showErrorSnackbar(
+        context,
+        message: authProvider.error!,
+        onRetry: _handleGoogleLogin,
+      );
+    }
+  }
+
+  void _handlePrimaryAction() {
+    switch (_phase) {
+      case _LoginPhase.username:
+        _handleContinueUsername();
+      case _LoginPhase.password:
+        _handlePasswordLogin();
+      case _LoginPhase.google:
+        _handleGoogleLogin();
+    }
+  }
+
+  String get _primaryButtonLabel {
+    switch (_phase) {
+      case _LoginPhase.username:
+        return 'Continue';
+      case _LoginPhase.password:
+        return 'Log In';
+      case _LoginPhase.google:
+        return 'Continue with Google';
+    }
+  }
+
+  bool _isPrimaryLoading(AuthProvider authProvider) {
+    if (_phase == _LoginPhase.username) {
+      return _isResolving;
+    }
+    return authProvider.isLoading;
   }
 
   InputDecoration _prismInputDecoration(
@@ -213,26 +347,57 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Username or Email Field
-                          Text(
-                            'Username or Email',
-                            style: PrismTextStyles.bodyMedium,
+                          // Username field (step 1)
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _phase == _LoginPhase.username
+                                      ? 'Username'
+                                      : 'Signing in as',
+                                  style: PrismTextStyles.bodyMedium,
+                                ),
+                              ),
+                              if (_phase != _LoginPhase.username)
+                                TextButton(
+                                  onPressed: _isResolving
+                                      ? null
+                                      : () {
+                                          HapticFeedback.selectionClick();
+                                          _resetToUsername();
+                                        },
+                                  child: Text(
+                                    'Change',
+                                    style: PrismTextStyles.bodySmall.copyWith(
+                                      color: PrismColors.prismYellow,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ).animate().fadeIn(delay: 300.ms),
                           SizedBox(height: labelToInputSpacing),
                           TextFormField(
-                            controller: _identifierController,
+                            controller: _usernameController,
                             style: PrismTextStyles.bodyLarge,
-                            keyboardType: TextInputType.emailAddress,
-                            textInputAction: TextInputAction.next,
+                            textInputAction: _phase == _LoginPhase.username
+                                ? TextInputAction.done
+                                : TextInputAction.next,
                             autocorrect: false,
+                            readOnly: _phase != _LoginPhase.username,
+                            onFieldSubmitted: (_) {
+                              if (_phase == _LoginPhase.username) {
+                                _handleContinueUsername();
+                              }
+                            },
                             decoration: _prismInputDecoration(
                               context,
-                              'Enter username or email',
+                              'Enter your username',
                               Icons.person_outline_rounded,
                             ),
                             validator: (value) {
                               if (value == null || value.trim().isEmpty) {
-                                return 'Please enter your username or email';
+                                return 'Please enter your username';
                               }
                               if (value.trim().length < 3) {
                                 return 'Must be at least 3 characters';
@@ -241,88 +406,111 @@ class _LoginScreenState extends State<LoginScreen> {
                             },
                           ).animate().fadeIn(delay: 350.ms),
 
-                          SizedBox(height: inputToInputSpacing),
-
-                          // Password Field
-                          Text(
-                            'Password',
-                            style: PrismTextStyles.bodyMedium,
-                          ).animate().fadeIn(delay: 400.ms),
-                          SizedBox(height: labelToInputSpacing),
-                          TextFormField(
-                            controller: _passwordController,
-                            obscureText: _obscurePassword,
-                            style: PrismTextStyles.bodyLarge,
-                            textInputAction: TextInputAction.done,
-                            onFieldSubmitted: (_) => _handleLogin(),
-                            decoration:
-                                _prismInputDecoration(
-                                  context,
-                                  'Enter your password',
-                                  Icons.lock_outline_rounded,
-                                ).copyWith(
-                                  suffixIcon: IconButton(
-                                    icon: Icon(
-                                      _obscurePassword
-                                          ? Icons.visibility_off_rounded
-                                          : Icons.visibility_rounded,
-                                      color: PrismColors.secondaryText,
-                                    ),
-                                    onPressed: () {
-                                      HapticFeedback.selectionClick();
-                                      setState(() {
-                                        _obscurePassword = !_obscurePassword;
-                                      });
-                                    },
+                          if (_phase == _LoginPhase.password) ...[
+                            SizedBox(height: inputToInputSpacing),
+                            if (_resolvedEmail != null)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text(
+                                  _resolvedEmail!,
+                                  style: PrismTextStyles.bodySmall.copyWith(
+                                    color: PrismColors.secondaryText,
                                   ),
-                                ),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Please enter your password';
-                              }
-                              if (value.length < 6) {
-                                return 'Password must be at least 6 characters';
-                              }
-                              return null;
-                            },
-                          ).animate().fadeIn(delay: 450.ms),
-
-                          // Forgot Password Link
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: () {
-                                HapticFeedback.selectionClick();
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        const ForgotPasswordScreen(),
-                                  ),
-                                );
-                              },
-                              child: Text(
-                                'Forgot Password?',
-                                style: PrismTextStyles.bodySmall.copyWith(
-                                  color: PrismColors.prismYellow,
-                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                            ),
-                          ).animate().fadeIn(delay: 500.ms),
+                            Text(
+                              'Password',
+                              style: PrismTextStyles.bodyMedium,
+                            ).animate().fadeIn(delay: 400.ms),
+                            SizedBox(height: labelToInputSpacing),
+                            TextFormField(
+                              controller: _passwordController,
+                              obscureText: _obscurePassword,
+                              style: PrismTextStyles.bodyLarge,
+                              textInputAction: TextInputAction.done,
+                              onFieldSubmitted: (_) => _handlePasswordLogin(),
+                              decoration:
+                                  _prismInputDecoration(
+                                    context,
+                                    'Enter your password',
+                                    Icons.lock_outline_rounded,
+                                  ).copyWith(
+                                    suffixIcon: IconButton(
+                                      icon: Icon(
+                                        _obscurePassword
+                                            ? Icons.visibility_off_rounded
+                                            : Icons.visibility_rounded,
+                                        color: PrismColors.secondaryText,
+                                      ),
+                                      onPressed: () {
+                                        HapticFeedback.selectionClick();
+                                        setState(() {
+                                          _obscurePassword = !_obscurePassword;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Please enter your password';
+                                }
+                                if (value.length < 6) {
+                                  return 'Password must be at least 6 characters';
+                                }
+                                return null;
+                              },
+                            ).animate().fadeIn(delay: 450.ms),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: () {
+                                  HapticFeedback.selectionClick();
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const ForgotPasswordScreen(),
+                                    ),
+                                  );
+                                },
+                                child: Text(
+                                  'Forgot Password?',
+                                  style: PrismTextStyles.bodySmall.copyWith(
+                                    color: PrismColors.prismYellow,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ).animate().fadeIn(delay: 500.ms),
+                          ],
 
-                          //SizedBox(height: inputToInputSpacing),
+                          if (_phase == _LoginPhase.google) ...[
+                            SizedBox(height: inputToInputSpacing),
+                            Text(
+                              'This account uses Google Sign-In.',
+                              textAlign: TextAlign.center,
+                              style: PrismTextStyles.bodyMedium.copyWith(
+                                color: PrismColors.secondaryText,
+                              ),
+                            ).animate().fadeIn(delay: 400.ms),
+                          ],
 
-                          // Login Button
+                          SizedBox(height: inputToInputSpacing),
+
                           Consumer<AuthProvider>(
                                 builder: (context, authProvider, child) {
                                   return PrismButton(
-                                    text: 'Log In',
-                                    isLoading: authProvider.isLoading,
-                                    onPressed: authProvider.isLoading
+                                    text: _primaryButtonLabel,
+                                    isLoading: _isPrimaryLoading(authProvider),
+                                    onPressed: _isPrimaryLoading(authProvider)
                                         ? null
-                                        : _handleLogin,
-                                    type: PrismButtonType.primary,
+                                        : _handlePrimaryAction,
+                                    type: _phase == _LoginPhase.google
+                                        ? PrismButtonType.secondary
+                                        : PrismButtonType.primary,
+                                    icon: _phase == _LoginPhase.google
+                                        ? Icons.g_mobiledata_rounded
+                                        : null,
                                   );
                                 },
                               )

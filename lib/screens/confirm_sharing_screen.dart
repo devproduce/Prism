@@ -7,10 +7,12 @@ import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/providers/gallery_provider.dart';
 import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/screens/home_screen.dart';
+import 'package:prism/screens/sharing_recipient_screen.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/utils/error_handler.dart';
 import 'package:prism/utils/media_url_utils.dart';
+import 'package:prism/utils/responsive_helper.dart';
 import 'package:prism/widgets/recipient_selector_sheet.dart';
 import 'package:prism/widgets/review/review_bottom_bar.dart';
 import 'package:prism/widgets/review/review_no_face_send_all.dart';
@@ -148,37 +150,19 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
         if (userId != null) {
           galleryProvider.refreshAfterShare(userId);
         }
-        sharingProvider.clearBatch();
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: PrismColors.black),
-                const SizedBox(width: 8),
-                Text(
-                  'Memories Shared Successfully!',
-                  style: PrismTextStyles.bodyMedium.copyWith(
-                    color: PrismColors.black,
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: PrismColors.prismYellow,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            margin: const EdgeInsets.all(16),
-          ),
-        );
+        final recipients = sharingProvider.collectConfirmedRecipients();
+        final photoCount = sharingProvider.sharedPhotoCount;
+        sharingProvider.clearBatch();
         HapticFeedback.heavyImpact();
 
-        Navigator.of(context).pushAndRemoveUntil(
+        Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (context) => HomeScreen(key: HomeScreen.homeScreenKey),
+            builder: (context) => SharingRecipientScreen(
+              recipients: recipients,
+              photoCount: photoCount,
+            ),
           ),
-          (route) => false,
         );
       } else if (mounted) {
         _showError(sharingProvider.error ?? 'Sharing failed');
@@ -256,26 +240,42 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
     }
 
     final contentInset = _contentInset(context);
+    final titleStyle = PrismTextStyles.h2.copyWith(
+      fontSize: ResponsiveHelper.scaledFontSize(context, 24),
+    );
 
     if (batchStatus == null || _isLoadingBatch) {
       return Scaffold(
         backgroundColor: PrismColors.voidBlack,
         appBar: AppBar(
-          title: Text('Review & Share', style: PrismTextStyles.h2),
+          title: Text('Review & Share', style: titleStyle),
           backgroundColor: Colors.transparent,
           elevation: 0,
         ),
         body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (_isLoadingBatch) ...[
-                const CircularProgressIndicator(color: PrismColors.prismYellow),
-                const SizedBox(height: 16),
-                Text('Loading batch...', style: PrismTextStyles.bodyLarge),
-              ] else
-                ShimmerLayouts.galleryGrid(itemCount: 6, crossAxisCount: 2),
-            ],
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: ResponsiveHelper.horizontalPadding(context),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_isLoadingBatch) ...[
+                  const CircularProgressIndicator(color: PrismColors.prismYellow),
+                  SizedBox(height: ResponsiveHelper.spacingM(context)),
+                  Text(
+                    'Loading batch...',
+                    style: PrismTextStyles.bodyLarge.copyWith(
+                      fontSize: ResponsiveHelper.scaledFontSize(context, 16),
+                    ),
+                  ),
+                ] else
+                  ShimmerLayouts.galleryGrid(
+                    itemCount: ResponsiveHelper.isSmallScreen(context) ? 4 : 6,
+                    crossAxisCount: ResponsiveHelper.galleryGridCount(context),
+                  ),
+              ],
+            ),
           ),
         ),
       );
@@ -300,11 +300,15 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
       child: Scaffold(
         backgroundColor: PrismColors.voidBlack,
         appBar: AppBar(
-          title: Text('Review & Share', style: PrismTextStyles.h2),
+          title: Text('Review & Share', style: titleStyle),
           backgroundColor: Colors.transparent,
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: PrismColors.white),
+            icon: Icon(
+              Icons.arrow_back,
+              color: PrismColors.white,
+              size: ResponsiveHelper.iconSizeM(context),
+            ),
             onPressed: _exitReview,
           ),
         ),
@@ -391,9 +395,10 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
   }
 
   double _contentInset(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    if (screenWidth <= 900) return 16;
-    return (screenWidth - 800).clamp(16.0, double.infinity) / 2;
+    final screenWidth = ResponsiveHelper.screenWidth(context);
+    final basePadding = ResponsiveHelper.horizontalPadding(context);
+    if (screenWidth <= ResponsiveHelper.tablet) return basePadding;
+    return (screenWidth - 800).clamp(basePadding, double.infinity) / 2;
   }
 }
 
@@ -402,21 +407,24 @@ class _NoPhotosState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final padding = ResponsiveHelper.isSmallScreen(context) ? 24.0 : 32.0;
+
     return Padding(
-      padding: const EdgeInsets.all(32),
+      padding: EdgeInsets.all(padding),
       child: Center(
         child: Column(
           children: [
             Icon(
               Icons.photo_library_outlined,
-              size: 48,
+              size: ResponsiveHelper.iconSizeXL(context),
               color: PrismColors.secondaryText,
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: ResponsiveHelper.spacingS(context)),
             Text(
               'No photos in this batch',
               style: PrismTextStyles.bodyMedium.copyWith(
                 color: PrismColors.secondaryText,
+                fontSize: ResponsiveHelper.scaledFontSize(context, 14),
               ),
               textAlign: TextAlign.center,
             ),

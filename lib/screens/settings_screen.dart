@@ -9,8 +9,22 @@ import 'package:prism/widgets/prism_button.dart';
 import 'package:prism/utils/error_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<AuthProvider>().refreshUser();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +52,10 @@ class SettingsScreen extends StatelessWidget {
         padding: EdgeInsets.all(horizontalPadding),
         child: Column(
           children: [
+            if (authProvider.currentUser?.isDeletionPending ?? false) ...[
+              _buildDeletionPendingBanner(context, authProvider),
+              const SizedBox(height: 24),
+            ],
             // Account Section
             _buildSectionHeader('Account'),
             PrismCard(
@@ -205,6 +223,173 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildDeletionPendingBanner(
+    BuildContext context,
+    AuthProvider authProvider,
+  ) {
+    return PrismCard(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.warning_amber_rounded,
+                  color: PrismColors.destructiveRed,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Account scheduled for deletion',
+                    style: PrismTextStyles.bodyLarge.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Your account is in the deletion grace period. You can cancel this anytime before it is permanently removed.',
+              style: PrismTextStyles.bodyMedium.copyWith(
+                color: PrismColors.secondaryText,
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: PrismButton(
+                text: authProvider.usesGoogleAuth
+                    ? 'Cancel deletion with Google'
+                    : 'Cancel account deletion',
+                type: PrismButtonType.primary,
+                onPressed: () =>
+                    _handleCancelDeletion(context, authProvider),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleCancelDeletion(
+    BuildContext context,
+    AuthProvider authProvider,
+  ) async {
+    HapticFeedback.selectionClick();
+
+    final passwordController = TextEditingController();
+    bool isLoading = false;
+    final usesGoogle = authProvider.usesGoogleAuth;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: PrismColors.surfaceGray,
+              title: Text('Cancel Deletion', style: PrismTextStyles.h3),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    usesGoogle
+                        ? 'Confirm with Google to keep your account active.'
+                        : 'Enter your password to cancel account deletion.',
+                    style: PrismTextStyles.bodyMedium.copyWith(
+                      color: PrismColors.secondaryText,
+                    ),
+                  ),
+                  if (!usesGoogle) ...[
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: passwordController,
+                      obscureText: true,
+                      style: PrismTextStyles.bodyLarge,
+                      decoration: InputDecoration(
+                        hintText: 'Password',
+                        hintStyle: PrismTextStyles.bodyMedium.copyWith(
+                          color: PrismColors.secondaryText,
+                        ),
+                        filled: true,
+                        fillColor: PrismColors.inputGray,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isLoading ? null : () => Navigator.pop(dialogContext),
+                  child: Text(
+                    'Back',
+                    style: PrismTextStyles.button.copyWith(
+                      color: PrismColors.secondaryText,
+                    ),
+                  ),
+                ),
+                PrismButton(
+                  text: usesGoogle ? 'Confirm with Google' : 'Cancel deletion',
+                  isLoading: isLoading,
+                  onPressed: () async {
+                    if (!usesGoogle && passwordController.text.isEmpty) {
+                      ErrorHandler.showErrorSnackbar(
+                        context,
+                        message: 'Password is required',
+                      );
+                      return;
+                    }
+                    setState(() => isLoading = true);
+                    try {
+                      await authProvider.cancelAccountDeletion(
+                        password:
+                            usesGoogle ? null : passwordController.text,
+                        context: context,
+                      );
+                      if (context.mounted) {
+                        Navigator.pop(dialogContext);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Account deletion cancelled',
+                              style: PrismTextStyles.bodyMedium.copyWith(
+                                color: PrismColors.white,
+                              ),
+                            ),
+                            backgroundColor: PrismColors.voidBlack,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ErrorHandler.showErrorSnackbar(
+                          context,
+                          message: ErrorHandler.getErrorMessage(e),
+                        );
+                      }
+                    } finally {
+                      if (context.mounted) setState(() => isLoading = false);
+                    }
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _handleLogout(
     BuildContext context,
     AuthProvider authProvider,
@@ -248,6 +433,7 @@ class SettingsScreen extends StatelessWidget {
     final passwordController = TextEditingController();
     final reasonController = TextEditingController();
     bool isLoading = false;
+    final usesGoogle = authProvider.usesGoogleAuth;
 
     await showDialog(
       context: context,
@@ -263,32 +449,48 @@ class SettingsScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Are you sure you want to delete your account? This action cannot be undone. Please enter your password and a reason to confirm.',
-                    style: PrismTextStyles.bodyMedium.copyWith(color: PrismColors.secondaryText),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: passwordController,
-                    obscureText: true,
-                    style: PrismTextStyles.bodyLarge,
-                    decoration: InputDecoration(
-                      hintText: 'Password',
-                      hintStyle: PrismTextStyles.bodyMedium.copyWith(color: PrismColors.secondaryText),
-                      filled: true,
-                      fillColor: PrismColors.inputGray,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                    usesGoogle
+                        ? 'This will schedule your account for deletion. You will need to confirm with Google before we proceed.'
+                        : 'This will schedule your account for deletion. Enter your password and a reason to confirm.',
+                    style: PrismTextStyles.bodyMedium.copyWith(
+                      color: PrismColors.secondaryText,
                     ),
                   ),
+                  if (!usesGoogle) ...[
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: passwordController,
+                      obscureText: true,
+                      style: PrismTextStyles.bodyLarge,
+                      decoration: InputDecoration(
+                        hintText: 'Password',
+                        hintStyle: PrismTextStyles.bodyMedium.copyWith(
+                          color: PrismColors.secondaryText,
+                        ),
+                        filled: true,
+                        fillColor: PrismColors.inputGray,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   TextField(
                     controller: reasonController,
                     style: PrismTextStyles.bodyLarge,
                     decoration: InputDecoration(
                       hintText: 'Reason (e.g. not_using)',
-                      hintStyle: PrismTextStyles.bodyMedium.copyWith(color: PrismColors.secondaryText),
+                      hintStyle: PrismTextStyles.bodyMedium.copyWith(
+                        color: PrismColors.secondaryText,
+                      ),
                       filled: true,
                       fillColor: PrismColors.inputGray,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
                     ),
                   ),
                 ],
@@ -296,32 +498,52 @@ class SettingsScreen extends StatelessWidget {
               actions: [
                 TextButton(
                   onPressed: isLoading ? null : () => Navigator.pop(dialogContext),
-                  child: Text('Cancel', style: PrismTextStyles.button.copyWith(color: PrismColors.secondaryText)),
+                  child: Text(
+                    'Cancel',
+                    style: PrismTextStyles.button.copyWith(
+                      color: PrismColors.secondaryText,
+                    ),
+                  ),
                 ),
                 PrismButton(
-                  text: 'Delete',
+                  text: usesGoogle ? 'Confirm with Google' : 'Delete',
                   isLoading: isLoading,
                   type: PrismButtonType.destructive,
                   onPressed: () async {
-                    if (passwordController.text.isEmpty || reasonController.text.isEmpty) {
-                      ErrorHandler.showErrorSnackbar(context, message: 'Password and reason are required');
+                    if (!usesGoogle && passwordController.text.isEmpty) {
+                      ErrorHandler.showErrorSnackbar(
+                        context,
+                        message: 'Password is required',
+                      );
+                      return;
+                    }
+                    if (reasonController.text.isEmpty) {
+                      ErrorHandler.showErrorSnackbar(
+                        context,
+                        message: 'Reason is required',
+                      );
                       return;
                     }
                     setState(() => isLoading = true);
                     try {
                       await authProvider.deleteAccount(
-                        password: passwordController.text,
+                        password: usesGoogle ? null : passwordController.text,
                         reason: reasonController.text,
                         context: context,
                       );
                       if (context.mounted) {
-                        Navigator.pop(dialogContext); // Close dialog
-                        Navigator.of(context).pushNamedAndRemoveUntil('/onboarding', (route) => false);
+                        Navigator.pop(dialogContext);
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          '/onboarding',
+                          (route) => false,
+                        );
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
                               'Account scheduled for deletion',
-                              style: PrismTextStyles.bodyMedium.copyWith(color: PrismColors.white),
+                              style: PrismTextStyles.bodyMedium.copyWith(
+                                color: PrismColors.white,
+                              ),
                             ),
                             backgroundColor: PrismColors.voidBlack,
                           ),

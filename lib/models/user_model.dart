@@ -16,6 +16,8 @@ class UserModel {
   final String? phoneNumber;
   final DateTime? createdAt;
   final String? archivePin;
+  final String? authProvider;
+  final DateTime? deletionScheduledAt;
 
   UserModel({
     required this.userId,
@@ -33,7 +35,11 @@ class UserModel {
     this.phoneNumber,
     this.createdAt,
     this.archivePin,
+    this.authProvider,
+    this.deletionScheduledAt,
   });
+
+  bool get isDeletionPending => deletionScheduledAt != null;
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
     return UserModel(
@@ -54,7 +60,27 @@ class UserModel {
           ? DateTime.tryParse(json['created_at'])
           : null,
       archivePin: json['archive_pin'],
+      authProvider: json['auth_provider'] as String?,
+      deletionScheduledAt: _parseDeletionScheduledAt(json),
     );
+  }
+
+  static DateTime? _parseDeletionScheduledAt(Map<String, dynamic> json) {
+    for (final key in [
+      'deletion_scheduled_at',
+      'scheduled_deletion_at',
+      'account_deletion_at',
+    ]) {
+      final value = json[key];
+      if (value == null) continue;
+      if (value is bool) return value ? DateTime.now() : null;
+      final parsed = DateTime.tryParse(value.toString());
+      if (parsed != null) return parsed;
+    }
+    if (json['deletion_pending'] == true || json['account_deletion_pending'] == true) {
+      return DateTime.now();
+    }
+    return null;
   }
 
   Map<String, dynamic> toJson() {
@@ -74,6 +100,9 @@ class UserModel {
       'phone_number': phoneNumber,
       'created_at': createdAt?.toIso8601String(),
       'archive_pin': archivePin,
+      'auth_provider': authProvider,
+      if (deletionScheduledAt != null)
+        'deletion_scheduled_at': deletionScheduledAt!.toIso8601String(),
     };
   }
 
@@ -106,6 +135,8 @@ class UserModel {
     String? phoneNumber,
     DateTime? createdAt,
     String? archivePin,
+    String? authProvider,
+    DateTime? deletionScheduledAt,
   }) {
     return UserModel(
       userId: userId ?? this.userId,
@@ -123,6 +154,8 @@ class UserModel {
       phoneNumber: phoneNumber ?? this.phoneNumber,
       createdAt: createdAt ?? this.createdAt,
       archivePin: archivePin ?? this.archivePin,
+      authProvider: authProvider ?? this.authProvider,
+      deletionScheduledAt: deletionScheduledAt ?? this.deletionScheduledAt,
     );
   }
 }

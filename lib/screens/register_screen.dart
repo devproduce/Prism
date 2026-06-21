@@ -10,7 +10,7 @@ import 'package:prism/widgets/glass_widgets.dart';
 
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/screens/login_screen.dart';
-import 'package:prism/screens/home_screen.dart';
+import 'package:prism/utils/auth_navigation.dart';
 import 'package:prism/screens/multi_view_capture_screen.dart';
 import 'package:prism/utils/error_handler.dart';
 
@@ -254,16 +254,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     // Navigate to home screen and clear all previous routes
     // This prevents the app from going back to splash/onboarding on rebuild
     if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        PageRouteBuilder(
-          pageBuilder: (_, __, ___) =>
-              HomeScreen(key: HomeScreen.homeScreenKey),
-          transitionsBuilder: (_, animation, __, child) {
-            return FadeTransition(opacity: animation, child: child);
-          },
-        ),
-        (route) => false, // Remove all previous routes from the stack
-      );
+      navigateAfterAuthentication(context, authProvider, clearStack: true);
     }
   }
 

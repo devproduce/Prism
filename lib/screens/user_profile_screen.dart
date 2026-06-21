@@ -140,7 +140,6 @@ class _UserProfileScreenState extends State<UserProfileScreen>
       debugPrint('📸 Fetching shared gallery for friend: ${widget.userId}');
 
       final data = await apiClient.getSharedGallery(
-        userId: authProvider.currentUser!.userId,
         friendId: widget.userId,
       );
 

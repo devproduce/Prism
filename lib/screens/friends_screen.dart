@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/models/friend_model.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:prism/models/contact_sync_result.dart';
 import 'package:prism/screens/user_profile_screen.dart';
 import 'package:prism/screens/collection_detail_screen.dart';
@@ -22,7 +23,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:prism/widgets/friendship_action_pill.dart';
 import 'package:prism/widgets/unknown_faces_strip.dart';
-import 'package:prism/utils/debug_session_log.dart';
 
 class FriendsScreen extends StatefulWidget {
   final bool openRequestsDirectly;
@@ -59,16 +59,14 @@ class _FriendsScreenState extends State<FriendsScreen> {
       if (authProvider.currentUser != null) {
         friendsProvider.refreshAll(authProvider.currentUser!.userId);
       }
-      
+
       if (widget.openRequestsDirectly) {
         _showRequestsBottomSheet(context, friendsProvider, authProvider);
       }
 
       final initialQuery = widget.initialSearchQuery?.trim();
       final userId = authProvider.currentUser?.userId;
-      if (initialQuery != null &&
-          initialQuery.isNotEmpty &&
-          userId != null) {
+      if (initialQuery != null && initialQuery.isNotEmpty && userId != null) {
         _searchController.text = initialQuery;
         setState(() {});
         _updateSearchStatusRefreshTimer(true);
@@ -94,18 +92,110 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
     if (_searchStatusRefreshTimer != null) return;
 
-    _searchStatusRefreshTimer = Timer.periodic(
-      const Duration(seconds: 12),
-      (_) {
-        if (!mounted) return;
-        final userId = context.read<AuthProvider>().currentUser?.userId;
-        if (userId == null) return;
-        context.read<FriendsProvider>().syncFriendshipsIfStale(
-              userId,
-              force: true,
-            );
-      },
+    _searchStatusRefreshTimer = Timer.periodic(const Duration(seconds: 12), (
+      _,
+    ) {
+      if (!mounted) return;
+      final userId = context.read<AuthProvider>().currentUser?.userId;
+      if (userId == null) return;
+      context.read<FriendsProvider>().syncFriendshipsIfStale(
+        userId,
+        force: true,
+      );
+    });
+  }
+
+  Future<void> _syncContacts(
+    FriendsProvider friendsProvider,
+    AuthProvider authProvider,
+  ) async {
+    final userId = authProvider.currentUser?.userId;
+    if (userId == null) return;
+
+    HapticFeedback.mediumImpact();
+    final user = authProvider.currentUser;
+    final ownerName = user != null
+        ? '${user.firstName} ${user.lastName ?? ''}'.trim()
+        : '';
+
+    final outcome = await friendsProvider.syncAndGetRecommendations(
+      userId,
+      accountCountryCode: user?.countryCode,
+      accountPhone: user?.phoneNumber,
+      accountDisplayName:
+          ownerName.isNotEmpty ? ownerName : user?.username,
     );
+
+    if (!mounted) return;
+
+    if (outcome.isSuccess) {
+      ErrorHandler.showSuccessSnackbar(
+        context,
+        message: 'Contacts synced successfully!',
+      );
+      return;
+    }
+
+    switch (outcome.issue) {
+      case ContactSyncIssue.permissionDenied:
+        final status = await Permission.contacts.status;
+        if (!mounted) return;
+        if (status.isPermanentlyDenied) {
+          final openSettings = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              backgroundColor: PrismColors.surfaceGray,
+              title: Text('Contacts permission', style: PrismTextStyles.h3),
+              content: Text(
+                'Prism needs access to your contacts to find friends. '
+                'Enable Contacts permission in Settings.',
+                style: PrismTextStyles.bodyMedium,
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: Text(
+                    'Cancel',
+                    style: PrismTextStyles.button.copyWith(
+                      color: PrismColors.secondaryText,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: Text(
+                    'Open Settings',
+                    style: PrismTextStyles.button.copyWith(
+                      color: PrismColors.prismYellow,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+          if (openSettings == true) {
+            await openAppSettings();
+          }
+        } else {
+          ErrorHandler.showErrorSnackbar(
+            context,
+            message:
+                'Contacts permission is required. Tap Sync Contacts again to allow access.',
+          );
+        }
+      case ContactSyncIssue.noContacts:
+        ErrorHandler.showErrorSnackbar(
+          context,
+          message: 'No contacts found on this device to sync.',
+        );
+      case ContactSyncIssue.uploadFailed:
+      case null:
+        ErrorHandler.showErrorSnackbar(
+          context,
+          message: friendsProvider.error ??
+              'Could not upload contacts. Please try again.',
+        );
+    }
   }
 
   @override
@@ -123,6 +213,25 @@ class _FriendsScreenState extends State<FriendsScreen> {
         automaticallyImplyLeading: false,
         actions: [
           IconButton(
+            tooltip: 'Sync contacts',
+            icon: friendsProvider.isSyncingContacts
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: PrismColors.prismYellow,
+                    ),
+                  )
+                : const Icon(
+                    Icons.contacts_rounded,
+                    color: PrismColors.prismYellow,
+                  ),
+            onPressed: friendsProvider.isSyncingContacts
+                ? null
+                : () => _syncContacts(friendsProvider, authProvider),
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh_rounded, color: PrismColors.white),
             onPressed: () {
               HapticFeedback.lightImpact();
@@ -136,7 +245,11 @@ class _FriendsScreenState extends State<FriendsScreen> {
             children: [
               IconButton(
                 icon: const Icon(Icons.inbox_rounded, color: PrismColors.white),
-                onPressed: () => _showRequestsBottomSheet(context, friendsProvider, authProvider),
+                onPressed: () => _showRequestsBottomSheet(
+                  context,
+                  friendsProvider,
+                  authProvider,
+                ),
               ),
               if (friendsProvider.pendingRequests.isNotEmpty)
                 Positioned(
@@ -191,14 +304,17 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 setState(() {});
                 _updateSearchStatusRefreshTimer(value.isNotEmpty);
                 if (authProvider.currentUser != null) {
-                  friendsProvider.searchUsers(value, authProvider.currentUser!.userId);
+                  friendsProvider.searchUsers(
+                    value,
+                    authProvider.currentUser!.userId,
+                  );
                 }
               },
               onSubmitted: (value) async {
                 if (value.isNotEmpty && authProvider.currentUser != null) {
                   final isPassword = await authProvider.verifyPassword(value);
                   if (!context.mounted) return;
-                  
+
                   if (isPassword) {
                     Navigator.push(
                       context,
@@ -231,7 +347,9 @@ class _FriendsScreenState extends State<FriendsScreen> {
                     backgroundColor: PrismColors.surfaceGray,
                     onRefresh: () async {
                       if (authProvider.currentUser != null) {
-                        await friendsProvider.refreshAll(authProvider.currentUser!.userId);
+                        await friendsProvider.refreshAll(
+                          authProvider.currentUser!.userId,
+                        );
                       }
                     },
                     child: CustomScrollView(
@@ -241,7 +359,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
                       slivers: [
                         // ── Sync banner + People You May Know ────────────────
                         SliverToBoxAdapter(
-                          child: _buildDiscoverHeader(friendsProvider, authProvider),
+                          child: _buildDiscoverHeader(friendsProvider),
                         ),
                         _buildOnPlatformSliver(friendsProvider, authProvider),
                         // ── YOUR FRIENDS label ────────────────────────────────
@@ -260,6 +378,13 @@ class _FriendsScreenState extends State<FriendsScreen> {
                         ),
                         // ── Friends list ─────────────────────────────────────
                         _buildFriendsSliver(friendsProvider, authProvider),
+                        // ── Sync prompt (only when backend has no contacts) ──
+                        SliverToBoxAdapter(
+                          child: _buildSyncPromptBelowFriends(
+                            friendsProvider,
+                            authProvider,
+                          ),
+                        ),
                         // ── Invite to Prism header + search ──────────────────
                         SliverToBoxAdapter(
                           child: _buildInviteHeader(friendsProvider),
@@ -359,7 +484,10 @@ class _FriendsScreenState extends State<FriendsScreen> {
   }
 
   // Friends Sliver
-  Widget _buildFriendsSliver(FriendsProvider provider, AuthProvider authProvider) {
+  Widget _buildFriendsSliver(
+    FriendsProvider provider,
+    AuthProvider authProvider,
+  ) {
     if (provider.isLoading) {
       return SliverToBoxAdapter(
         child: Padding(
@@ -382,45 +510,43 @@ class _FriendsScreenState extends State<FriendsScreen> {
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       sliver: SliverList(
-        delegate: SliverChildBuilderDelegate(
-          (context, index) {
-            final friend = provider.friends[index];
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _buildFriendCard(friend),
-            );
-          },
-          childCount: provider.friends.length,
-        ),
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final friend = provider.friends[index];
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _buildFriendCard(friend),
+          );
+        }, childCount: provider.friends.length),
       ),
     );
   }
 
-  Widget _buildSearchResults(FriendsProvider provider, AuthProvider authProvider) {
+  Widget _buildSearchResults(
+    FriendsProvider provider,
+    AuthProvider authProvider,
+  ) {
     return provider.isSearching
         ? const Center(
-            child: CircularProgressIndicator(
-              color: PrismColors.prismYellow,
-            ),
+            child: CircularProgressIndicator(color: PrismColors.prismYellow),
           )
         : provider.searchResults.isEmpty
-            ? _buildEmptyState(
-                'No users found',
-                'Try a different username',
-                Icons.search_off_rounded,
-              )
-            : ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-                itemCount: provider.searchResults.length,
-                separatorBuilder: (ctx, i) => const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  return _buildSearchResultCard(
-                    provider.searchResults[index],
-                    provider,
-                    authProvider,
-                  );
-                },
+        ? _buildEmptyState(
+            'No users found',
+            'Try a different username',
+            Icons.search_off_rounded,
+          )
+        : ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+            itemCount: provider.searchResults.length,
+            separatorBuilder: (ctx, i) => const SizedBox(height: 12),
+            itemBuilder: (context, index) {
+              return _buildSearchResultCard(
+                provider.searchResults[index],
+                provider,
+                authProvider,
               );
+            },
+          );
   }
 
   // Pending Requests Tab
@@ -856,32 +982,10 @@ class _FriendsScreenState extends State<FriendsScreen> {
     );
   }
 
-  // ── Sync banner + "People You May Know" section header (non-list parts) ──
-  Widget _buildDiscoverHeader(
-    FriendsProvider provider,
-    AuthProvider authProvider,
-  ) {
-    final userId = authProvider.currentUser?.userId;
+  // ── "People You May Know" section header (non-list parts) ──
+  Widget _buildDiscoverHeader(FriendsProvider provider) {
     final result = provider.contactSyncResult;
-    final isSyncing = provider.isSyncingContacts;
     final isLoadingRecs = provider.isLoadingRecommendations;
-
-    // #region agent log
-    DebugSessionLog.log(
-      location: 'friends_screen.dart:_buildDiscoverHeader',
-      message: 'Friends discover UI state',
-      hypothesisId: 'A,C,D',
-      data: {
-        'hasSynced': provider.hasSynced,
-        'isLoadingRecs': isLoadingRecs,
-        'contactSyncResultNull': result == null,
-        'onPlatformCount': result?.onPlatform.length ?? 0,
-        'notOnPlatformCount': result?.notOnPlatform.length ?? 0,
-        'visibleOnPlatformCount':
-            provider.visibleOnPlatformRecommendations.length,
-      },
-    );
-    // #endregion
 
     final side = _discoverSidePadding(context);
 
@@ -893,135 +997,52 @@ class _FriendsScreenState extends State<FriendsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-          // ── Sync Banner ──────────────────────────────────────────
-          if (!provider.hasSynced) ...[
-            PrismCard(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.contacts_rounded,
-                          color: PrismColors.prismYellow,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Find Friends from Contacts',
+              if (isLoadingRecs)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(32),
+                    child: CircularProgressIndicator(
+                      color: PrismColors.prismYellow,
+                    ),
+                  ),
+                )
+              else if (provider.hasBackendContacts && result != null) ...[
+                if (provider.visibleOnPlatformRecommendations.isNotEmpty)
+                  _buildDiscoverSectionHeader(
+                    'PEOPLE YOU MAY KNOW',
+                    Icons.people_rounded,
+                  ),
+                if (result.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    child: Center(
+                      child: Column(
+                        children: [
+                          const Icon(
+                            Icons.people_outline_rounded,
+                            color: PrismColors.secondaryText,
+                            size: 48,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No suggestions yet',
                             style: PrismTextStyles.bodyLarge.copyWith(
-                              fontWeight: FontWeight.w600,
+                              color: PrismColors.secondaryText,
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Sync your phonebook to find friends already on Prism and invite others.',
-                      style: PrismTextStyles.bodySmall.copyWith(
-                        color: PrismColors.secondaryText,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: isSyncing
-                          ? const Center(
-                              child: Padding(
-                                padding: EdgeInsets.symmetric(vertical: 8),
-                                child: CircularProgressIndicator(
-                                  color: PrismColors.prismYellow,
-                                ),
-                              ),
-                            )
-                          : PrismButton(
-                              text: 'Sync Contacts',
-                              type: PrismButtonType.primary,
-                              icon: Icons.sync_rounded,
-                              onPressed: userId == null
-                                  ? null
-                                  : () async {
-                                      final user =
-                                          authProvider.currentUser;
-                                      final ownerName = user != null
-                                          ? '${user.firstName} ${user.lastName ?? ''}'
-                                              .trim()
-                                          : '';
-                                      final res = await provider
-                                          .syncAndGetRecommendations(
-                                        userId,
-                                        accountCountryCode:
-                                            user?.countryCode,
-                                        accountPhone: user?.phoneNumber,
-                                        accountDisplayName:
-                                            ownerName.isNotEmpty
-                                                ? ownerName
-                                                : user?.username,
-                                      );
-                                      if (!mounted) return;
-                                      if (res == null) {
-                                        ErrorHandler.showErrorSnackbar(
-                                          context,
-                                          message:
-                                              'Contacts permission denied. Enable it in Settings.',
-                                        );
-                                      }
-                                    },
+                          const SizedBox(height: 4),
+                          Text(
+                            'Re-sync after more of your contacts join Prism',
+                            style: PrismTextStyles.bodySmall.copyWith(
+                              color: PrismColors.secondaryText,
                             ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
                     ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-          ],
-
-          // ── Loading / empty state ────────────────────────────────
-          if (isLoadingRecs)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: CircularProgressIndicator(color: PrismColors.prismYellow),
-              ),
-            )
-          else if (result != null) ...[
-            if (provider.visibleOnPlatformRecommendations.isNotEmpty)
-              _buildDiscoverSectionHeader('PEOPLE YOU MAY KNOW', Icons.people_rounded),
-            if (result.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 20),
-                child: Center(
-                  child: Column(
-                    children: [
-                      const Icon(
-                        Icons.people_outline_rounded,
-                        color: PrismColors.secondaryText,
-                        size: 48,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'No suggestions yet',
-                        style: PrismTextStyles.bodyLarge.copyWith(
-                          color: PrismColors.secondaryText,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Re-sync after more of your contacts join Prism',
-                        style: PrismTextStyles.bodySmall.copyWith(
-                          color: PrismColors.secondaryText,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
                   ),
-                ),
-              ),
-          ],
+              ],
             ],
           ),
         ),
@@ -1059,18 +1080,98 @@ class _FriendsScreenState extends State<FriendsScreen> {
       padding: EdgeInsets.fromLTRB(side, 10, side, 8),
       sliver: SliverList(
         delegate: SliverChildListDelegate(
-          suggestions.map((user) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: _discoverContentWidth(context),
+          suggestions
+              .map(
+                (user) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: _discoverContentWidth(context),
+                      ),
+                      child: _buildOnPlatformCard(user, provider, authProvider),
+                    ),
+                  ),
                 ),
-                child: _buildOnPlatformCard(user, provider, authProvider),
+              )
+              .toList(),
+          addRepaintBoundaries: true,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSyncPromptBelowFriends(
+    FriendsProvider provider,
+    AuthProvider authProvider,
+  ) {
+    if (provider.isLoadingRecommendations || provider.hasBackendContacts) {
+      return const SizedBox.shrink();
+    }
+
+    final side = _discoverSidePadding(context);
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(side, 16, side, 8),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: _discoverContentWidth(context)),
+          child: PrismCard(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.contacts_rounded,
+                        color: PrismColors.prismYellow,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Find friends from contacts',
+                          style: PrismTextStyles.bodyLarge.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Sync your phonebook to discover friends on Prism and invite others.',
+                    style: PrismTextStyles.bodySmall.copyWith(
+                      color: PrismColors.secondaryText,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: provider.isSyncingContacts
+                        ? const Center(
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(vertical: 8),
+                              child: CircularProgressIndicator(
+                                color: PrismColors.prismYellow,
+                              ),
+                            ),
+                          )
+                        : PrismButton(
+                            text: 'Sync Contacts',
+                            type: PrismButtonType.primary,
+                            icon: Icons.sync_rounded,
+                            onPressed: authProvider.currentUser == null
+                                ? null
+                                : () => _syncContacts(provider, authProvider),
+                          ),
+                  ),
+                ],
               ),
             ),
-          )).toList(),
-          addRepaintBoundaries: true,
+          ),
         ),
       ),
     );
@@ -1081,7 +1182,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
     final result = provider.contactSyncResult;
     final isLoadingRecs = provider.isLoadingRecommendations;
 
-    if (isLoadingRecs || result == null) {
+    if (isLoadingRecs || !provider.hasBackendContacts || result == null) {
       return const SizedBox.shrink();
     }
 
@@ -1095,7 +1196,10 @@ class _FriendsScreenState extends State<FriendsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildDiscoverSectionHeader('INVITE TO PRISM', Icons.mail_outline_rounded),
+          _buildDiscoverSectionHeader(
+            'INVITE TO PRISM',
+            Icons.mail_outline_rounded,
+          ),
           const SizedBox(height: 10),
           TextField(
             controller: _inviteSearchController,
@@ -1154,14 +1258,19 @@ class _FriendsScreenState extends State<FriendsScreen> {
     final result = provider.contactSyncResult;
     final isLoadingRecs = provider.isLoadingRecommendations;
 
-    if (isLoadingRecs || result == null || result.notOnPlatform.isEmpty) {
+    if (isLoadingRecs ||
+        !provider.hasBackendContacts ||
+        result == null ||
+        result.notOnPlatform.isEmpty) {
       return const SliverToBoxAdapter(child: SizedBox.shrink());
     }
 
     final inviteTargets = result.notOnPlatform
-        .where((c) => c.displayName
-            .toLowerCase()
-            .contains(_inviteSearchQuery.toLowerCase()))
+        .where(
+          (c) => c.displayName.toLowerCase().contains(
+            _inviteSearchQuery.toLowerCase(),
+          ),
+        )
         .toList();
 
     if (inviteTargets.isEmpty) {
@@ -1182,10 +1291,14 @@ class _FriendsScreenState extends State<FriendsScreen> {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       sliver: SliverList(
         delegate: SliverChildListDelegate(
-          inviteTargets.map((contact) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _buildInviteCard(contact, authProvider),
-          )).toList(),
+          inviteTargets
+              .map(
+                (contact) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _buildInviteCard(contact, authProvider),
+                ),
+              )
+              .toList(),
           addRepaintBoundaries: true,
         ),
       ),
@@ -1379,12 +1492,14 @@ class _FriendsScreenState extends State<FriendsScreen> {
     );
   }
 
-  Widget _buildInviteCard(NotOnPlatformContact contact, AuthProvider authProvider) {
+  Widget _buildInviteCard(
+    NotOnPlatformContact contact,
+    AuthProvider authProvider,
+  ) {
     return PrismCard(
       padding: EdgeInsets.zero,
       child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: CircleAvatar(
           backgroundColor: PrismColors.inputGray,
           child: Text(
@@ -1411,19 +1526,25 @@ class _FriendsScreenState extends State<FriendsScreen> {
             if (contact.whatsappLink.isNotEmpty)
               _buildInviteButton(
                 color: const Color(0xFF25D366),
-                iconWidget: const FaIcon(FontAwesomeIcons.whatsapp, size: 16, color: Color(0xFF25D366)),
+                iconWidget: const FaIcon(
+                  FontAwesomeIcons.whatsapp,
+                  size: 16,
+                  color: Color(0xFF25D366),
+                ),
                 onTap: () {
-                  final username = authProvider.currentUser?.username ?? 'Your friend';
-                  final message = "$username is on Prism , why dont you try it out with a link attached there www.prismapp.in";
+                  final username =
+                      authProvider.currentUser?.username ?? 'Your friend';
+                  final message =
+                      "$username is on Prism , why dont you try it out with a link attached there www.prismapp.in";
                   final encodedMessage = Uri.encodeComponent(message);
-                  
+
                   String finalUrl = contact.whatsappLink;
                   if (finalUrl.contains('?')) {
                     // Strip any existing query parameters (like an old text= parameter)
                     finalUrl = finalUrl.split('?').first;
                   }
                   finalUrl = '$finalUrl?text=$encodedMessage';
-                  
+
                   _launchUrl(finalUrl);
                 },
               ),
@@ -1433,20 +1554,26 @@ class _FriendsScreenState extends State<FriendsScreen> {
             if (contact.smsLink.isNotEmpty)
               _buildInviteButton(
                 color: PrismColors.electricBlue,
-                iconWidget: const Icon(Icons.sms_rounded, size: 16, color: PrismColors.electricBlue),
+                iconWidget: const Icon(
+                  Icons.sms_rounded,
+                  size: 16,
+                  color: PrismColors.electricBlue,
+                ),
                 onTap: () {
-                  final username = authProvider.currentUser?.username ?? 'Your friend';
-                  final message = "$username is on Prism , why dont you try it out with a link attached there www.prismapp.in";
+                  final username =
+                      authProvider.currentUser?.username ?? 'Your friend';
+                  final message =
+                      "$username is on Prism , why dont you try it out with a link attached there www.prismapp.in";
                   final encodedMessage = Uri.encodeComponent(message);
-                  
+
                   String finalUrl = contact.smsLink;
                   if (finalUrl.contains('?')) {
                     finalUrl = finalUrl.split('?').first;
                   }
-                  
+
                   // SMS uses 'body' parameter instead of 'text'
                   finalUrl = '$finalUrl?body=$encodedMessage';
-                  
+
                   _launchUrl(finalUrl);
                 },
               ),

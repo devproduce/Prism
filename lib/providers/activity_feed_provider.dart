@@ -85,9 +85,9 @@ class ActivityFeedProvider with ChangeNotifier {
       _setError(null);
 
       final results = await Future.wait<List<dynamic>>([
-        _apiClient.getNotifications(userId: userId),
-        _apiClient.getPendingRequests(userId: userId),
-        _apiClient.getSentRequests(userId: userId),
+        _apiClient.getNotifications(),
+        _apiClient.getPendingRequests(),
+        _apiClient.getSentRequests(),
       ]);
 
       final notificationData = results[0];
@@ -132,7 +132,6 @@ class ActivityFeedProvider with ChangeNotifier {
 
       await _apiClient.acceptFriendRequest(
         friendshipId: friendshipId,
-        userId: userId,
       );
 
       await refetch(userId);
@@ -184,7 +183,6 @@ class ActivityFeedProvider with ChangeNotifier {
 
       await _apiClient.rejectFriendRequest(
         friendshipId: friendshipId,
-        userId: userId,
       );
 
       await refetch(userId);
@@ -245,7 +243,6 @@ class ActivityFeedProvider with ChangeNotifier {
       _setError(null);
       await _apiClient.markNotificationReadSingle(
         notificationId: notificationId,
-        userId: userId,
       );
 
       if (removeRetroactiveFromFeed ||
@@ -282,7 +279,6 @@ class ActivityFeedProvider with ChangeNotifier {
     try {
       _setError(null);
       final response = await _apiClient.acceptRetroactiveShare(
-        userId: userId,
         friendId: friendId,
         contactFaceIds: contactFaceIds,
         unknownFaceIds: unknownFaceIds,
@@ -329,7 +325,7 @@ class ActivityFeedProvider with ChangeNotifier {
 
   Future<void> markAllAsRead(String userId) async {
     try {
-      await _apiClient.markNotificationsRead(userId: userId);
+      await _apiClient.markNotificationsRead();
 
       _notifications = _notifications
           .map(

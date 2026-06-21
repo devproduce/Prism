@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -8,6 +10,7 @@ import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/screens/processing_screen.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
+import 'package:prism/utils/responsive_helper.dart';
 import 'package:prism/widgets/prism_button.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:prism/utils/error_handler.dart';
@@ -165,6 +168,14 @@ class _ShareUploadScreenState extends State<ShareUploadScreen> {
   @override
   Widget build(BuildContext context) {
     final sharingProvider = Provider.of<SharingProvider>(context);
+    final screenWidth = MediaQuery.of(context).size.width;
+    final horizontalPadding = ResponsiveHelper.horizontalPadding(context);
+    const crossAxisSpacing = 12.0;
+    final crossAxisCount = screenWidth >= ResponsiveHelper.tablet ? 3 : 2;
+    final columnWidth = (screenWidth -
+            horizontalPadding * 2 -
+            crossAxisSpacing * (crossAxisCount - 1)) /
+        crossAxisCount;
 
     return Scaffold(
       backgroundColor: PrismColors.voidBlack,
@@ -209,7 +220,7 @@ class _ShareUploadScreenState extends State<ShareUploadScreen> {
               children: [
                 Expanded(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(16.0),
+                    padding: EdgeInsets.all(horizontalPadding),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -243,171 +254,25 @@ class _ShareUploadScreenState extends State<ShareUploadScreen> {
                         MasonryGridView.count(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          crossAxisCount: 2,
+                          crossAxisCount: crossAxisCount,
                           mainAxisSpacing: 12,
-                          crossAxisSpacing: 12,
+                          crossAxisSpacing: crossAxisSpacing,
                           itemCount: sharingProvider.selectedImages.length + 1,
                           itemBuilder: (context, index) {
                             if (index ==
                                 sharingProvider.selectedImages.length) {
-                              return GestureDetector(
-                                onTap: _pickMedia, // Changed to pickMedia
-                                child: Container(
-                                  height: 150,
-                                  decoration: BoxDecoration(
-                                    color: PrismColors
-                                        .inputGray, // Dark matte gray
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(
-                                      color: PrismColors.white.withValues(
-                                        alpha: 0.1,
-                                      ),
-                                      style: BorderStyle.solid,
-                                    ),
-                                  ),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(12),
-                                        decoration: BoxDecoration(
-                                          color: PrismColors.voidBlack,
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                            color: PrismColors.white.withValues(
-                                              alpha: 0.12,
-                                            ),
-                                          ),
-                                        ),
-                                        child: const Icon(
-                                          Icons.add_photo_alternate_rounded,
-                                          color: PrismColors.prismYellow,
-                                          size: 32,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        'Add Media',
-                                        style: PrismTextStyles.bodySmall
-                                            .copyWith(
-                                              color: PrismColors.secondaryText,
-                                            ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                              return _AddMediaTile(
+                                width: columnWidth,
+                                onTap: _pickMedia,
                               );
                             }
 
                             final file = sharingProvider.selectedImages[index];
-                            final isVideo = _isVideo(file.path);
-
-                            return Stack(
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: Container(
-                                    height: 150, // Fixed height for grid
-                                    color: PrismColors.surfaceGray,
-                                    child: isVideo
-                                        ? Stack(
-                                            fit: StackFit.expand,
-                                            children: [
-                                              // Placeholder for video thumb
-                                              Container(
-                                                color: PrismColors.black,
-                                                child: const Center(
-                                                  child: Icon(
-                                                    Icons.play_circle_fill,
-                                                    color: PrismColors.white,
-                                                    size: 48,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          )
-                                        : Image.file(
-                                            file,
-                                            fit: BoxFit.cover,
-                                            errorBuilder:
-                                                (context, error, stackTrace) {
-                                                  return Container(
-                                                    color:
-                                                        PrismColors.surfaceGray,
-                                                    child: Column(
-                                                      mainAxisAlignment:
-                                                          MainAxisAlignment
-                                                              .center,
-                                                      children: [
-                                                        const Icon(
-                                                          Icons.broken_image,
-                                                          color: PrismColors
-                                                              .secondaryText,
-                                                        ),
-                                                        const SizedBox(
-                                                          height: 4,
-                                                        ),
-                                                        Text(
-                                                          'Error',
-                                                          style: PrismTextStyles
-                                                              .bodySmall
-                                                              .copyWith(
-                                                                fontSize: 10,
-                                                              ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  );
-                                                },
-                                          ),
-                                  ),
-                                ),
-                                Positioned(
-                                  top: 8,
-                                  right: 8,
-                                  child: GestureDetector(
-                                    onTap: () =>
-                                        sharingProvider.removeImage(index),
-                                    child: Container(
-                                      padding: const EdgeInsets.all(6),
-                                      decoration: BoxDecoration(
-                                        color: PrismColors.black.withValues(
-                                          alpha: 0.6,
-                                        ),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(
-                                        Icons.close,
-                                        size: 16,
-                                        color: PrismColors.white,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                if (isVideo)
-                                  Positioned(
-                                    bottom: 8,
-                                    left: 8,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: PrismColors.prismYellow,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: const Text(
-                                        'VIDEO',
-                                        style: TextStyle(
-                                          color: PrismColors.black,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                              ],
+                            return _SelectedMediaTile(
+                              file: file,
+                              width: columnWidth,
+                              isVideo: _isVideo(file.path),
+                              onRemove: () => sharingProvider.removeImage(index),
                             );
                           },
                         ),
@@ -418,6 +283,230 @@ class _ShareUploadScreenState extends State<ShareUploadScreen> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+class _AddMediaTile extends StatelessWidget {
+  final double width;
+  final VoidCallback onTap;
+
+  const _AddMediaTile({
+    required this.width,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: width,
+        height: width,
+        decoration: BoxDecoration(
+          color: PrismColors.inputGray,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: PrismColors.white.withValues(alpha: 0.1),
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: PrismColors.voidBlack,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: PrismColors.white.withValues(alpha: 0.12),
+                ),
+              ),
+              child: const Icon(
+                Icons.add_photo_alternate_rounded,
+                color: PrismColors.prismYellow,
+                size: 32,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add Media',
+              style: PrismTextStyles.bodySmall.copyWith(
+                color: PrismColors.secondaryText,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SelectedMediaTile extends StatefulWidget {
+  final File file;
+  final double width;
+  final bool isVideo;
+  final VoidCallback onRemove;
+
+  const _SelectedMediaTile({
+    required this.file,
+    required this.width,
+    required this.isVideo,
+    required this.onRemove,
+  });
+
+  @override
+  State<_SelectedMediaTile> createState() => _SelectedMediaTileState();
+}
+
+class _SelectedMediaTileState extends State<_SelectedMediaTile> {
+  double? _aspectRatio;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveAspectRatio();
+  }
+
+  @override
+  void didUpdateWidget(_SelectedMediaTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.file.path != widget.file.path) {
+      _aspectRatio = null;
+      _resolveAspectRatio();
+    }
+  }
+
+  Future<void> _resolveAspectRatio() async {
+    if (widget.isVideo) {
+      if (mounted) setState(() => _aspectRatio = 16 / 9);
+      return;
+    }
+
+    try {
+      final bytes = await widget.file.readAsBytes();
+      final codec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: 240,
+      );
+      final frame = await codec.getNextFrame();
+      final width = frame.image.width.toDouble();
+      final height = frame.image.height.toDouble();
+      frame.image.dispose();
+
+      if (!mounted || height <= 0) return;
+      setState(() => _aspectRatio = width / height);
+    } catch (_) {
+      if (mounted) setState(() => _aspectRatio = 1.0);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final aspectRatio = _aspectRatio;
+    final tileHeight = aspectRatio == null
+        ? widget.width
+        : widget.width / aspectRatio;
+
+    return SizedBox(
+      width: widget.width,
+      height: tileHeight,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: ColoredBox(
+              color: PrismColors.surfaceGray,
+              child: aspectRatio == null
+                  ? const Center(
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: PrismColors.prismYellow,
+                        ),
+                      ),
+                    )
+                  : widget.isVideo
+                      ? const ColoredBox(
+                          color: PrismColors.black,
+                          child: Center(
+                            child: Icon(
+                              Icons.play_circle_fill,
+                              color: PrismColors.white,
+                              size: 48,
+                            ),
+                          ),
+                        )
+                      : Image.file(
+                          widget.file,
+                          fit: BoxFit.cover,
+                          width: widget.width,
+                          height: tileHeight,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.broken_image,
+                                  color: PrismColors.secondaryText,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Error',
+                                  style: PrismTextStyles.bodySmall.copyWith(
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+            ),
+          ),
+          Positioned(
+            top: 8,
+            right: 8,
+            child: GestureDetector(
+              onTap: widget.onRemove,
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: PrismColors.black.withValues(alpha: 0.6),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.close,
+                  size: 16,
+                  color: PrismColors.white,
+                ),
+              ),
+            ),
+          ),
+          if (widget.isVideo)
+            Positioned(
+              bottom: 8,
+              left: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: PrismColors.prismYellow,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  'VIDEO',
+                  style: TextStyle(
+                    color: PrismColors.black,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

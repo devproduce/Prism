@@ -51,5 +51,7 @@
 	<string>Prism needs camera access to capture moments.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Prism needs microphone access to record audio with your videos.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Prism uses your contacts to find friends already on the app and let you invite others.</string>
 </dict>
 </plist>
