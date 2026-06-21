@@ -25,6 +25,7 @@ import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/providers/activity_feed_provider.dart';
 import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/providers/theme_provider.dart';
+import 'package:prism/services/auth_backend_capabilities.dart';
 import 'package:prism/services/notification_service.dart';
 import 'package:prism/services/local_notification_service.dart';
 import 'package:prism/services/share_handler_service.dart';
@@ -39,6 +40,7 @@ void main() async {
 
   // Initialize FCM notifications
   await NotificationService.initialize();
+  await AuthBackendCapabilities.probe();
 
   // Initialize local notifications
   await LocalNotificationService().initialize(navigatorKey);

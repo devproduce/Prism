@@ -15,6 +15,7 @@ import 'package:prism/services/contact_service.dart';
 import 'package:prism/services/token_storage_service.dart';
 import 'package:prism/services/auth_session_store.dart';
 import 'package:prism/services/firebase_auth_service.dart';
+import 'package:prism/services/auth_backend_capabilities.dart';
 import 'package:prism/providers/profile_provider.dart';
 import 'package:prism/services/notification_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -89,6 +90,7 @@ class AuthProvider with ChangeNotifier {
           _currentUser = user;
           _isAuthenticated = true;
           await _sessionStore.bindUser(user.userId);
+          _bindApiUser(user.userId);
           _authGate = _sessionStore.authGate;
           await _hydrateContactsSyncedState(user.userId);
 
@@ -146,11 +148,12 @@ class AuthProvider with ChangeNotifier {
     }
 
     await _sessionStore.bindUser(response.user.userId);
+    _bindApiUser(response.user.userId);
     await _databaseService.saveUserSession(response.user);
     await _saveCredentialsForNativeAccess();
 
     try {
-      final freshUser = await _apiClient.getCurrentUser();
+      final freshUser = await _apiClient.getCurrentUser(response.user.userId);
       _currentUser = freshUser;
       await _databaseService.updateUserSession(freshUser);
     } catch (e) {
@@ -212,6 +215,14 @@ class AuthProvider with ChangeNotifier {
     required String password,
     String? email,
   }) async {
+    if (AuthBackendCapabilities.legacyAuthEnabled) {
+      return login(
+        identifier: username,
+        password: password,
+        manageLoadingState: false,
+      );
+    }
+
     var loginEmail = email?.trim().isNotEmpty == true
         ? email!.trim()
         : (registeredUser.email.isNotEmpty ? registeredUser.email : null);
@@ -255,6 +266,70 @@ class AuthProvider with ChangeNotifier {
       username:
           merged.username.isEmpty ? registeredUser.username : merged.username,
     );
+  }
+
+  void _bindApiUser(String userId) {
+    _apiClient.setAuthenticatedUserId(userId);
+    _apiClient.setLegacyAuthMode(AuthBackendCapabilities.legacyAuthEnabled);
+  }
+
+  /// Legacy username/password login for backends without Firebase auth.
+  Future<bool> login({
+    required String identifier,
+    required String password,
+    bool manageLoadingState = true,
+  }) async {
+    try {
+      if (manageLoadingState) {
+        _setLoading(true);
+        _setError(null);
+      }
+
+      final response = await _apiClient.login(
+        identifier: identifier,
+        password: password,
+      );
+
+      _currentUser = response.user;
+      _isAuthenticated = true;
+      _authGate = AuthGate.none;
+      _sessionStore.setAuthGate(AuthGate.none);
+      _bindApiUser(response.user.userId);
+
+      if (response.accessToken != null && response.accessToken!.isNotEmpty) {
+        debugPrint('Auth token set from login response');
+      } else {
+        debugPrint('Legacy login succeeded without JWT access token');
+      }
+
+      await _sessionStore.bindUser(response.user.userId);
+      await _databaseService.saveUserSession(response.user);
+      await _saveCredentialsForNativeAccess();
+
+      try {
+        final freshUser =
+            await _apiClient.getCurrentUser(response.user.userId);
+        _currentUser = freshUser;
+        await _databaseService.updateUserSession(freshUser);
+      } catch (e) {
+        debugPrint('Warning: Could not fetch fresh profile after login: $e');
+      }
+
+      await _hydrateContactsSyncedState(response.user.userId);
+      NotificationService.registerDeviceToken(response.user.userId);
+
+      if (manageLoadingState) _setLoading(false);
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      if (manageLoadingState) _setLoading(false);
+      return false;
+    } catch (e) {
+      _setError(ErrorHandler.getErrorMessage(e));
+      if (manageLoadingState) _setLoading(false);
+      return false;
+    }
   }
 
   Future<bool> migrateLegacyAccount({
@@ -475,11 +550,13 @@ class AuthProvider with ChangeNotifier {
         email: email,
         firstName: firstName,
         lastName: lastName,
-        profileImage: profileImage,
+        profileImage:
+            faceIds != null && faceIds.isNotEmpty ? null : profileImage,
         faceIds: faceIds,
       );
 
       _currentUser = response.user;
+      _bindApiUser(response.user.userId);
       final token = response.accessToken;
 
       // Check phone_synced flag
@@ -735,6 +812,7 @@ class AuthProvider with ChangeNotifier {
     _isAuthenticated = false;
     _contactsSynced = false;
     _authGate = AuthGate.none;
+    _apiClient.setAuthenticatedUserId(null);
     await _apiClient.clearAuthToken();
     await _sessionStore.clear();
     await _firebaseAuth.signOut();
@@ -859,7 +937,7 @@ class AuthProvider with ChangeNotifier {
     if (_currentUser == null) return;
 
     try {
-      final updatedUser = await _apiClient.getCurrentUser();
+      final updatedUser = await _apiClient.getCurrentUser(_currentUser!.userId);
 
       // Preserve local archive PIN since backend doesn't know about it
       _currentUser = updatedUser.copyWith(archivePin: _currentUser!.archivePin);

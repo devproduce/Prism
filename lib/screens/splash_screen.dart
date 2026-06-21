@@ -67,7 +67,9 @@ class _SplashScreenState extends State<SplashScreen> {
       // Determine navigation destination
       if (authProvider.isAuthenticated && authProvider.currentUser != null) {
         try {
-          await authProvider.apiClient.getCurrentUser();
+          await authProvider.apiClient.getCurrentUser(
+            authProvider.currentUser!.userId,
+          );
 
           if (!mounted) return;
 

@@ -13,6 +13,7 @@ import 'package:prism/screens/complete_profile_screen.dart';
 import 'package:prism/screens/secure_account_screen.dart';
 import 'package:prism/utils/auth_navigation.dart';
 import 'package:prism/utils/error_handler.dart';
+import 'package:prism/services/auth_backend_capabilities.dart';
 import 'package:prism/api/api_client.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -29,9 +30,9 @@ class _LoginScreenState extends State<LoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
-  _LoginPhase _phase = _LoginPhase.username;
-  String? _resolvedEmail;
   bool _isResolving = false;
+  bool _legacyDirectLogin = false;
+  _LoginPhase _phase = _LoginPhase.username;
 
   @override
   void dispose() {
@@ -44,9 +45,12 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _phase = _LoginPhase.username;
       _resolvedEmail = null;
+      _legacyDirectLogin = false;
       _passwordController.clear();
     });
   }
+
+  String? _resolvedEmail;
 
   Future<void> _handleContinueUsername() async {
     if (_phase != _LoginPhase.username) return;
@@ -55,6 +59,15 @@ class _LoginScreenState extends State<LoginScreen> {
     HapticFeedback.lightImpact();
     final username = _usernameController.text.trim();
     final authProvider = context.read<AuthProvider>();
+
+    if (AuthBackendCapabilities.legacyAuthEnabled) {
+      setState(() {
+        _phase = _LoginPhase.password;
+        _legacyDirectLogin = true;
+        _resolvedEmail = null;
+      });
+      return;
+    }
 
     setState(() => _isResolving = true);
     authProvider.clearError();
@@ -100,6 +113,14 @@ class _LoginScreenState extends State<LoginScreen> {
       });
     } on ApiException catch (e) {
       if (!mounted) return;
+      if (e.statusCode == 404) {
+        setState(() {
+          _phase = _LoginPhase.password;
+          _legacyDirectLogin = true;
+          _resolvedEmail = null;
+        });
+        return;
+      }
       ErrorHandler.showErrorSnackbar(
         context,
         message: e.statusCode == 429
@@ -123,19 +144,26 @@ class _LoginScreenState extends State<LoginScreen> {
     if (_phase != _LoginPhase.password) return;
     if (!_formKey.currentState!.validate()) return;
 
-    final email = _resolvedEmail;
-    if (email == null || email.isEmpty) {
-      _resetToUsername();
-      return;
-    }
-
     HapticFeedback.lightImpact();
     final authProvider = context.read<AuthProvider>();
 
-    final success = await authProvider.loginWithFirebaseEmail(
-      email: email,
-      password: _passwordController.text,
-    );
+    final bool success;
+    if (_legacyDirectLogin) {
+      success = await authProvider.login(
+        identifier: _usernameController.text.trim(),
+        password: _passwordController.text,
+      );
+    } else {
+      final email = _resolvedEmail;
+      if (email == null || email.isEmpty) {
+        _resetToUsername();
+        return;
+      }
+      success = await authProvider.loginWithFirebaseEmail(
+        email: email,
+        password: _passwordController.text,
+      );
+    }
 
     if (!mounted) return;
 

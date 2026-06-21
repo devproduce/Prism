@@ -30,6 +30,8 @@ class ApiClient {
   final http.Client _client = http.Client();
   final TokenStorageService _tokenStorage = TokenStorageService.instance;
   String? _authToken;
+  String? _authenticatedUserId;
+  bool _legacyAuthMode = true;
 
   bool _isRefreshing = false;
   final List<Completer<String?>> _refreshWaiters = [];
@@ -54,6 +56,22 @@ class ApiClient {
   // Set authentication token
   void setAuthToken(String token) {
     _authToken = token;
+  }
+
+  void setAuthenticatedUserId(String? userId) {
+    _authenticatedUserId = userId;
+  }
+
+  void setLegacyAuthMode(bool enabled) {
+    _legacyAuthMode = enabled;
+  }
+
+  bool get legacyAuthMode => _legacyAuthMode;
+
+  String? _activeUserId([String? userId]) {
+    final id = userId ?? _authenticatedUserId;
+    if (id == null || id.isEmpty) return null;
+    return id;
   }
 
   // Clear authentication token
@@ -167,7 +185,7 @@ class ApiClient {
       _handle403EmailGate(response);
     }
 
-    if (!authenticated || response.statusCode != 401) {
+    if (_legacyAuthMode || !authenticated || response.statusCode != 401) {
       return response;
     }
 
@@ -371,6 +389,7 @@ class ApiClient {
 
   /// Register device token for FCM
   Future<void> registerDeviceToken({
+    String? userId,
     required String deviceId,
     required String fcmToken,
     required String platform,
@@ -380,6 +399,7 @@ class ApiClient {
       final response = await _post(
         uri,
         body: json.encode({
+          if (_activeUserId(userId) != null) 'user_id': _activeUserId(userId),
           'device_id': deviceId,
           'fcm_token': fcmToken,
           'platform': platform,
@@ -435,8 +455,8 @@ class ApiClient {
         debugPrint('✓ Including ${faceIds.length} face IDs in registration');
       }
 
-      // Add image file if provided
-      if (profileImage != null) {
+      // Backend skips image upload when face_ids are provided (multi-view mode).
+      if (profileImage != null && (faceIds == null || faceIds.isEmpty)) {
         request.files.add(
           await http.MultipartFile.fromPath('image', profileImage.path),
         );
@@ -465,8 +485,7 @@ class ApiClient {
     }
   }
 
-  /// Legacy password login — prefer Firebase + [loginVerify].
-  @Deprecated('Use Firebase sign-in followed by POST /auth/login/verify')
+  /// Login user (legacy backend) or fallback when Firebase auth is unavailable.
   Future<AuthResponse> login({
     required String identifier, // Changed from 'email' to 'identifier'
     required String password,
@@ -499,6 +518,10 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/auth/verify-password');
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('POST', uri);
+        final activeUserId = _activeUserId();
+        if (activeUserId != null) {
+          request.fields['user_id'] = activeUserId;
+        }
         request.fields['password'] = password;
         return request;
       });
@@ -733,10 +756,18 @@ class ApiClient {
 
   /// Get current user details
   /// GET /users/me
-  Future<UserModel> getCurrentUser() async {
+  Future<UserModel> getCurrentUser([String? userId]) async {
     try {
+      final queryParams = <String, String>{};
+      final activeUserId = _activeUserId(userId);
+      if (activeUserId != null) {
+        queryParams['user_id'] = activeUserId;
+      }
+
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}${ApiConstants.getCurrentUser}',
+      ).replace(
+        queryParameters: queryParams.isEmpty ? null : queryParams,
       );
 
       final response = await _get(uri);
@@ -788,6 +819,10 @@ class ApiClient {
       );
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('PUT', uri);
+        final activeUserId = _activeUserId();
+        if (activeUserId != null) {
+          request.fields['user_id'] = activeUserId;
+        }
         if (username != null) request.fields['username'] = username;
         if (firstName != null) request.fields['first_name'] = firstName;
         if (lastName != null) request.fields['last_name'] = lastName;
@@ -818,6 +853,10 @@ class ApiClient {
       );
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('POST', uri);
+        final activeUserId = _activeUserId();
+        if (activeUserId != null) {
+          request.fields['user_id'] = activeUserId;
+        }
         request.files.add(
           await http.MultipartFile.fromPath('image', profileImage.path),
         );
@@ -839,6 +878,10 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/users/me/profile-picture');
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('DELETE', uri);
+        final activeUserId = _activeUserId();
+        if (activeUserId != null) {
+          request.fields['user_id'] = activeUserId;
+        }
         return request;
       });
       final data = _handleResponse(response);
@@ -861,6 +904,8 @@ class ApiClient {
   }) async {
     try {
       final queryParams = <String, String>{};
+      final activeUserId = _activeUserId();
+      if (activeUserId != null) queryParams['user_id'] = activeUserId;
       if (favourite != null) queryParams['favourite'] = favourite.toString();
       if (archive != null) queryParams['archive'] = archive.toString();
       if (bin != null) queryParams['bin'] = bin.toString();
@@ -911,7 +956,12 @@ class ApiClient {
       print('Toggle field: $field for image: $imageId');
 
       final response = await _sendMultipart(() async {
-        return http.MultipartRequest('POST', uri);
+        final request = http.MultipartRequest('POST', uri);
+        final activeUserId = _activeUserId();
+        if (activeUserId != null) {
+          request.fields['user_id'] = activeUserId;
+        }
+        return request;
       });
 
       print('Toggle API Status: ${response.statusCode}');
@@ -949,9 +999,12 @@ class ApiClient {
   /// GET /images/friend/{friend_id}
   Future<List<dynamic>> getSharedGallery({required String friendId}) async {
     try {
+      final queryParams = <String, String>{};
+      final activeUserId = _activeUserId();
+      if (activeUserId != null) queryParams['user_id'] = activeUserId;
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}${ApiConstants.getSharedGallery}$friendId',
-      );
+      ).replace(queryParameters: queryParams.isEmpty ? null : queryParams);
 
       print('Shared Gallery API Request: $uri');
       final response = await _get(uri);
@@ -987,6 +1040,10 @@ class ApiClient {
       );
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('PATCH', uri);
+        final activeUserId = _activeUserId();
+        if (activeUserId != null) {
+          request.fields['user_id'] = activeUserId;
+        }
         request.fields['description'] = description;
         return request;
       });
@@ -1013,6 +1070,7 @@ class ApiClient {
       final response = await _post(
         uri,
         body: json.encode({
+          if (_activeUserId() != null) 'user_id': _activeUserId(),
           'image_ids': imageIds,
           'field': field,
           'value': value,
@@ -1039,6 +1097,10 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/users/me/contacts');
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('POST', uri);
+        final activeUserId = _activeUserId();
+        if (activeUserId != null) {
+          request.fields['user_id'] = activeUserId;
+        }
         request.fields['full_name'] = fullName;
         request.fields['phone_number'] = phoneNumber;
         if (countryCode != null && countryCode.isNotEmpty) {
@@ -1059,6 +1121,10 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/users/me/contacts',
+      ).replace(
+        queryParameters: _activeUserId() == null
+            ? null
+            : {'user_id': _activeUserId()!},
       );
 
       final response = await _get(uri);
@@ -1082,6 +1148,10 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/users/me/contacts/batch');
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('POST', uri);
+        final activeUserId = _activeUserId();
+        if (activeUserId != null) {
+          request.fields['user_id'] = activeUserId;
+        }
         request.fields['contacts'] = json.encode(contacts);
         return request;
       });
@@ -1103,6 +1173,10 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends',
+      ).replace(
+        queryParameters: _activeUserId() == null
+            ? null
+            : {'user_id': _activeUserId()!},
       );
 
       final response = await _get(uri);
@@ -1123,7 +1197,12 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/search',
-      ).replace(queryParameters: {'username': username});
+      ).replace(
+        queryParameters: {
+          'username': username,
+          if (_activeUserId() != null) 'user_id': _activeUserId()!,
+        },
+      );
 
       final response = await _get(uri);
       final data = _handleResponse(response);
@@ -1146,7 +1225,10 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/friends/request');
       final response = await _post(
         uri,
-        body: json.encode({'username': targetUsername}),
+        body: json.encode({
+          if (_activeUserId() != null) 'user_id': _activeUserId(),
+          'username': targetUsername,
+        }),
       );
 
       final data = _handleResponse(response);
@@ -1163,6 +1245,10 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/pending',
+      ).replace(
+        queryParameters: _activeUserId() == null
+            ? null
+            : {'user_id': _activeUserId()!},
       );
 
       final response = await _get(uri);
@@ -1183,6 +1269,10 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/sent',
+      ).replace(
+        queryParameters: _activeUserId() == null
+            ? null
+            : {'user_id': _activeUserId()!},
       );
 
       final response = await _get(uri);
@@ -1206,7 +1296,9 @@ class ApiClient {
       );
       final response = await _post(
         uri,
-        body: json.encode({}),
+        body: json.encode(
+          _activeUserId() == null ? {} : {'user_id': _activeUserId()},
+        ),
       );
 
       final data = _handleResponse(response);
@@ -1226,7 +1318,9 @@ class ApiClient {
       );
       final response = await _post(
         uri,
-        body: json.encode({}),
+        body: json.encode(
+          _activeUserId() == null ? {} : {'user_id': _activeUserId()},
+        ),
       );
 
       final data = _handleResponse(response);
@@ -1245,6 +1339,10 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/notifications',
+      ).replace(
+        queryParameters: _activeUserId() == null
+            ? null
+            : {'user_id': _activeUserId()!},
       );
 
       final response = await _get(uri);
@@ -1265,6 +1363,10 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/blocked',
+      ).replace(
+        queryParameters: _activeUserId() == null
+            ? null
+            : {'user_id': _activeUserId()!},
       );
 
       final response = await _get(uri);
@@ -1285,6 +1387,10 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendId/block',
+      ).replace(
+        queryParameters: _activeUserId() == null
+            ? null
+            : {'user_id': _activeUserId()!},
       );
 
       final response = await _post(uri);
@@ -1303,6 +1409,10 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendId/unblock',
+      ).replace(
+        queryParameters: _activeUserId() == null
+            ? null
+            : {'user_id': _activeUserId()!},
       );
 
       final response = await _post(uri);
@@ -1321,6 +1431,10 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendId',
+      ).replace(
+        queryParameters: _activeUserId() == null
+            ? null
+            : {'user_id': _activeUserId()!},
       );
 
       final response = await _delete(uri);
@@ -1342,7 +1456,10 @@ class ApiClient {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/friends/$friendId/keep')
           .replace(
-            queryParameters: {'keep_status': keepStatus},
+            queryParameters: {
+              if (_activeUserId() != null) 'user_id': _activeUserId()!,
+              'keep_status': keepStatus,
+            },
           );
 
       final response = await _put(uri);
@@ -1373,6 +1490,10 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/images/upload');
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('POST', uri);
+        final activeUserId = _activeUserId();
+        if (activeUserId != null) {
+          request.fields['user_id'] = activeUserId;
+        }
         if (description != null && description.isNotEmpty) {
           request.fields['description'] = description;
         }
@@ -1416,6 +1537,10 @@ class ApiClient {
       debugPrint('🔄 [ApiClient] GET /images/batch/$batchId');
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/images/batch/$batchId',
+      ).replace(
+        queryParameters: _activeUserId() == null
+            ? null
+            : {'user_id': _activeUserId()!},
       );
 
       final response = await _get(uri);
@@ -1478,6 +1603,7 @@ class ApiClient {
         uri,
         body: json.encode({
           'batch_id': batchId,
+          if (_activeUserId() != null) 'user_id': _activeUserId(),
           'recipients': recipients,
           'auto_clean': autoClean,
           if (imageRecipientMap != null)
@@ -1511,7 +1637,10 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/contacts/sync');
       final response = await _post(
         uri,
-        body: json.encode({'contacts': contacts}),
+        body: json.encode({
+          if (_activeUserId() != null) 'user_id': _activeUserId(),
+          'contacts': contacts,
+        }),
       );
 
       final data = _handleResponse(response);
@@ -1528,6 +1657,10 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/contacts/recommendations',
+      ).replace(
+        queryParameters: _activeUserId() == null
+            ? null
+            : {'user_id': _activeUserId()!},
       );
 
       final response = await _get(uri);
@@ -1550,6 +1683,7 @@ class ApiClient {
       final response = await _post(
         uri,
         body: json.encode({
+          if (_activeUserId() != null) 'user_id': _activeUserId(),
           'dismissed_user_id': dismissedUserId,
         }),
       );
@@ -1574,6 +1708,7 @@ class ApiClient {
       final response = await _post(
         uri,
         body: json.encode({
+          if (_activeUserId() != null) 'user_id': _activeUserId(),
           'friend_id': friendId,
           'contact_face_ids': contactFaceIds,
           'unknown_face_ids': unknownFaceIds,
@@ -1597,7 +1732,9 @@ class ApiClient {
       );
       final response = await _post(
         uri,
-        body: json.encode({}),
+        body: json.encode(
+          _activeUserId() == null ? {} : {'user_id': _activeUserId()},
+        ),
       );
       _handleResponse(response);
     } catch (e) {
@@ -1615,7 +1752,9 @@ class ApiClient {
       );
       final response = await _post(
         uri,
-        body: json.encode({}),
+        body: json.encode(
+          _activeUserId() == null ? {} : {'user_id': _activeUserId()},
+        ),
       );
       _handleResponse(response);
     } catch (e) {
@@ -1630,6 +1769,10 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/contacts/sync-status',
+      ).replace(
+        queryParameters: _activeUserId() == null
+            ? null
+            : {'user_id': _activeUserId()!},
       );
 
       final response = await _get(uri);
@@ -1651,6 +1794,7 @@ class ApiClient {
       final response = await _patch(
         uri,
         body: json.encode({
+          if (_activeUserId() != null) 'user_id': _activeUserId(),
           'permission_status': permissionStatus,
         }),
       );
