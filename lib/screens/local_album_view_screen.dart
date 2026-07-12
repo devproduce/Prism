@@ -71,6 +71,7 @@ class _LocalAlbumViewScreenState extends State<LocalAlbumViewScreen> {
         size: _pageSize,
       );
 
+      if (!mounted) return;
       setState(() {
         _assets.addAll(assets);
         _currentPage++;
@@ -78,7 +79,7 @@ class _LocalAlbumViewScreenState extends State<LocalAlbumViewScreen> {
         _isLoading = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
       debugPrint('Error loading assets: $e');
     }
   }

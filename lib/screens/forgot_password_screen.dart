@@ -34,17 +34,24 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     setState(() => _isLoading = true);
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    await authProvider.forgotPassword(_identifierController.text);
+    final success = await authProvider.forgotPassword(_identifierController.text);
 
     if (mounted) {
       setState(() => _isLoading = false);
 
-      ErrorHandler.showSuccessSnackbar(
-        context,
-        message:
-            'If that account exists, a reset link has been sent.',
-      );
-      Navigator.pop(context);
+      if (success) {
+        ErrorHandler.showSuccessSnackbar(
+          context,
+          message:
+              'If that account exists, a reset link has been sent.',
+        );
+        Navigator.pop(context);
+      } else if (authProvider.error != null && authProvider.error!.isNotEmpty) {
+        ErrorHandler.showErrorSnackbar(
+          context,
+          message: authProvider.error!,
+        );
+      }
     }
   }
 

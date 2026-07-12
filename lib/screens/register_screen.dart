@@ -10,9 +10,12 @@ import 'package:prism/widgets/glass_widgets.dart';
 
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/screens/login_screen.dart';
+import 'package:prism/screens/complete_profile_screen.dart';
+import 'package:prism/services/auth_backend_capabilities.dart';
 import 'package:prism/utils/auth_navigation.dart';
 import 'package:prism/screens/multi_view_capture_screen.dart';
 import 'package:prism/utils/error_handler.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -115,7 +118,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       MaterialPageRoute(builder: (context) => const MultiViewCaptureScreen()),
     );
 
-    if (result != null) {
+    if (result != null && mounted) {
       if (result is Map) {
         // New format with image path
         final faces = result['faceIds'];
@@ -177,7 +180,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         imageQuality: 70,
       );
 
-      if (pickedFile != null) {
+      if (pickedFile != null && mounted) {
         setState(() {
           _profilePicImage = File(pickedFile.path);
         });
@@ -231,7 +234,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           duration: const Duration(seconds: 6),
         );
       }
-      _nextPage();
+      navigateAfterAuthentication(context, authProvider, clearStack: true);
     } else if (mounted) {
       ErrorHandler.showErrorSnackbar(
         context,
@@ -262,6 +265,76 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (mounted) {
       navigateAfterAuthentication(context, authProvider, clearStack: true);
     }
+  }
+
+  Future<void> _handleGoogleSignUp() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    authProvider.clearGoogleRegistrationRequired();
+
+    final success = await authProvider.loginWithGoogle();
+    if (!mounted) return;
+
+    if (success) {
+      navigateAfterAuthentication(context, authProvider, clearStack: true);
+      return;
+    }
+
+    if (authProvider.googleRegistrationRequired) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const CompleteProfileScreen()),
+      );
+      return;
+    }
+
+    if (authProvider.error != null && authProvider.error!.isNotEmpty) {
+      ErrorHandler.showErrorSnackbar(
+        context,
+        message: authProvider.error!,
+      );
+    }
+  }
+
+  Widget _buildGoogleSignUpButton() {
+    if (!AuthBackendCapabilities.firebaseAuthEnabled) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      children: [
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(child: Divider(color: Colors.white.withOpacity(0.15))),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                'or',
+                style: PrismTextStyles.bodySmall.copyWith(color: Colors.white54),
+              ),
+            ),
+            Expanded(child: Divider(color: Colors.white.withOpacity(0.15))),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Consumer<AuthProvider>(
+          builder: (context, authProvider, _) {
+            return OutlinedButton.icon(
+              onPressed: authProvider.isLoading ? null : _handleGoogleSignUp,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: BorderSide(color: Colors.white.withOpacity(0.2)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              icon: const FaIcon(FontAwesomeIcons.google, size: 18),
+              label: const Text('Sign up with Google'),
+            );
+          },
+        ),
+      ],
+    );
   }
 
   InputDecoration _glassInputDecoration(String hint, [IconData? icon]) {
@@ -407,6 +480,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           return null;
                         },
                       ),
+                      _buildGoogleSignUpButton(),
                     ],
                     onNext: () async {
                       if (_step1Key.currentState!.validate()) {

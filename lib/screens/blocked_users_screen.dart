@@ -42,10 +42,11 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
   Future<void> _showBlockUserDialog() async {
     final controller = TextEditingController();
 
-    await showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
+    try {
+      await showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
           backgroundColor: PrismColors.surfaceGray,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
@@ -101,6 +102,9 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
         );
       },
     );
+    } finally {
+      controller.dispose();
+    }
   }
 
   Future<void> _blockUser(String username) async {

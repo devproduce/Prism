@@ -64,9 +64,12 @@ class _PrismTextFieldState extends State<PrismTextField>
       curve: Curves.elasticIn,
     ));
 
-    _focusNode.addListener(() {
-      setState(() => _isFocused = _focusNode.hasFocus);
-    });
+    _focusNode.addListener(_handleFocusChange);
+  }
+
+  void _handleFocusChange() {
+    if (!mounted) return;
+    setState(() => _isFocused = _focusNode.hasFocus);
   }
 
   @override
@@ -79,6 +82,7 @@ class _PrismTextFieldState extends State<PrismTextField>
 
   @override
   void dispose() {
+    _focusNode.removeListener(_handleFocusChange);
     _shakeController.dispose();
     _focusNode.dispose();
     super.dispose();

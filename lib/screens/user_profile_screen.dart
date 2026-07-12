@@ -142,7 +142,12 @@ class _UserProfileScreenState extends State<UserProfileScreen>
 
     try {
       final apiClient = ApiClient();
-      if (!await apiClient.ensureAuthenticated()) return;
+      if (!await apiClient.ensureAuthenticated()) {
+        if (mounted) {
+          setState(() => _isLoadingSharedImages = false);
+        }
+        return;
+      }
 
       debugPrint('📸 Fetching shared gallery for friend: ${widget.userId}');
 

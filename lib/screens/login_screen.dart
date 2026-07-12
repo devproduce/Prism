@@ -12,6 +12,7 @@ import 'package:prism/screens/forgot_password_screen.dart';
 import 'package:prism/screens/register_screen.dart';
 import 'package:prism/screens/complete_profile_screen.dart';
 import 'package:prism/screens/secure_account_screen.dart';
+import 'package:prism/services/auth_backend_capabilities.dart';
 import 'package:prism/utils/auth_navigation.dart';
 import 'package:prism/utils/error_handler.dart';
 
@@ -29,6 +30,10 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _isSubmitting = false;
   bool _googleSignInRequired = false;
+  bool _passwordStepVisible = false;
+  String? _resolvedEmail;
+
+  bool get _useFirebaseAuth => AuthBackendCapabilities.firebaseAuthEnabled;
 
   @override
   void dispose() {
@@ -53,12 +58,59 @@ class _LoginScreenState extends State<LoginScreen> {
     authProvider.clearError();
 
     try {
-      // Per mobile_auth_implementation_guide.md: POST /auth/login with
-      // identifier (username or email) + password.
+      if (_useFirebaseAuth && !_passwordStepVisible) {
+        final result = await authProvider.resolveUsername(
+          _usernameController.text.trim(),
+        );
+        if (!mounted) return;
+
+        if (result.useGoogle) {
+          setState(() {
+            _googleSignInRequired = true;
+            _isSubmitting = false;
+          });
+          return;
+        }
+
+        if (result.needsMigration) {
+          await authProvider.beginLegacyMigration(result);
+          if (!mounted) return;
+          if (authProvider.authGate == AuthGate.migrateAccount) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => SecureAccountScreen(
+                  prefilledEmail: authProvider.migrationPrefilledEmail,
+                ),
+              ),
+            );
+          }
+          setState(() => _isSubmitting = false);
+          return;
+        }
+
+        final email = result.email?.trim();
+        if (email == null || email.isEmpty) {
+          ErrorHandler.showErrorSnackbar(
+            context,
+            message: 'Could not find an account for that username.',
+          );
+          setState(() => _isSubmitting = false);
+          return;
+        }
+
+        setState(() {
+          _resolvedEmail = email;
+          _passwordStepVisible = true;
+          _isSubmitting = false;
+        });
+        return;
+      }
+
       await _completeLogin(
         authProvider,
-        legacyDirect: true,
+        email: _resolvedEmail,
         password: password,
+        legacyDirect: !_useFirebaseAuth,
       );
     } catch (e) {
       if (mounted) {
@@ -98,7 +150,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (!success && authProvider.authGate == AuthGate.migrateAccount) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const SecureAccountScreen()),
+        MaterialPageRoute(
+          builder: (_) => SecureAccountScreen(
+            prefilledEmail: authProvider.migrationPrefilledEmail,
+          ),
+        ),
       );
       return;
     }
@@ -148,8 +204,56 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _resetGoogleSignIn() {
-    setState(() => _googleSignInRequired = false);
+  void _resetLoginFlow() {
+    setState(() {
+      _googleSignInRequired = false;
+      _passwordStepVisible = false;
+      _resolvedEmail = null;
+      _passwordController.clear();
+    });
+  }
+
+  Widget _buildGoogleSignInButton(AuthProvider authProvider, double gap) {
+    if (!_useFirebaseAuth || _googleSignInRequired || _passwordStepVisible) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      children: [
+        SizedBox(height: gap),
+        Row(
+          children: [
+            Expanded(
+              child: Divider(
+                color: PrismColors.white.withValues(alpha: 0.15),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                'or',
+                style: PrismTextStyles.bodySmall.copyWith(
+                  color: PrismColors.secondaryText,
+                ),
+              ),
+            ),
+            Expanded(
+              child: Divider(
+                color: PrismColors.white.withValues(alpha: 0.15),
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: gap),
+        PrismButton(
+          text: 'Continue with Google',
+          isLoading: _isLoading(authProvider),
+          onPressed: _isLoading(authProvider) ? null : _handleGoogleLogin,
+          type: PrismButtonType.secondary,
+          icon: Icons.g_mobiledata_rounded,
+        ),
+      ],
+    );
   }
 
   bool _isLoading(AuthProvider authProvider) {
@@ -300,9 +404,107 @@ class _LoginScreenState extends State<LoginScreen> {
                             Align(
                               alignment: Alignment.centerLeft,
                               child: TextButton(
-                                onPressed: _isSubmitting ? null : _resetGoogleSignIn,
+                                onPressed: _isSubmitting ? null : _resetLoginFlow,
                                 child: Text(
                                   'Use a different account',
+                                  style: PrismTextStyles.bodySmall.copyWith(
+                                    color: PrismColors.prismYellow,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ] else if (_passwordStepVisible) ...[
+                            Text(
+                              'Signing in as ${_usernameController.text.trim()}',
+                              style: PrismTextStyles.bodyMedium,
+                            ),
+                            if (_resolvedEmail != null) ...[
+                              SizedBox(height: labelGap),
+                              Text(
+                                _resolvedEmail!,
+                                style: PrismTextStyles.bodyMedium.copyWith(
+                                  color: PrismColors.secondaryText,
+                                ),
+                              ),
+                            ],
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton(
+                                onPressed: _isSubmitting ? null : _resetLoginFlow,
+                                child: Text(
+                                  'Use a different account',
+                                  style: PrismTextStyles.bodySmall.copyWith(
+                                    color: PrismColors.prismYellow,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            SizedBox(height: fieldGap),
+                            Text(
+                              'Password',
+                              style: PrismTextStyles.bodyMedium,
+                            ),
+                            SizedBox(height: labelGap),
+                            TextFormField(
+                              controller: _passwordController,
+                              obscureText: _obscurePassword,
+                              style: PrismTextStyles.bodyLarge,
+                              textInputAction: TextInputAction.done,
+                              autofocus: true,
+                              onFieldSubmitted: (_) => _handleLogin(),
+                              decoration: _prismInputDecoration(
+                                context,
+                                'Enter your password',
+                                Icons.lock_outline_rounded,
+                              ).copyWith(
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_off_rounded
+                                        : Icons.visibility_rounded,
+                                    color: PrismColors.secondaryText,
+                                  ),
+                                  onPressed: () {
+                                    HapticFeedback.selectionClick();
+                                    setState(() {
+                                      _obscurePassword = !_obscurePassword;
+                                    });
+                                  },
+                                ),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Please enter your password';
+                                }
+                                if (value.length < 6) {
+                                  return 'Password must be at least 6 characters';
+                                }
+                                return null;
+                              },
+                            ),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: () {
+                                  HapticFeedback.selectionClick();
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const ForgotPasswordScreen(),
+                                    ),
+                                  );
+                                },
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                child: Text(
+                                  'Forgot Password?',
                                   style: PrismTextStyles.bodySmall.copyWith(
                                     color: PrismColors.prismYellow,
                                     fontWeight: FontWeight.w600,
@@ -336,94 +538,110 @@ class _LoginScreenState extends State<LoginScreen> {
                                 return null;
                               },
                             ).animate().fadeIn(delay: 350.ms),
-                            SizedBox(height: fieldGap),
-                            Text(
-                              'Password',
-                              style: PrismTextStyles.bodyMedium,
-                            ).animate().fadeIn(delay: 400.ms),
-                            SizedBox(height: labelGap),
-                            TextFormField(
-                              controller: _passwordController,
-                              obscureText: _obscurePassword,
-                              style: PrismTextStyles.bodyLarge,
-                              textInputAction: TextInputAction.done,
-                              onFieldSubmitted: (_) => _handleLogin(),
-                              decoration: _prismInputDecoration(
-                                context,
-                                'Enter your password',
-                                Icons.lock_outline_rounded,
-                              ).copyWith(
-                                suffixIcon: IconButton(
-                                  icon: Icon(
-                                    _obscurePassword
-                                        ? Icons.visibility_off_rounded
-                                        : Icons.visibility_rounded,
-                                    color: PrismColors.secondaryText,
+                            if (!_useFirebaseAuth || _passwordStepVisible) ...[
+                              SizedBox(height: fieldGap),
+                              Text(
+                                'Password',
+                                style: PrismTextStyles.bodyMedium,
+                              ).animate().fadeIn(delay: 400.ms),
+                              SizedBox(height: labelGap),
+                              TextFormField(
+                                controller: _passwordController,
+                                obscureText: _obscurePassword,
+                                style: PrismTextStyles.bodyLarge,
+                                textInputAction: TextInputAction.done,
+                                onFieldSubmitted: (_) => _handleLogin(),
+                                decoration: _prismInputDecoration(
+                                  context,
+                                  'Enter your password',
+                                  Icons.lock_outline_rounded,
+                                ).copyWith(
+                                  suffixIcon: IconButton(
+                                    icon: Icon(
+                                      _obscurePassword
+                                          ? Icons.visibility_off_rounded
+                                          : Icons.visibility_rounded,
+                                      color: PrismColors.secondaryText,
+                                    ),
+                                    onPressed: () {
+                                      HapticFeedback.selectionClick();
+                                      setState(() {
+                                        _obscurePassword = !_obscurePassword;
+                                      });
+                                    },
                                   ),
+                                ),
+                                validator: (value) {
+                                  if (!_useFirebaseAuth || _passwordStepVisible) {
+                                    if (value == null || value.isEmpty) {
+                                      return 'Please enter your password';
+                                    }
+                                    if (value.length < 6) {
+                                      return 'Password must be at least 6 characters';
+                                    }
+                                  }
+                                  return null;
+                                },
+                              ).animate().fadeIn(delay: 450.ms),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
                                   onPressed: () {
                                     HapticFeedback.selectionClick();
-                                    setState(() {
-                                      _obscurePassword = !_obscurePassword;
-                                    });
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            const ForgotPasswordScreen(),
+                                      ),
+                                    );
                                   },
-                                ),
-                              ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Please enter your password';
-                                }
-                                if (value.length < 6) {
-                                  return 'Password must be at least 6 characters';
-                                }
-                                return null;
-                              },
-                            ).animate().fadeIn(delay: 450.ms),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton(
-                                onPressed: () {
-                                  HapticFeedback.selectionClick();
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          const ForgotPasswordScreen(),
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  child: Text(
+                                    'Forgot Password?',
+                                    style: PrismTextStyles.bodySmall.copyWith(
+                                      color: PrismColors.prismYellow,
+                                      fontWeight: FontWeight.w600,
                                     ),
-                                  );
-                                },
-                                style: TextButton.styleFrom(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  minimumSize: Size.zero,
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                child: Text(
-                                  'Forgot Password?',
-                                  style: PrismTextStyles.bodySmall.copyWith(
-                                    color: PrismColors.prismYellow,
-                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                              ),
-                            ).animate().fadeIn(delay: 500.ms),
+                              ).animate().fadeIn(delay: 500.ms),
+                            ],
                           ],
                           SizedBox(height: buttonGap),
                           Consumer<AuthProvider>(
                             builder: (context, authProvider, child) {
-                              return PrismButton(
-                                text: _googleSignInRequired
-                                    ? 'Continue with Google'
-                                    : 'Log In',
-                                isLoading: _isLoading(authProvider),
-                                onPressed: _isLoading(authProvider)
-                                    ? null
-                                    : _handleLogin,
-                                type: _googleSignInRequired
-                                    ? PrismButtonType.secondary
-                                    : PrismButtonType.primary,
-                                icon: _googleSignInRequired
-                                    ? Icons.g_mobiledata_rounded
-                                    : null,
+                              final loginLabel = _googleSignInRequired
+                                  ? 'Continue with Google'
+                                  : (_useFirebaseAuth && !_passwordStepVisible
+                                      ? 'Continue'
+                                      : 'Log In');
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  PrismButton(
+                                    text: loginLabel,
+                                    isLoading: _isLoading(authProvider),
+                                    onPressed: _isLoading(authProvider)
+                                        ? null
+                                        : _handleLogin,
+                                    type: _googleSignInRequired
+                                        ? PrismButtonType.secondary
+                                        : PrismButtonType.primary,
+                                    icon: _googleSignInRequired
+                                        ? Icons.g_mobiledata_rounded
+                                        : null,
+                                  ),
+                                  _buildGoogleSignInButton(
+                                    authProvider,
+                                    buttonGap,
+                                  ),
+                                ],
                               );
                             },
                           )

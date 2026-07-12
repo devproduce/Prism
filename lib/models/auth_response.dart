@@ -24,6 +24,12 @@ class AuthResponse {
   /// Backward-compatible alias used across existing call sites.
   String? get token => accessToken;
 
+  static String? extractAccessToken(Map<String, dynamic> json) =>
+      _extractAccessToken(json);
+
+  static String? extractRefreshToken(Map<String, dynamic> json) =>
+      _extractRefreshToken(json);
+
   static String? _readTokenField(Map<String, dynamic> json, String key) {
     final value = json[key];
     if (value is String && value.isNotEmpty) return value;

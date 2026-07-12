@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:prism/api/api_client.dart';
 import 'package:prism/utils/constants.dart';
 
 class EngagementApi {
@@ -8,6 +9,7 @@ class EngagementApi {
   EngagementApi._internal();
 
   final http.Client _client = http.Client();
+  final ApiClient _apiClient = ApiClient();
 
   /// Submit user feedback
   Future<Map<String, dynamic>> submitFeedback({
@@ -29,23 +31,42 @@ class EngagementApi {
       'source': source,
     };
 
-    try {
-      final response = await _client.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(body),
-      );
+    if (!await _apiClient.ensureAuthenticated()) {
+      throw ApiException('Your session has expired. Please log in again.', 401);
+    }
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return json.decode(response.body);
-      } else {
-        final errorBody = json.decode(response.body);
-        throw Exception(
-          errorBody['detail'] ?? 'Failed to submit feedback',
+    final token = _apiClient.token;
+    final response = await _client.post(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      },
+      body: json.encode(body),
+    );
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      try {
+        final decoded = json.decode(response.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+        return {'ok': true};
+      } catch (_) {
+        return {'ok': true};
+      }
+    }
+
+    try {
+      final errorBody = json.decode(response.body);
+      if (errorBody is Map<String, dynamic>) {
+        throw ApiException(
+          errorBody['detail']?.toString() ?? 'Failed to submit feedback',
+          response.statusCode,
         );
       }
     } catch (e) {
-      throw Exception('Failed to submit feedback: $e');
+      if (e is ApiException) rethrow;
     }
+
+    throw ApiException('Failed to submit feedback', response.statusCode);
   }
 }

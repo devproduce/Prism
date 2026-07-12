@@ -45,6 +45,7 @@ class ApiClient {
   bool _legacyAuthMode = false;
 
   bool _isRefreshing = false;
+  bool _logoutInProgress = false;
   final List<Completer<String?>> _refreshWaiters = [];
 
   /// Called when refresh fails and the user must sign in again.
@@ -80,8 +81,12 @@ class ApiClient {
 
   // Clear authentication token
   Future<void> clearAuthToken() async {
+    _logoutInProgress = true;
     _authToken = null;
+    _completeRefreshWaiters(null);
+    _isRefreshing = false;
     await _tokenStorage.clearAll();
+    _logoutInProgress = false;
   }
 
   // Get authentication token
@@ -167,8 +172,11 @@ class ApiClient {
   }
 
   void _handle403EmailGate(http.Response response) {
-    final message = _extractErrorMessage(response.body, 403);
-    if (!message.toLowerCase().contains('email not verified')) {
+    final message = _extractErrorMessage(response.body, 403).toLowerCase();
+    final isEmailGate = message.contains('email not verified') ||
+        message.contains('email verification') ||
+        message.contains('verify your email');
+    if (!isEmailGate) {
       return;
     }
 
@@ -179,16 +187,42 @@ class ApiClient {
     onAuthGateRequired?.call(gate);
   }
 
-  void _completeRefreshWaiters(String? token) {
-    for (final waiter in _refreshWaiters) {
-      if (!waiter.isCompleted) {
-        waiter.complete(token);
-      }
-    }
-    _refreshWaiters.clear();
+  bool _isTransientRefreshError(Object error) {
+    return error is SocketException ||
+        error is TimeoutException ||
+        error is http.ClientException;
   }
 
-  Future<String?> _refreshAccessToken() async {
+  bool _isTransientRefreshStatus(int statusCode) {
+    return statusCode == 408 || statusCode == 429 || statusCode >= 500;
+  }
+
+  String? _extractRefreshAccessToken(Map<String, dynamic> data) {
+    return AuthResponse.extractAccessToken(data);
+  }
+
+  String? _extractRefreshRefreshToken(
+    Map<String, dynamic> data,
+    String fallback,
+  ) {
+    return AuthResponse.extractRefreshToken(data) ?? fallback;
+  }
+
+  Future<void> _invalidateSessionAfterRefreshFailure() async {
+    _completeRefreshWaiters(null);
+    await clearAuthToken();
+    onSessionExpired?.call();
+  }
+
+  /// Attempts silent refresh without logging out on transient network errors.
+  Future<String?> trySilentRefresh() => _refreshAccessToken(forceAuthFailure: false);
+
+  Future<String?> _refreshAccessToken({bool forceAuthFailure = false}) async {
+    if (_logoutInProgress) {
+      _completeRefreshWaiters(null);
+      return null;
+    }
+
     if (_isRefreshing) {
       final waiter = Completer<String?>();
       _refreshWaiters.add(waiter);
@@ -197,11 +231,14 @@ class ApiClient {
 
     _isRefreshing = true;
     try {
+      if (_logoutInProgress) {
+        _completeRefreshWaiters(null);
+        return null;
+      }
+
       final refreshToken = await _tokenStorage.getRefreshToken();
       if (refreshToken == null || refreshToken.isEmpty) {
-        _completeRefreshWaiters(null);
-        await clearAuthToken();
-        onSessionExpired?.call();
+        await _invalidateSessionAfterRefreshFailure();
         return null;
       }
 
@@ -212,12 +249,15 @@ class ApiClient {
         body: json.encode({'refresh_token': refreshToken}),
       );
 
+      if (_logoutInProgress) {
+        _completeRefreshWaiters(null);
+        return null;
+      }
+
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final data = json.decode(response.body) as Map<String, dynamic>;
-        final accessToken =
-            data['access_token'] as String? ?? data['token'] as String?;
-        final newRefresh =
-            data['refresh_token'] as String? ?? refreshToken;
+        final accessToken = _extractRefreshAccessToken(data);
+        final newRefresh = _extractRefreshRefreshToken(data, refreshToken);
         if (accessToken != null && accessToken.isNotEmpty) {
           await saveAuthTokens(
             accessToken: accessToken,
@@ -229,19 +269,51 @@ class ApiClient {
         }
       }
 
-      _completeRefreshWaiters(null);
-      await clearAuthToken();
-      onSessionExpired?.call();
+      if (!forceAuthFailure && _isTransientRefreshStatus(response.statusCode)) {
+        debugPrint('Token refresh deferred: HTTP ${response.statusCode}');
+        _completeRefreshWaiters(null);
+        return null;
+      }
+
+      await _invalidateSessionAfterRefreshFailure();
       return null;
     } catch (e) {
       debugPrint('Token refresh failed: $e');
-      _completeRefreshWaiters(null);
-      await clearAuthToken();
-      onSessionExpired?.call();
+      if (!forceAuthFailure && _isTransientRefreshError(e)) {
+        _completeRefreshWaiters(null);
+        return null;
+      }
+      await _invalidateSessionAfterRefreshFailure();
       return null;
     } finally {
       _isRefreshing = false;
     }
+  }
+
+  void _completeRefreshWaiters(String? token) {
+    for (final waiter in _refreshWaiters) {
+      if (!waiter.isCompleted) {
+        waiter.complete(token);
+      }
+    }
+    _refreshWaiters.clear();
+  }
+
+  Future<void> _ensureAccessTokenForRequest() async {
+    await _hydrateAuthTokenIfNeeded();
+    if (_authToken != null && _authToken!.isNotEmpty) return;
+
+    final refreshed = await _refreshAccessToken();
+    if (refreshed != null && refreshed.isNotEmpty) return;
+
+    final hasRefresh = await _tokenStorage.hasRefreshToken();
+    if (hasRefresh) {
+      throw ApiException(
+        'Unable to refresh your session. Check your connection and try again.',
+        503,
+      );
+    }
+    throw ApiException('Not authenticated. Please log in again.', 401);
   }
 
   Future<http.Response> _withAuthRetry(
@@ -249,7 +321,7 @@ class ApiClient {
     bool authenticated = true,
   }) async {
     if (authenticated && !_legacyAuthMode) {
-      await _hydrateAuthTokenIfNeeded();
+      await _ensureAccessTokenForRequest();
     }
 
     var response = await send();
@@ -269,8 +341,15 @@ class ApiClient {
       return response;
     }
 
-    final newToken = await _refreshAccessToken();
+    final newToken = await _refreshAccessToken(forceAuthFailure: true);
     if (newToken == null) {
+      final hasRefresh = await _tokenStorage.hasRefreshToken();
+      if (hasRefresh) {
+        throw ApiException(
+          'Unable to refresh your session. Check your connection and try again.',
+          503,
+        );
+      }
       throw ApiException(
         'Your session has expired. Please log in again.',
         401,
@@ -473,7 +552,11 @@ class ApiClient {
   /// Check if username is available
   Future<bool> checkUsernameAvailability(String username) async {
     try {
-      final uri = Uri.parse('${ApiConstants.baseUrl}/auth/check-availability?type=username&value=$username');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/auth/check-availability',
+      ).replace(
+        queryParameters: {'type': 'username', 'value': username},
+      );
       final response = await _get(uri, authenticated: false);
       
       if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -647,7 +730,7 @@ class ApiClient {
       });
       final data = _handleResponse(response);
 
-      return data['valid'] as bool;
+      return data['valid'] == true;
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Password verification failed: ${e.toString()}');
@@ -878,7 +961,7 @@ class ApiClient {
 
       final response = await _get(uri, authenticated: false);
       final data = _handleResponse(response);
-      return data['available'] as bool;
+      return data['available'] == true;
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to check availability: ${e.toString()}');

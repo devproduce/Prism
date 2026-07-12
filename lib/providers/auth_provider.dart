@@ -1,4 +1,7 @@
 import 'dart:io';
+import 'dart:async';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:prism/utils/constants.dart';
 import 'package:prism/utils/error_handler.dart';
@@ -51,6 +54,7 @@ class AuthProvider with ChangeNotifier {
   bool get isAuthenticated => _isAuthenticated;
   bool get contactsSynced => _contactsSynced;
   AuthGate get authGate => _authGate;
+  String? get migrationPrefilledEmail => _sessionStore.migrationPrefilledEmail;
   bool get sessionExpired => _sessionExpired;
   /// True when the backend could not normalize the phone number on registration.
   bool get phoneSyncWarning => _phoneSyncWarning;
@@ -96,6 +100,7 @@ class AuthProvider with ChangeNotifier {
     try {
       _sessionExpired = false;
       _apiClient.setLegacyAuthMode(AuthBackendCapabilities.legacyAuthEnabled);
+      await _sessionStore.hydrate();
 
       final isLoggedIn = await _databaseService.isUserLoggedIn();
       if (!isLoggedIn) return;
@@ -104,7 +109,7 @@ class AuthProvider with ChangeNotifier {
       if (user == null) return;
 
       await _sessionStore.ensureSessionUserIdHydrated();
-      final accessToken = await _tokenStorage.getAccessToken();
+      var accessToken = await _tokenStorage.getAccessToken();
       final prefs = await SharedPreferences.getInstance();
       final storedUserId = prefs.getString(kPrefUserId);
       debugPrint(
@@ -114,11 +119,27 @@ class AuthProvider with ChangeNotifier {
 
       if (AuthBackendCapabilities.firebaseAuthEnabled &&
           (accessToken == null || accessToken.isEmpty)) {
-        debugPrint(
-          '⚠️ SQLite session without JWT — clearing stale session',
-        );
-        await _clearStaleSession();
-        return;
+        final hasRefresh = await _tokenStorage.hasRefreshToken();
+        if (hasRefresh) {
+          final refreshed = await _apiClient.trySilentRefresh();
+          if (refreshed != null && refreshed.isNotEmpty) {
+            accessToken = refreshed;
+            debugPrint('✅ Restored access token via refresh on startup');
+          } else if (_sessionExpired) {
+            await _clearStaleSession();
+            return;
+          } else {
+            debugPrint(
+              '⚠️ Could not refresh access token on startup; using cached session',
+            );
+          }
+        } else {
+          debugPrint(
+            '⚠️ SQLite session without JWT or refresh token — clearing stale session',
+          );
+          await _clearStaleSession();
+          return;
+        }
       }
 
       _currentUser = user;
@@ -159,6 +180,7 @@ class AuthProvider with ChangeNotifier {
     _sessionExpired = true;
     _isAuthenticated = false;
     _authGate = AuthGate.none;
+    _sessionStore.setAuthGate(AuthGate.none);
     notifyListeners();
   }
 
@@ -172,6 +194,7 @@ class AuthProvider with ChangeNotifier {
     final userId = _currentUser?.userId;
     if (userId != null) {
       NotificationService.registerDeviceToken(userId);
+      _saveCredentialsForNativeAccess();
     }
   }
 
@@ -266,6 +289,16 @@ class AuthProvider with ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
+      if (e is ApiException &&
+          e.statusCode != null &&
+          (e.statusCode! >= 500 || e.statusCode == 503)) {
+        debugPrint('Session validation skipped due to server error: $e');
+        return true;
+      }
+      if (e is SocketException || e is TimeoutException) {
+        debugPrint('Session validation skipped due to network error: $e');
+        return true;
+      }
       debugPrint('Session validation failed: $e');
       rethrow;
     }
@@ -336,7 +369,7 @@ class AuthProvider with ChangeNotifier {
       );
 
       if (response.needsMigration == true) {
-        beginLegacyMigration(
+        await beginLegacyMigration(
           ResolveUsernameResult(
             needsMigration: true,
             migrationToken: response.migrationToken,
@@ -394,7 +427,8 @@ class AuthProvider with ChangeNotifier {
         );
       }
 
-      _sessionStore.setMigrationToken(null);
+      await _sessionStore.setMigrationToken(null);
+      await _sessionStore.setMigrationPrefilledEmail(null);
       final ok = await _finalizeAuthenticatedSession(response);
       if (!ok) {
         _setLoading(false);
@@ -444,11 +478,12 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  void beginLegacyMigration(ResolveUsernameResult result) {
-    _sessionStore.setMigrationToken(result.migrationToken);
+  Future<void> beginLegacyMigration(ResolveUsernameResult result) async {
+    await _sessionStore.setMigrationToken(result.migrationToken);
+    await _sessionStore.setMigrationPrefilledEmail(result.prefilledEmail);
     _sessionStore.hasFirebaseAccount = result.hasFirebaseAccount;
     _authGate = AuthGate.migrateAccount;
-    _sessionStore.setAuthGate(AuthGate.migrateAccount);
+    await _sessionStore.setAuthGate(AuthGate.migrateAccount);
     notifyListeners();
   }
 
@@ -627,6 +662,7 @@ class AuthProvider with ChangeNotifier {
             email: trimmedEmail,
             password: password,
           );
+          await _firebaseAuth.sendEmailVerification();
           firebaseToken = await _firebaseAuth.getIdToken();
         } on FirebaseAuthException catch (e) {
           _setError(_firebaseAuth.friendlyError(e));
@@ -668,7 +704,7 @@ class AuthProvider with ChangeNotifier {
             await _databaseService.updateUserSession(_currentUser!);
           }
           _authGate = AuthGate.verifyEmail;
-          _sessionStore.setAuthGate(AuthGate.verifyEmail);
+          await _sessionStore.setAuthGate(AuthGate.verifyEmail);
           _setLoading(false);
           notifyListeners();
           return true;
@@ -729,7 +765,8 @@ class AuthProvider with ChangeNotifier {
   }
 
   /// Forgot password — accepts username or email.
-  Future<void> forgotPassword(String identifier) async {
+  /// Returns true when the reset flow completed without error.
+  Future<bool> forgotPassword(String identifier) async {
     try {
       _setLoading(true);
       _setError(null);
@@ -738,8 +775,16 @@ class AuthProvider with ChangeNotifier {
       if (email != null && email.isNotEmpty) {
         await _firebaseAuth.sendPasswordResetEmail(email: email);
       }
-    } catch (_) {
-      // Always show generic success per security policy.
+      return true;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      return false;
+    } on FirebaseAuthException catch (e) {
+      _setError(_firebaseAuth.friendlyError(e));
+      return false;
+    } catch (e) {
+      _setError(ErrorHandler.getErrorMessage(e));
+      return false;
     } finally {
       _setLoading(false);
     }
@@ -1156,10 +1201,9 @@ class AuthProvider with ChangeNotifier {
     if (_currentUser == null) return false;
 
     try {
-      // update local user model
-      _currentUser = _currentUser!.copyWith(archivePin: pin);
+      final hashedPin = _hashArchivePin(pin);
+      _currentUser = _currentUser!.copyWith(archivePin: hashedPin);
 
-      // persist to local DB
       await _databaseService.updateUserSession(_currentUser!);
       notifyListeners();
       return true;
@@ -1172,6 +1216,17 @@ class AuthProvider with ChangeNotifier {
   /// Check Archive PIN
   bool checkArchivePin(String pin) {
     if (_currentUser == null || _currentUser!.archivePin == null) return false;
-    return _currentUser!.archivePin == pin;
+    return _archivePinMatches(_currentUser!.archivePin!, pin);
+  }
+
+  String _hashArchivePin(String pin) {
+    final bytes = utf8.encode('prism_archive_v1:$pin');
+    return sha256.convert(bytes).toString();
+  }
+
+  bool _archivePinMatches(String stored, String input) {
+    if (stored.isEmpty || input.isEmpty) return false;
+    if (stored == input) return true;
+    return stored == _hashArchivePin(input);
   }
 }

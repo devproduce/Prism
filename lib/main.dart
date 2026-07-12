@@ -10,6 +10,7 @@ import 'package:prism/screens/settings_screen.dart';
 import 'package:prism/screens/edit_profile_screen.dart';
 import 'package:prism/screens/blocked_users_screen.dart';
 import 'package:prism/screens/help_support_screen.dart';
+import 'package:prism/screens/share_upload_screen.dart';
 import 'package:prism/utils/activity_feed_refresh.dart';
 import 'package:prism/services/fcm_navigation_service.dart';
 import 'package:prism/services/background_share_handler.dart';
@@ -269,6 +270,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               '/profile': (context) => const EditProfileScreen(),
               '/blocked_users': (context) => const BlockedUsersScreen(),
               '/help_support': (context) => const HelpSupportScreen(),
+              '/share': (context) => const ShareUploadScreen(),
               '/confirm_share': (context) {
                 final args =
                     ModalRoute.of(context)?.settings.arguments

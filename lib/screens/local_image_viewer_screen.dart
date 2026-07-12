@@ -34,8 +34,9 @@ class _LocalImageViewerScreenState extends State<LocalImageViewerScreen> {
   @override
   void initState() {
     super.initState();
-    _currentIndex = widget.initialIndex;
-    _pageController = PageController(initialPage: widget.initialIndex);
+    final maxIndex = widget.assets.isEmpty ? 0 : widget.assets.length - 1;
+    _currentIndex = widget.initialIndex.clamp(0, maxIndex);
+    _pageController = PageController(initialPage: _currentIndex);
   }
 
   @override

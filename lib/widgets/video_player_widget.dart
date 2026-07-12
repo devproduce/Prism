@@ -81,6 +81,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         },
       );
 
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
@@ -112,6 +113,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               style: TextStyle(color: Colors.white70),
             ),
           ],
+        ),
+      );
+    }
+
+    if (_chewieController == null) {
+      return Center(
+        child: Text(
+          'Failed to load video',
+          style: TextStyle(color: Colors.white70),
         ),
       );
     }

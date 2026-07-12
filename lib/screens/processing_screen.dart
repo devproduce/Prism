@@ -62,7 +62,7 @@ class _ProcessingScreenState extends State<ProcessingScreen>
       final userId = authProvider.currentUser?.userId;
       if (userId == null) {
         debugPrint('⚠️ [ProcessingScreen] User not authenticated');
-        setState(() => _isLoadingBatch = false);
+        if (mounted) setState(() => _isLoadingBatch = false);
         return;
       }
 
@@ -120,7 +120,7 @@ class _ProcessingScreenState extends State<ProcessingScreen>
   }
 
   void _navigateToConfirm(SharingProvider sharingProvider) {
-    if (_hasNavigated) return;
+    if (_hasNavigated || !mounted) return;
     final batchId = sharingProvider.currentBatchId;
     if (batchId == null) return;
     if (sharingProvider.batchStatus?.batchId != batchId) return;
@@ -158,6 +158,7 @@ class _ProcessingScreenState extends State<ProcessingScreen>
               // Navigate to confirm screen when processing is complete
               if (_shouldNavigateToConfirm(sharingProvider)) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted) return;
                   _navigateToConfirm(sharingProvider);
                 });
               }

@@ -313,13 +313,17 @@ class SharingProvider extends ChangeNotifier {
 
   // Toggle recipient selection
   void toggleRecipient(String userId) {
-    if (_batchStatus != null) {
-      final recipient = _batchStatus!.recipients.firstWhere(
-        (r) => r.userId == userId,
-      );
-      recipient.isSelected = !recipient.isSelected;
-      notifyListeners();
+    if (_batchStatus == null) return;
+
+    final recipients = _batchStatus!.recipients;
+    final index = recipients.indexWhere((r) => r.userId == userId);
+    if (index == -1) {
+      debugPrint('toggleRecipient: unknown userId $userId');
+      return;
     }
+
+    recipients[index].isSelected = !recipients[index].isSelected;
+    notifyListeners();
   }
 
   // Toggle recipient for specific image

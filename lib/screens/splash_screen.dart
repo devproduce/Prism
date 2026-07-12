@@ -87,7 +87,11 @@ class _SplashScreenState extends State<SplashScreen> {
           }
           if (gate == AuthGate.migrateAccount) {
             Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const SecureAccountScreen()),
+              MaterialPageRoute(
+                builder: (_) => SecureAccountScreen(
+                  prefilledEmail: authProvider.migrationPrefilledEmail,
+                ),
+              ),
             );
             return;
           }
@@ -147,7 +151,11 @@ class _SplashScreenState extends State<SplashScreen> {
           }
           if (gate == AuthGate.migrateAccount) {
             Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const SecureAccountScreen()),
+              MaterialPageRoute(
+                builder: (_) => SecureAccountScreen(
+                  prefilledEmail: authProvider.migrationPrefilledEmail,
+                ),
+              ),
             );
             return;
           }

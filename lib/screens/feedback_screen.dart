@@ -108,6 +108,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
 
       HapticFeedback.mediumImpact();
 
+      if (!mounted) return;
       setState(() {
         _submitted = true;
         _isSubmitting = false;
@@ -118,7 +119,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
         if (mounted) Navigator.pop(context);
       });
     } catch (e) {
-      setState(() => _isSubmitting = false);
+      if (mounted) setState(() => _isSubmitting = false);
       if (mounted) {
         ErrorHandler.showErrorSnackbar(
           context,

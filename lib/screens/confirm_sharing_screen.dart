@@ -51,6 +51,7 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
     final userId = authProvider.currentUser?.userId;
     if (userId == null) return;
     if (!await ApiClient().ensureAuthenticated()) return;
+    if (!mounted) return;
 
     final friendsProvider = context.read<FriendsProvider>();
     await friendsProvider.syncFriendshipsIfStale(userId);
@@ -79,9 +80,7 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
     final afterUnknowns = sharingProvider.batchStatus?.unknowns.length ?? beforeUnknowns;
     if (afterUnknowns != _lastAppliedUnknownCount) {
       _lastAppliedUnknownCount = afterUnknowns;
-      if (mounted) {
-        setState(() => _ensureDefaultExpanded(sharingProvider));
-      }
+      _maybeInitExpanded(sharingProvider);
     }
   }
 
@@ -123,19 +122,21 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
     if (mounted) {
       setState(() {
         _isLoadingBatch = false;
-        _ensureDefaultExpanded(sharingProvider);
       });
+      _maybeInitExpanded(sharingProvider);
     }
   }
 
-  void _ensureDefaultExpanded(SharingProvider sharingProvider) {
-    if (_expandedInitialized) return;
+  void _maybeInitExpanded(SharingProvider sharingProvider) {
+    if (_expandedInitialized || !mounted) return;
 
     final defaultGroup = sharingProvider.reviewLayout?.defaultExpandedGroup;
     if (defaultGroup == null) return;
 
-    _expandedInitialized = true;
-    _expandedGroupIds.add(defaultGroup.id);
+    setState(() {
+      _expandedInitialized = true;
+      _expandedGroupIds.add(defaultGroup.id);
+    });
   }
 
   Future<void> _exitReview() async {
@@ -237,13 +238,10 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
     final batchStatus = sharingProvider.batchStatus;
     final layout = sharingProvider.reviewLayout;
 
-    if (batchStatus != null) {
+    if (batchStatus != null && batchStatus.isCompleted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (batchStatus.isCompleted) _applyDiscoveryEnrichment();
-        if (!_expandedInitialized) {
-          setState(() => _ensureDefaultExpanded(sharingProvider));
-        }
+        _applyDiscoveryEnrichment();
       });
     }
 

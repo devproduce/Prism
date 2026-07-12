@@ -23,11 +23,11 @@ import 'package:prism/screens/processing_screen.dart';
 import 'package:prism/screens/friends_screen.dart';
 import 'package:prism/screens/profile_screen.dart';
 import 'package:prism/screens/collections_screen.dart';
+import 'package:prism/utils/error_handler.dart';
 import 'package:prism/screens/image_viewer_screen.dart';
 import 'package:prism/screens/notification_screen.dart';
 import 'package:prism/widgets/prism_media_preview.dart';
 import 'package:prism/widgets/pin_dialog.dart';
-import 'package:prism/utils/error_handler.dart';
 import 'package:prism/providers/local_gallery_provider.dart';
 import 'package:prism/widgets/album_card.dart';
 import 'package:prism/screens/local_album_view_screen.dart';
@@ -239,6 +239,12 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     } catch (e) {
       debugPrint('Error picking media: $e');
+      if (mounted) {
+        ErrorHandler.showErrorSnackbar(
+          context,
+          message: ErrorHandler.getErrorMessage(e),
+        );
+      }
     }
   }
 

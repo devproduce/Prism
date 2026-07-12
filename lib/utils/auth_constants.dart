@@ -2,6 +2,8 @@
 const String kPrefAuthToken = 'prism_auth_token';
 const String kPrefUserId = 'prism_user_id';
 const String kPrefBaseUrl = 'prism_base_url';
+const String kPrefAuthGate = 'prism_auth_gate';
+const String kPrefMigrationPrefilledEmail = 'prism_migration_prefilled_email';
 
 String hasFirebaseAccountKey(String userId) =>
     'prism_has_firebase_account_$userId';

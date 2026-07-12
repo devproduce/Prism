@@ -8,6 +8,7 @@ import 'package:prism/theme/text_styles.dart';
 import 'package:prism/widgets/prism_card.dart';
 import 'package:prism/widgets/prism_button.dart';
 import 'package:prism/utils/error_handler.dart';
+import 'package:prism/screens/keep_users_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -100,6 +101,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Navigator.pushNamed(context, '/blocked_users');
                     },
                   ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Divider(
+                      color: PrismColors.white.withValues(alpha: 0.1),
+                      height: 1,
+                    ),
+                  ),
+                  _buildSettingsTile(
+                    context,
+                    icon: Icons.bookmark_outline_rounded,
+                    title: 'Keep Users',
+                    subtitle: 'Friends kept during Auto Clean',
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const KeepUsersScreen(),
+                        ),
+                      );
+                    },
+                  ),
 
                 ],
               ),
@@ -154,6 +177,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onTap: () {
                       HapticFeedback.selectionClick();
                       Navigator.pushNamed(context, '/feedback');
+                    },
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Divider(
+                      color: PrismColors.white.withValues(alpha: 0.1),
+                      height: 1,
+                    ),
+                  ),
+                  _buildSettingsTile(
+                    context,
+                    icon: Icons.help_outline_rounded,
+                    title: 'Help & Support',
+                    subtitle: 'FAQs and troubleshooting',
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      Navigator.pushNamed(context, '/help_support');
                     },
                   ),
                   Padding(
@@ -391,6 +431,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       },
     );
+    passwordController.dispose();
   }
 
   Future<void> _handleLogout(
@@ -570,6 +611,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       },
     );
+    passwordController.dispose();
+    reasonController.dispose();
   }
 
   Future<void> _launchEmail(BuildContext context) async {
@@ -827,7 +870,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ),
-    );
+    ).whenComplete(() {
+      codeCtrl.dispose();
+      phoneCtrl.dispose();
+    });
   }
 
   Widget _buildSectionHeader(String title) {

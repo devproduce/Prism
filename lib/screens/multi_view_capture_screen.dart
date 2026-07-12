@@ -41,6 +41,7 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
   // We'll visualize progress based on count of captured views.
 
   Timer? _frameSendTimer;
+  StreamSubscription<CvFeedback>? _statusSubscription;
 
   @override
   void initState() {
@@ -53,7 +54,7 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
-        setState(() => _message = 'No camera found');
+        if (mounted) setState(() => _message = 'No camera found');
         return;
       }
 
@@ -81,7 +82,9 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
       await _connectToCvService();
     } catch (e) {
       debugPrint('Error initializing camera: $e');
-      setState(() => _message = 'Camera error: ${e.toString()}');
+      if (mounted) {
+        setState(() => _message = 'Camera error: ${e.toString()}');
+      }
     }
   }
 
@@ -89,7 +92,8 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
     try {
       await _cvService.connect();
 
-      _cvService.statusStream.listen(
+      await _statusSubscription?.cancel();
+      _statusSubscription = _cvService.statusStream.listen(
         (feedback) {
           if (!mounted) return;
 
@@ -120,7 +124,9 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
         },
         onError: (error) {
           debugPrint('CV Service error: $error');
-          setState(() => _message = 'Connection error');
+          if (mounted) {
+            setState(() => _message = 'Connection error');
+          }
         },
       );
 
@@ -130,7 +136,9 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
       _startFrameSending();
     } catch (e) {
       debugPrint('Error connecting to CV service: $e');
-      setState(() => _message = 'Failed to connect: ${e.toString()}');
+      if (mounted) {
+        setState(() => _message = 'Failed to connect: ${e.toString()}');
+      }
     }
   }
 
@@ -213,6 +221,7 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
         ).pop({'faceIds': _faceIds, 'imagePath': imagePath});
       }
     } else {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No face IDs received. Please try again.'),
@@ -222,21 +231,31 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
     }
   }
 
-  void _retakeScan() {
+  Future<void> _retakeScan() async {
+    _stopFrameSending();
+    await _statusSubscription?.cancel();
+    _statusSubscription = null;
+
+    final previousController = _cameraController;
+    _cameraController = null;
+    await previousController?.dispose();
+
+    _cvService.close();
+    _cvService = CvService();
+
+    if (!mounted) return;
+
     setState(() {
+      _isInitialized = false;
       _isComplete = false;
       _faceIds = null;
       _capturedIndices = [];
-
-      _capturedFrames.clear(); // Clear local frames
+      _capturedFrames.clear();
       _lastSentFrame = null;
       _message = 'Align your face in the center';
     });
 
-    _cvService.close();
-    _cvService = CvService();
-    _connectToCvService();
-    _initializeCamera();
+    await _initializeCamera();
   }
 
   Uint8List? _lastSentFrame;
@@ -244,6 +263,7 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
   @override
   void dispose() {
     _stopFrameSending();
+    _statusSubscription?.cancel();
     _cameraController?.dispose();
     _cvService.dispose();
     super.dispose();

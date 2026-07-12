@@ -8,6 +8,7 @@ class TokenStorageService {
   static final TokenStorageService instance = TokenStorageService._();
 
   static const _refreshTokenKey = 'prism_refresh_token';
+  static const _accessTokenKey = 'prism_access_token';
 
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
@@ -20,20 +21,39 @@ class TokenStorageService {
   }
 
   Future<void> saveAccessToken(String token) async {
+    await _secureStorage.write(key: _accessTokenKey, value: token);
+    // Native Android background service still reads from SharedPreferences.
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(kPrefAuthToken, token);
   }
 
   Future<String?> getAccessToken() async {
+    final secureToken = await _secureStorage.read(key: _accessTokenKey);
+    if (secureToken != null && secureToken.isNotEmpty) {
+      return secureToken;
+    }
+
+    // Migrate legacy plaintext tokens from SharedPreferences.
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(kPrefAuthToken);
+    final legacyToken = prefs.getString(kPrefAuthToken);
+    if (legacyToken != null && legacyToken.isNotEmpty) {
+      await _secureStorage.write(key: _accessTokenKey, value: legacyToken);
+      return legacyToken;
+    }
+    return null;
+  }
+
+  Future<bool> hasRefreshToken() async {
+    final token = await getRefreshToken();
+    return token != null && token.isNotEmpty;
   }
 
   Future<void> clearAll() async {
     try {
       await _secureStorage.delete(key: _refreshTokenKey);
+      await _secureStorage.delete(key: _accessTokenKey);
     } catch (e) {
-      debugPrint('TokenStorageService: failed to clear refresh token: $e');
+      debugPrint('TokenStorageService: failed to clear secure tokens: $e');
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(kPrefAuthToken);

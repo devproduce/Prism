@@ -76,6 +76,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   }
 
   void _updateCurrentImage(GalleryImage updatedImage) {
+    if (!mounted) return;
     if (_currentIndex >= 0 && _currentIndex < _localImages.length) {
       setState(() {
         _localImages[_currentIndex] = updatedImage;
@@ -131,6 +132,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
         // Success - no snackbar needed
       } catch (e) {
+        if (!mounted) return;
         // Revert on error
         _updateCurrentImage(
           GalleryImage(
@@ -215,6 +217,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
         // Success - no snackbar needed
       } catch (e) {
+        if (!mounted) return;
         // Revert on error
         _updateCurrentImage(
           GalleryImage(

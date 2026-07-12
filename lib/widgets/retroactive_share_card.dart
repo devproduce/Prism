@@ -170,7 +170,7 @@ class RetroactiveShareCard extends StatelessWidget {
                       unknownFaceIds: unknownFaceIds,
                       imageIds: imageIds,
                     );
-                    if (ok) {
+                    if (ok && context.mounted) {
                       await provider.markAsReadSingle(
                         notification.id,
                         currentUserId,
@@ -188,7 +188,7 @@ class RetroactiveShareCard extends StatelessWidget {
                           currentUserId,
                           removeRetroactiveFromFeed: true,
                         );
-                    onDismiss();
+                    if (context.mounted) onDismiss();
                   },
                   child: Text(
                     'Skip',
