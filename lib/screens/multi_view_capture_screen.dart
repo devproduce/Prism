@@ -7,6 +7,7 @@ import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:prism/services/cv_service.dart';
 import 'package:prism/theme/colors.dart';
+import 'package:prism/utils/image_file_utils.dart';
 
 import 'package:flutter_animate/flutter_animate.dart';
 
@@ -169,16 +170,9 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
         final jpeg = img.encodeJpg(resized, quality: 80);
         _cvService.sendFrame(Uint8List.fromList(jpeg));
 
-        // Store frame for potential display (Approximation: store every frame?? No, too heavy)
-        // Better strategy: Store the *last* frame sent for each *potential* index if we could?
-        // Actually, we can just save the last frame sent to a temp variable.
-        // If the *next* feedback says "captured index X", we assign that temp frame to X.
-        // This requires careful sync.
-        // For now, let's just update the "last sent frame"
         _lastSentFrame = Uint8List.fromList(jpeg);
       } else {
-        _cvService.sendFrame(Uint8List.fromList(bytes));
-        _lastSentFrame = Uint8List.fromList(bytes);
+        debugPrint('Could not decode camera frame; skipping non-JPEG frame');
       }
     } catch (e) {
       debugPrint('Error sending frame: $e');
@@ -191,22 +185,23 @@ class _MultiViewCaptureScreenState extends State<MultiViewCaptureScreen> {
     if (_faceIds != null && _faceIds!.isNotEmpty) {
       String? imagePath;
       try {
-        // Save a captured frame to use as profile picture
+        Uint8List? sourceBytes;
         if (_capturedFrames.isNotEmpty) {
-          // Prefer center frame (index 1) or just first available
           final key = _capturedFrames.containsKey(1)
               ? 1
               : _capturedFrames.keys.first;
-          final bytes = _capturedFrames[key];
+          sourceBytes = _capturedFrames[key];
+        } else if (_lastSentFrame != null) {
+          sourceBytes = _lastSentFrame;
+        }
 
-          if (bytes != null) {
-            final tempDir = await getTemporaryDirectory();
-            final file = File(
-              '${tempDir.path}/face_capture_${DateTime.now().millisecondsSinceEpoch}.jpg',
-            );
-            await file.writeAsBytes(bytes);
-            imagePath = file.path;
-          }
+        if (sourceBytes != null) {
+          final tempDir = await getTemporaryDirectory();
+          final file = File(
+            '${tempDir.path}/face_capture_${DateTime.now().millisecondsSinceEpoch}.jpg',
+          );
+          await ImageFileUtils.saveJpegFile(sourceBytes, file);
+          imagePath = file.path;
         }
       } catch (e) {
         debugPrint('Error saving face capture image: $e');

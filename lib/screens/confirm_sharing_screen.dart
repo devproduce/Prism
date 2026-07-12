@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:prism/models/review_models.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
+import 'package:prism/api/api_client.dart';
 import 'package:prism/providers/gallery_provider.dart';
 import 'package:prism/providers/sharing_provider.dart';
 import 'package:prism/screens/home_screen.dart';
@@ -46,8 +47,10 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
 
 
   Future<void> _loadReviewContext() async {
-    final userId = context.read<AuthProvider>().currentUser?.userId;
+    final authProvider = context.read<AuthProvider>();
+    final userId = authProvider.currentUser?.userId;
     if (userId == null) return;
+    if (!await ApiClient().ensureAuthenticated()) return;
 
     final friendsProvider = context.read<FriendsProvider>();
     await friendsProvider.syncFriendshipsIfStale(userId);
@@ -94,6 +97,11 @@ class _ConfirmSharingScreenState extends State<ConfirmSharingScreen> {
 
     if (authProvider.currentUser == null) {
       _showError('User not authenticated');
+      return;
+    }
+
+    if (!await ApiClient().ensureAuthenticated()) {
+      _showError('Your session has expired. Please log in again.');
       return;
     }
 

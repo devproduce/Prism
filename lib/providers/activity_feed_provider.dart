@@ -78,7 +78,16 @@ class ActivityFeedProvider with ChangeNotifier {
     return status.isGranted;
   }
 
+  Future<bool> _ensureAuthenticated() async {
+    if (!await _apiClient.ensureAuthenticated()) {
+      _setError('Your session has expired. Please log in again.');
+      return false;
+    }
+    return true;
+  }
+
   Future<void> refetch(String userId) async {
+    if (!await _ensureAuthenticated()) return;
 
     try {
       _setLoading(true);
@@ -126,6 +135,8 @@ class ActivityFeedProvider with ChangeNotifier {
     String userId,
     BuildContext context,
   ) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       _setError(null);
       _optimisticallyRemoveReceivedRequest(friendshipId);
@@ -177,6 +188,8 @@ class ActivityFeedProvider with ChangeNotifier {
     String userId,
     BuildContext context,
   ) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       _setError(null);
       _optimisticallyRemoveReceivedRequest(friendshipId);
@@ -239,6 +252,8 @@ class ActivityFeedProvider with ChangeNotifier {
     String userId, {
     bool removeRetroactiveFromFeed = false,
   }) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       _setError(null);
       await _apiClient.markNotificationReadSingle(
@@ -276,6 +291,8 @@ class ActivityFeedProvider with ChangeNotifier {
     required List<String> unknownFaceIds,
     required List<String> imageIds,
   }) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       _setError(null);
       final response = await _apiClient.acceptRetroactiveShare(
@@ -324,6 +341,8 @@ class ActivityFeedProvider with ChangeNotifier {
   }
 
   Future<void> markAllAsRead(String userId) async {
+    if (!await _ensureAuthenticated()) return;
+
     try {
       await _apiClient.markNotificationsRead();
 

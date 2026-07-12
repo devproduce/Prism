@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:prism/utils/constants.dart';
+import 'package:prism/utils/image_file_utils.dart';
 import 'package:prism/models/user_model.dart';
 import 'package:prism/models/auth_response.dart';
 import 'package:prism/models/auth_gate.dart';
@@ -11,6 +14,15 @@ import 'package:prism/models/contact_sync_result.dart';
 import 'package:prism/models/resolve_username_result.dart';
 import 'package:prism/services/token_storage_service.dart';
 import 'package:prism/services/auth_session_store.dart';
+
+/// Central auth contract for API requests.
+class ApiAuthPolicy {
+  /// Production sends JWT Bearer on protected routes.
+  static const bool jwtOnly = true;
+
+  /// Live backend still validates user_id on many routes alongside JWT.
+  static const bool includeSessionUserId = true;
+}
 
 class ApiException implements Exception {
   final String message;
@@ -30,8 +42,7 @@ class ApiClient {
   final http.Client _client = http.Client();
   final TokenStorageService _tokenStorage = TokenStorageService.instance;
   String? _authToken;
-  String? _authenticatedUserId;
-  bool _legacyAuthMode = true;
+  bool _legacyAuthMode = false;
 
   bool _isRefreshing = false;
   final List<Completer<String?>> _refreshWaiters = [];
@@ -41,6 +52,9 @@ class ApiClient {
 
   /// Called when backend returns 403 "Email not verified".
   void Function(AuthGate gate)? onAuthGateRequired;
+
+  /// Called after a successful silent access-token refresh (e.g. re-register FCM).
+  VoidCallback? onAccessTokenRefreshed;
 
   Future<void> saveAuthTokens({
     required String accessToken,
@@ -58,21 +72,11 @@ class ApiClient {
     _authToken = token;
   }
 
-  void setAuthenticatedUserId(String? userId) {
-    _authenticatedUserId = userId;
-  }
-
   void setLegacyAuthMode(bool enabled) {
     _legacyAuthMode = enabled;
   }
 
   bool get legacyAuthMode => _legacyAuthMode;
-
-  String? _activeUserId([String? userId]) {
-    final id = userId ?? _authenticatedUserId;
-    if (id == null || id.isEmpty) return null;
-    return id;
-  }
 
   // Clear authentication token
   Future<void> clearAuthToken() async {
@@ -83,13 +87,83 @@ class ApiClient {
   // Get authentication token
   String? get token => _authToken;
 
-  // Get common headers
-  Map<String, String> _getHeaders({bool isMultipart = false}) {
-    final headers = <String, String>{
+  /// Restore in-memory token from secure storage when the singleton outlives
+  /// a process restart or a code hot-reload.
+  Future<void> _hydrateAuthTokenIfNeeded() async {
+    if (_authToken == null || _authToken!.isEmpty) {
+      final stored = await _tokenStorage.getAccessToken();
+      if (stored != null && stored.isNotEmpty) {
+        _authToken = stored;
+      }
+    }
+    await AuthSessionStore.instance.ensureSessionUserIdHydrated();
+  }
+
+  /// Returns true when a JWT is available for protected contact/API calls.
+  Future<bool> ensureAuthenticated() async {
+    if (_legacyAuthMode) return true;
+    await _hydrateAuthTokenIfNeeded();
+    return _authToken != null && _authToken!.isNotEmpty;
+  }
+
+  void _requireAuthToken({required bool authenticated}) {
+    if (!authenticated) return;
+    if (ApiAuthPolicy.jwtOnly &&
+        !_legacyAuthMode &&
+        (_authToken == null || _authToken!.isEmpty)) {
+      throw ApiException('Not authenticated. Please log in again.', 401);
+    }
+  }
+
+  Map<String, String> _authHeaders({
+    bool isMultipart = false,
+    bool authenticated = true,
+  }) {
+    _requireAuthToken(authenticated: authenticated);
+    return {
       if (!isMultipart) 'Content-Type': 'application/json',
-      if (_authToken != null) 'Authorization': 'Bearer $_authToken',
+      if (_authToken != null && _authToken!.isNotEmpty)
+        'Authorization': 'Bearer $_authToken',
     };
-    return headers;
+  }
+
+  String? get _sessionUserId => AuthSessionStore.instance.sessionUserId;
+
+  Map<String, String> _userQueryParams([Map<String, String>? extra]) {
+    final params = <String, String>{...?extra};
+    if (!ApiAuthPolicy.includeSessionUserId) return params;
+    final userId = _sessionUserId;
+    if (userId != null && userId.isNotEmpty) {
+      params.putIfAbsent('user_id', () => userId);
+    }
+    return params;
+  }
+
+  Map<String, dynamic> _userJsonBody(Map<String, dynamic> body) {
+    if (!ApiAuthPolicy.includeSessionUserId) return body;
+    final userId = _sessionUserId;
+    if (userId != null && userId.isNotEmpty) {
+      body.putIfAbsent('user_id', () => userId);
+    }
+    return body;
+  }
+
+  void _applyUserIdMultipartField(http.MultipartRequest request) {
+    if (!ApiAuthPolicy.includeSessionUserId) return;
+    final userId = _sessionUserId;
+    if (userId != null && userId.isNotEmpty) {
+      request.fields.putIfAbsent('user_id', () => userId);
+    }
+  }
+
+  void _logAuthDiagnostics(String endpoint, {int? statusCode}) {
+    if (!kDebugMode) return;
+    final hasJwt = _authToken != null && _authToken!.isNotEmpty;
+    final hasUserId = _sessionUserId != null && _sessionUserId!.isNotEmpty;
+    debugPrint(
+      '[AuthDiag] $endpoint status=${statusCode ?? "?"} '
+      'jwt=$hasJwt sessionUserId=$hasUserId',
+    );
   }
 
   void _handle403EmailGate(http.Response response) {
@@ -140,7 +214,8 @@ class ApiClient {
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final data = json.decode(response.body) as Map<String, dynamic>;
-        final accessToken = data['access_token'] as String?;
+        final accessToken =
+            data['access_token'] as String? ?? data['token'] as String?;
         final newRefresh =
             data['refresh_token'] as String? ?? refreshToken;
         if (accessToken != null && accessToken.isNotEmpty) {
@@ -149,6 +224,7 @@ class ApiClient {
             refreshToken: newRefresh,
           );
           _completeRefreshWaiters(accessToken);
+          onAccessTokenRefreshed?.call();
           return accessToken;
         }
       }
@@ -172,6 +248,10 @@ class ApiClient {
     Future<http.Response> Function() send, {
     bool authenticated = true,
   }) async {
+    if (authenticated && !_legacyAuthMode) {
+      await _hydrateAuthTokenIfNeeded();
+    }
+
     var response = await send();
 
     if (response.statusCode == 429) {
@@ -205,7 +285,7 @@ class ApiClient {
     bool authenticated = true,
   }) {
     return _withAuthRetry(
-      () => _client.get(uri, headers: _getHeaders()),
+      () => _client.get(uri, headers: _authHeaders(authenticated: authenticated)),
       authenticated: authenticated,
     );
   }
@@ -216,7 +296,7 @@ class ApiClient {
     bool authenticated = true,
   }) {
     return _withAuthRetry(
-      () => _client.post(uri, headers: _getHeaders(), body: body),
+      () => _client.post(uri, headers: _authHeaders(authenticated: authenticated), body: body),
       authenticated: authenticated,
     );
   }
@@ -227,7 +307,7 @@ class ApiClient {
     bool authenticated = true,
   }) {
     return _withAuthRetry(
-      () => _client.delete(uri, headers: _getHeaders(), body: body),
+      () => _client.delete(uri, headers: _authHeaders(authenticated: authenticated), body: body),
       authenticated: authenticated,
     );
   }
@@ -238,7 +318,7 @@ class ApiClient {
     bool authenticated = true,
   }) {
     return _withAuthRetry(
-      () => _client.put(uri, headers: _getHeaders(), body: body),
+      () => _client.put(uri, headers: _authHeaders(authenticated: authenticated), body: body),
       authenticated: authenticated,
     );
   }
@@ -249,7 +329,7 @@ class ApiClient {
     bool authenticated = true,
   }) {
     return _withAuthRetry(
-      () => _client.patch(uri, headers: _getHeaders(), body: body),
+      () => _client.patch(uri, headers: _authHeaders(authenticated: authenticated), body: body),
       authenticated: authenticated,
     );
   }
@@ -260,14 +340,17 @@ class ApiClient {
   }) {
     return _withAuthRetry(() async {
       final request = await buildRequest();
-      request.headers.addAll(_getHeaders(isMultipart: true));
+      _applyUserIdMultipartField(request);
+      request.headers.addAll(
+        _authHeaders(isMultipart: true, authenticated: authenticated),
+      );
       final streamedResponse = await request.send();
       return http.Response.fromStream(streamedResponse);
     }, authenticated: authenticated);
   }
 
   // Handle API response
-  dynamic _handleResponse(http.Response response) {
+  dynamic _handleResponse(http.Response response, {String? endpoint}) {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (response.body.isEmpty) return null;
       try {
@@ -277,6 +360,10 @@ class ApiClient {
         throw ApiException('Invalid response format from server');
       }
     } else {
+      if (endpoint != null &&
+          (response.statusCode == 401 || response.statusCode == 422)) {
+        _logAuthDiagnostics(endpoint, statusCode: response.statusCode);
+      }
       // Extract a clean, human-readable message from the error response.
       // Never expose raw JSON to the user.
       final message = _extractErrorMessage(response.body, response.statusCode);
@@ -297,7 +384,21 @@ class ApiClient {
         // Check the most common backend error fields in priority order
         for (final key in ['detail', 'message', 'error', 'msg']) {
           final value = decoded[key];
-          if (value != null && value.toString().isNotEmpty) {
+          if (value == null) continue;
+          if (value is List) {
+            final parts = value.map((item) {
+              if (item is Map) {
+                final field = (item['loc'] as List?)?.last?.toString();
+                final msg = item['msg']?.toString();
+                if (field != null && msg != null) return '$field: $msg';
+                return msg ?? item.toString();
+              }
+              return item.toString();
+            });
+            final joined = parts.where((p) => p.isNotEmpty).join('; ');
+            if (joined.isNotEmpty) return joined;
+          }
+          if (value.toString().isNotEmpty) {
             return value.toString();
           }
         }
@@ -387,11 +488,11 @@ class ApiClient {
     }
   }
 
-  /// Register device token for FCM
+  /// Register device token for FCM (production backend contract).
   Future<void> registerDeviceToken({
-    String? userId,
-    required String deviceId,
+    required String userId,
     required String fcmToken,
+    required String deviceId,
     required String platform,
   }) async {
     try {
@@ -399,7 +500,7 @@ class ApiClient {
       final response = await _post(
         uri,
         body: json.encode({
-          if (_activeUserId(userId) != null) 'user_id': _activeUserId(userId),
+          'user_id': userId,
           'device_id': deviceId,
           'fcm_token': fcmToken,
           'platform': platform,
@@ -413,34 +514,33 @@ class ApiClient {
     }
   }
 
-  /// Register a new user (V2 — phone-first)
-  /// POST /auth/register
-  /// phone fields are mandatory; email & firstName are optional
+  /// Register a new user.
+  /// POST /auth/register (multipart)
+  /// Required: username, password, email, country_code, phone_number, face_ids
   Future<AuthResponse> register({
     required String username,
     required String password,
+    required String email,
     required String countryCode,
     required String phoneNumber,
-    String? email,
     String? firstName,
     String? lastName,
     File? profileImage,
     List<String>? faceIds,
+    String? firebaseToken,
   }) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.register}');
       final request = http.MultipartRequest('POST', uri);
 
-      // Mandatory fields
       request.fields['username'] = username;
       request.fields['password'] = password;
-      // Strip leading '+' — backend expects numeric country code e.g. "91"
+      request.fields['email'] = email.trim();
       request.fields['country_code'] = countryCode.replaceAll('+', '').trim();
-      request.fields['phone_number'] = phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
-
-      // Optional fields
-      if (email != null && email.isNotEmpty) {
-        request.fields['email'] = email;
+      request.fields['phone_number'] =
+          phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
+      if (firebaseToken != null && firebaseToken.isNotEmpty) {
+        request.fields['firebase_token'] = firebaseToken;
       }
       if (firstName != null && firstName.isNotEmpty) {
         request.fields['first_name'] = firstName;
@@ -455,15 +555,36 @@ class ApiClient {
         debugPrint('✓ Including ${faceIds.length} face IDs in registration');
       }
 
-      // Backend skips image upload when face_ids are provided (multi-view mode).
-      if (profileImage != null && (faceIds == null || faceIds.isEmpty)) {
-        request.files.add(
-          await http.MultipartFile.fromPath('image', profileImage.path),
-        );
+      // Multi-view: backend links face_ids; send tiny placeholder for required image field.
+      final Uint8List imageBytes;
+      if (faceIds != null && faceIds.isNotEmpty) {
+        imageBytes = ImageFileUtils.placeholderJpeg;
+        debugPrint('✓ Using placeholder image for multi-view registration');
+      } else if (profileImage != null) {
+        imageBytes = await ImageFileUtils.readAsJpegBytes(profileImage);
+      } else {
+        imageBytes = ImageFileUtils.placeholderJpeg;
       }
+
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'image',
+          imageBytes,
+          filename: 'profile.jpg',
+          contentType: MediaType('image', 'jpeg'),
+        ),
+      );
+      debugPrint(
+        '✓ Including profile image in registration (${imageBytes.length} bytes JPEG)',
+      );
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        debugPrint(
+          '❌ Register failed: HTTP ${response.statusCode} body=${response.body}',
+        );
+      }
       final data = _handleResponse(response);
 
       final authResponse = AuthResponse.fromJson(data);
@@ -501,8 +622,11 @@ class ApiClient {
         authenticated: false,
       );
 
-      final data = _handleResponse(response);
+      final data = _handleResponse(response) as Map<String, dynamic>;
       final authResponse = AuthResponse.fromJson(data);
+      if (authResponse.needsMigration == true) {
+        return authResponse;
+      }
       await _persistAuthResponse(authResponse);
       return authResponse;
     } catch (e) {
@@ -518,10 +642,6 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/auth/verify-password');
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('POST', uri);
-        final activeUserId = _activeUserId();
-        if (activeUserId != null) {
-          request.fields['user_id'] = activeUserId;
-        }
         request.fields['password'] = password;
         return request;
       });
@@ -536,16 +656,20 @@ class ApiClient {
 
   /// Forgot password — accepts username or email.
   /// POST /auth/forgot-password
-  Future<void> forgotPassword(String identifier) async {
+  Future<String?> forgotPassword(String identifier) async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.forgotPassword}');
-      final response = await _post(
-        uri,
-        body: json.encode({'identifier': identifier}),
-        authenticated: false,
-      );
+      final response = await _sendMultipart(() async {
+        final request = http.MultipartRequest('POST', uri);
+        request.fields['identifier'] = identifier;
+        return request;
+      }, authenticated: false);
 
-      _handleResponse(response);
+      final data = _handleResponse(response);
+      if (data is Map<String, dynamic>) {
+        return data['email'] as String?;
+      }
+      return null;
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to send reset link: ${e.toString()}');
@@ -624,7 +748,10 @@ class ApiClient {
         authenticated: false,
       );
       final data = _handleResponse(response);
-      final authResponse = AuthResponse.fromJson(data);
+      if (kDebugMode && data is Map<String, dynamic>) {
+        debugPrint('loginVerify response keys: ${data.keys.toList()}');
+      }
+      final authResponse = AuthResponse.fromJson(data as Map<String, dynamic>);
       await _persistAuthResponse(authResponse);
       return authResponse;
     } catch (e) {
@@ -633,25 +760,25 @@ class ApiClient {
     }
   }
 
-  /// Legacy account migration to Firebase email/password.
-  /// POST /auth/migrate-email
-  Future<AuthResponse> migrateEmail({
+  /// Legacy account migration via email verification.
+  /// POST /auth/verify-legacy-email
+  Future<AuthResponse> verifyLegacyEmail({
     required String migrationToken,
     required String email,
-    required String password,
   }) async {
     try {
-      final uri =
-          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.migrateEmail}');
-      final response = await _post(
-        uri,
-        body: json.encode({
-          'migration_token': migrationToken,
-          'email': email.trim(),
-          'password': password,
-        }),
-        authenticated: false,
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}${ApiConstants.verifyLegacyEmail}',
       );
+      final response = await _client.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $migrationToken',
+        },
+        body: json.encode({'email': email.trim()}),
+      );
+
       final data = _handleResponse(response);
       final authResponse = AuthResponse.fromJson(data);
       await _persistAuthResponse(authResponse);
@@ -715,8 +842,14 @@ class ApiClient {
         request.fields['face_ids'] = json.encode(faceIds);
       }
       if (profileImage != null) {
+        final jpegBytes = await ImageFileUtils.readAsJpegBytes(profileImage);
         request.files.add(
-          await http.MultipartFile.fromPath('image', profileImage.path),
+          http.MultipartFile.fromBytes(
+            'image',
+            jpegBytes,
+            filename: 'profile.jpg',
+            contentType: MediaType('image', 'jpeg'),
+          ),
         );
       }
 
@@ -758,22 +891,14 @@ class ApiClient {
   /// GET /users/me
   Future<UserModel> getCurrentUser([String? userId]) async {
     try {
-      final queryParams = <String, String>{};
-      final activeUserId = _activeUserId(userId);
-      if (activeUserId != null) {
-        queryParams['user_id'] = activeUserId;
-      }
-
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}${ApiConstants.getCurrentUser}',
-      ).replace(
-        queryParameters: queryParams.isEmpty ? null : queryParams,
-      );
+      ).replace(queryParameters: _userQueryParams());
 
       final response = await _get(uri);
-      final data = _handleResponse(response);
+      final data = _handleResponse(response, endpoint: 'GET /users/me');
 
-      return UserModel.fromJson(data);
+      return UserModel.fromApiResponse(data);
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to get user: ${e.toString()}');
@@ -819,10 +944,6 @@ class ApiClient {
       );
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('PUT', uri);
-        final activeUserId = _activeUserId();
-        if (activeUserId != null) {
-          request.fields['user_id'] = activeUserId;
-        }
         if (username != null) request.fields['username'] = username;
         if (firstName != null) request.fields['first_name'] = firstName;
         if (lastName != null) request.fields['last_name'] = lastName;
@@ -837,7 +958,7 @@ class ApiClient {
       });
       final data = _handleResponse(response);
 
-      return UserModel.fromJson(data);
+      return UserModel.fromApiResponse(data);
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to update profile: ${e.toString()}');
@@ -853,18 +974,20 @@ class ApiClient {
       );
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('POST', uri);
-        final activeUserId = _activeUserId();
-        if (activeUserId != null) {
-          request.fields['user_id'] = activeUserId;
-        }
+        final jpegBytes = await ImageFileUtils.readAsJpegBytes(profileImage);
         request.files.add(
-          await http.MultipartFile.fromPath('image', profileImage.path),
+          http.MultipartFile.fromBytes(
+            'image',
+            jpegBytes,
+            filename: 'profile.jpg',
+            contentType: MediaType('image', 'jpeg'),
+          ),
         );
         return request;
       });
       final data = _handleResponse(response);
 
-      return UserModel.fromJson(data);
+      return UserModel.fromApiResponse(data);
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to upload profile picture: ${e.toString()}');
@@ -878,10 +1001,6 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/users/me/profile-picture');
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('DELETE', uri);
-        final activeUserId = _activeUserId();
-        if (activeUserId != null) {
-          request.fields['user_id'] = activeUserId;
-        }
         return request;
       });
       final data = _handleResponse(response);
@@ -904,15 +1023,13 @@ class ApiClient {
   }) async {
     try {
       final queryParams = <String, String>{};
-      final activeUserId = _activeUserId();
-      if (activeUserId != null) queryParams['user_id'] = activeUserId;
       if (favourite != null) queryParams['favourite'] = favourite.toString();
       if (archive != null) queryParams['archive'] = archive.toString();
       if (bin != null) queryParams['bin'] = bin.toString();
 
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}${ApiConstants.getGallery}',
-      ).replace(queryParameters: queryParams);
+      ).replace(queryParameters: _userQueryParams(queryParams));
 
       print('Gallery API Request: $uri');
       final response = await _get(uri);
@@ -957,10 +1074,6 @@ class ApiClient {
 
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('POST', uri);
-        final activeUserId = _activeUserId();
-        if (activeUserId != null) {
-          request.fields['user_id'] = activeUserId;
-        }
         return request;
       });
 
@@ -999,12 +1112,9 @@ class ApiClient {
   /// GET /images/friend/{friend_id}
   Future<List<dynamic>> getSharedGallery({required String friendId}) async {
     try {
-      final queryParams = <String, String>{};
-      final activeUserId = _activeUserId();
-      if (activeUserId != null) queryParams['user_id'] = activeUserId;
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}${ApiConstants.getSharedGallery}$friendId',
-      ).replace(queryParameters: queryParams.isEmpty ? null : queryParams);
+      ).replace(queryParameters: _userQueryParams());
 
       print('Shared Gallery API Request: $uri');
       final response = await _get(uri);
@@ -1040,10 +1150,6 @@ class ApiClient {
       );
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('PATCH', uri);
-        final activeUserId = _activeUserId();
-        if (activeUserId != null) {
-          request.fields['user_id'] = activeUserId;
-        }
         request.fields['description'] = description;
         return request;
       });
@@ -1069,98 +1175,17 @@ class ApiClient {
       );
       final response = await _post(
         uri,
-        body: json.encode({
-          if (_activeUserId() != null) 'user_id': _activeUserId(),
+        body: json.encode(_userJsonBody({
           'image_ids': imageIds,
           'field': field,
           'value': value,
-        }),
+        })),
       );
 
       _handleResponse(response);
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Failed to batch update: ${e.toString()}');
-    }
-  }
-
-  // ==================== CONTACT ENDPOINTS ====================
-
-  /// Add a contact
-  /// POST /users/me/contacts
-  Future<void> addContact({
-    required String fullName,
-    required String phoneNumber,
-    String? countryCode,
-  }) async {
-    try {
-      final uri = Uri.parse('${ApiConstants.baseUrl}/users/me/contacts');
-      final response = await _sendMultipart(() async {
-        final request = http.MultipartRequest('POST', uri);
-        final activeUserId = _activeUserId();
-        if (activeUserId != null) {
-          request.fields['user_id'] = activeUserId;
-        }
-        request.fields['full_name'] = fullName;
-        request.fields['phone_number'] = phoneNumber;
-        if (countryCode != null && countryCode.isNotEmpty) {
-          request.fields['country_code'] = countryCode;
-        }
-        return request;
-      });
-      _handleResponse(response);
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException('Failed to add contact: ${e.toString()}');
-    }
-  }
-
-  /// Get user contacts
-  /// GET /users/me/contacts
-  Future<List<dynamic>> getContacts() async {
-    try {
-      final uri = Uri.parse(
-        '${ApiConstants.baseUrl}/users/me/contacts',
-      ).replace(
-        queryParameters: _activeUserId() == null
-            ? null
-            : {'user_id': _activeUserId()!},
-      );
-
-      final response = await _get(uri);
-      final data = _handleResponse(response);
-      return _coerceToList(
-        data,
-        listKeys: const ['contacts', 'items', 'data'],
-      );
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException('Failed to get contacts: ${e.toString()}');
-    }
-  }
-
-  /// Add contacts in batch
-  /// POST /users/me/contacts/batch
-  Future<Map<String, dynamic>> addContactsBatch({
-    required List<Map<String, dynamic>> contacts,
-  }) async {
-    try {
-      final uri = Uri.parse('${ApiConstants.baseUrl}/users/me/contacts/batch');
-      final response = await _sendMultipart(() async {
-        final request = http.MultipartRequest('POST', uri);
-        final activeUserId = _activeUserId();
-        if (activeUserId != null) {
-          request.fields['user_id'] = activeUserId;
-        }
-        request.fields['contacts'] = json.encode(contacts);
-        return request;
-      });
-      final data = _handleResponse(response);
-
-      return data as Map<String, dynamic>;
-    } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException('Failed to add contacts batch: ${e.toString()}');
     }
   }
 
@@ -1173,11 +1198,7 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends',
-      ).replace(
-        queryParameters: _activeUserId() == null
-            ? null
-            : {'user_id': _activeUserId()!},
-      );
+      ).replace(queryParameters: _userQueryParams());
 
       final response = await _get(uri);
       final data = _handleResponse(response);
@@ -1198,10 +1219,7 @@ class ApiClient {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/search',
       ).replace(
-        queryParameters: {
-          'username': username,
-          if (_activeUserId() != null) 'user_id': _activeUserId()!,
-        },
+        queryParameters: _userQueryParams({'username': username}),
       );
 
       final response = await _get(uri);
@@ -1225,10 +1243,9 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/friends/request');
       final response = await _post(
         uri,
-        body: json.encode({
-          if (_activeUserId() != null) 'user_id': _activeUserId(),
+        body: json.encode(_userJsonBody({
           'username': targetUsername,
-        }),
+        })),
       );
 
       final data = _handleResponse(response);
@@ -1245,11 +1262,7 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/pending',
-      ).replace(
-        queryParameters: _activeUserId() == null
-            ? null
-            : {'user_id': _activeUserId()!},
-      );
+      ).replace(queryParameters: _userQueryParams());
 
       final response = await _get(uri);
       final data = _handleResponse(response);
@@ -1269,11 +1282,7 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/sent',
-      ).replace(
-        queryParameters: _activeUserId() == null
-            ? null
-            : {'user_id': _activeUserId()!},
-      );
+      ).replace(queryParameters: _userQueryParams());
 
       final response = await _get(uri);
       final data = _handleResponse(response);
@@ -1296,9 +1305,7 @@ class ApiClient {
       );
       final response = await _post(
         uri,
-        body: json.encode(
-          _activeUserId() == null ? {} : {'user_id': _activeUserId()},
-        ),
+        body: json.encode(_userJsonBody({})),
       );
 
       final data = _handleResponse(response);
@@ -1318,9 +1325,7 @@ class ApiClient {
       );
       final response = await _post(
         uri,
-        body: json.encode(
-          _activeUserId() == null ? {} : {'user_id': _activeUserId()},
-        ),
+        body: json.encode(_userJsonBody({})),
       );
 
       final data = _handleResponse(response);
@@ -1339,11 +1344,7 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/notifications',
-      ).replace(
-        queryParameters: _activeUserId() == null
-            ? null
-            : {'user_id': _activeUserId()!},
-      );
+      ).replace(queryParameters: _userQueryParams());
 
       final response = await _get(uri);
       final data = _handleResponse(response);
@@ -1363,11 +1364,7 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/blocked',
-      ).replace(
-        queryParameters: _activeUserId() == null
-            ? null
-            : {'user_id': _activeUserId()!},
-      );
+      ).replace(queryParameters: _userQueryParams());
 
       final response = await _get(uri);
       final data = _handleResponse(response);
@@ -1387,13 +1384,12 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendId/block',
-      ).replace(
-        queryParameters: _activeUserId() == null
-            ? null
-            : {'user_id': _activeUserId()!},
       );
 
-      final response = await _post(uri);
+      final response = await _post(
+        uri,
+        body: json.encode(_userJsonBody({})),
+      );
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1409,13 +1405,12 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendId/unblock',
-      ).replace(
-        queryParameters: _activeUserId() == null
-            ? null
-            : {'user_id': _activeUserId()!},
       );
 
-      final response = await _post(uri);
+      final response = await _post(
+        uri,
+        body: json.encode(_userJsonBody({})),
+      );
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1431,11 +1426,7 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendId',
-      ).replace(
-        queryParameters: _activeUserId() == null
-            ? null
-            : {'user_id': _activeUserId()!},
-      );
+      ).replace(queryParameters: _userQueryParams());
 
       final response = await _delete(uri);
 
@@ -1454,15 +1445,14 @@ class ApiClient {
     required String keepStatus,
   }) async {
     try {
-      final uri = Uri.parse('${ApiConstants.baseUrl}/friends/$friendId/keep')
-          .replace(
-            queryParameters: {
-              if (_activeUserId() != null) 'user_id': _activeUserId()!,
-              'keep_status': keepStatus,
-            },
-          );
+      final uri = Uri.parse('${ApiConstants.baseUrl}/friends/$friendId/keep');
 
-      final response = await _put(uri);
+      final response = await _put(
+        uri,
+        body: json.encode(
+          _userJsonBody({'keep_status': keepStatus}),
+        ),
+      );
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1490,10 +1480,6 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/images/upload');
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('POST', uri);
-        final activeUserId = _activeUserId();
-        if (activeUserId != null) {
-          request.fields['user_id'] = activeUserId;
-        }
         if (description != null && description.isNotEmpty) {
           request.fields['description'] = description;
         }
@@ -1537,11 +1523,7 @@ class ApiClient {
       debugPrint('🔄 [ApiClient] GET /images/batch/$batchId');
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/images/batch/$batchId',
-      ).replace(
-        queryParameters: _activeUserId() == null
-            ? null
-            : {'user_id': _activeUserId()!},
-      );
+      ).replace(queryParameters: _userQueryParams());
 
       final response = await _get(uri);
 
@@ -1601,14 +1583,13 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/images/share/confirm');
       final response = await _post(
         uri,
-        body: json.encode({
+        body: json.encode(_userJsonBody({
           'batch_id': batchId,
-          if (_activeUserId() != null) 'user_id': _activeUserId(),
           'recipients': recipients,
           'auto_clean': autoClean,
           if (imageRecipientMap != null)
-            'image_recipient_map': imageRecipientMap, // Added field
-        }),
+            'image_recipient_map': imageRecipientMap,
+        })),
       );
 
       debugPrint(
@@ -1637,10 +1618,9 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/contacts/sync');
       final response = await _post(
         uri,
-        body: json.encode({
-          if (_activeUserId() != null) 'user_id': _activeUserId(),
+        body: json.encode(_userJsonBody({
           'contacts': contacts,
-        }),
+        })),
       );
 
       final data = _handleResponse(response);
@@ -1657,11 +1637,7 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/contacts/recommendations',
-      ).replace(
-        queryParameters: _activeUserId() == null
-            ? null
-            : {'user_id': _activeUserId()!},
-      );
+      ).replace(queryParameters: _userQueryParams());
 
       final response = await _get(uri);
       final data = _handleResponse(response);
@@ -1682,10 +1658,9 @@ class ApiClient {
           Uri.parse('${ApiConstants.baseUrl}/contacts/recommendations/dismiss');
       final response = await _post(
         uri,
-        body: json.encode({
-          if (_activeUserId() != null) 'user_id': _activeUserId(),
+        body: json.encode(_userJsonBody({
           'dismissed_user_id': dismissedUserId,
-        }),
+        })),
       );
       _handleResponse(response);
     } catch (e) {
@@ -1707,13 +1682,12 @@ class ApiClient {
           Uri.parse('${ApiConstants.baseUrl}/friends/retroactive-share/accept');
       final response = await _post(
         uri,
-        body: json.encode({
-          if (_activeUserId() != null) 'user_id': _activeUserId(),
+        body: json.encode(_userJsonBody({
           'friend_id': friendId,
           'contact_face_ids': contactFaceIds,
           'unknown_face_ids': unknownFaceIds,
           'image_ids': imageIds,
-        }),
+        })),
       );
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1732,9 +1706,7 @@ class ApiClient {
       );
       final response = await _post(
         uri,
-        body: json.encode(
-          _activeUserId() == null ? {} : {'user_id': _activeUserId()},
-        ),
+        body: json.encode(_userJsonBody({})),
       );
       _handleResponse(response);
     } catch (e) {
@@ -1752,9 +1724,7 @@ class ApiClient {
       );
       final response = await _post(
         uri,
-        body: json.encode(
-          _activeUserId() == null ? {} : {'user_id': _activeUserId()},
-        ),
+        body: json.encode(_userJsonBody({})),
       );
       _handleResponse(response);
     } catch (e) {
@@ -1769,11 +1739,7 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/contacts/sync-status',
-      ).replace(
-        queryParameters: _activeUserId() == null
-            ? null
-            : {'user_id': _activeUserId()!},
-      );
+      ).replace(queryParameters: _userQueryParams());
 
       final response = await _get(uri);
       final data = _handleResponse(response);
@@ -1793,10 +1759,9 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/contacts/sync-status');
       final response = await _patch(
         uri,
-        body: json.encode({
-          if (_activeUserId() != null) 'user_id': _activeUserId(),
+        body: json.encode(_userJsonBody({
           'permission_status': permissionStatus,
-        }),
+        })),
       );
       _handleResponse(response);
     } catch (e) {

@@ -24,6 +24,23 @@ class FirebaseAuthService {
     return _auth.signInWithEmailAndPassword(email: email, password: password);
   }
 
+  Future<UserCredential> createUserWithEmailAndPassword({
+    required String email,
+    required String password,
+  }) {
+    return _auth.createUserWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+  }
+
+  Future<void> deleteCurrentUser() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      await user.delete();
+    }
+  }
+
   Future<String> getIdToken({bool forceRefresh = false}) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -38,6 +55,10 @@ class FirebaseAuthService {
 
   Future<void> reloadCurrentUser() async {
     await _auth.currentUser?.reload();
+  }
+
+  Future<void> sendPasswordResetEmail({required String email}) {
+    return _auth.sendPasswordResetEmail(email: email.trim());
   }
 
   bool get isEmailVerified => _auth.currentUser?.emailVerified ?? false;
@@ -110,6 +131,18 @@ class FirebaseAuthService {
         return 'Incorrect password. Please try again.';
       case 'user-not-found':
         return 'No account found for this email.';
+      case 'email-already-in-use':
+        return 'An account already exists with this email.';
+      case 'weak-password':
+        return 'Password is too weak. Use at least 6 characters.';
+      case 'unknown':
+        final message = e.message ?? '';
+        if (message.contains('CONFIGURATION_NOT_FOUND')) {
+          return 'Firebase is not configured for this app build yet.';
+        }
+        return message.isNotEmpty
+            ? message
+            : 'Authentication failed. Please try again.';
       case 'too-many-requests':
         return 'Too many attempts. Please wait a moment and try again.';
       case 'google-sign-in-cancelled':

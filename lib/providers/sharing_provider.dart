@@ -49,6 +49,15 @@ class SharingProvider extends ChangeNotifier {
   static const Set<String> _specialFlags = {'archive', 'favourite', 'bin'};
   List<OnPlatformUser> _cachedOnPlatformUsers = const [];
 
+  Future<bool> _ensureAuthenticated() async {
+    if (!await _apiClient.ensureAuthenticated()) {
+      _error = 'Your session has expired. Please log in again.';
+      notifyListeners();
+      return false;
+    }
+    return true;
+  }
+
   // Getters
   List<File> get selectedImages => _selectedImages;
   Map<String, String> get imageIdToLocalPath => _imageIdToLocalPath;
@@ -447,6 +456,8 @@ class SharingProvider extends ChangeNotifier {
 
   /// Load batch status from server (used when reopening from notification)
   Future<bool> loadBatchStatus(String batchId, String userId) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       debugPrint('🔄 [SharingProvider] Loading batch status: $batchId');
       _userId = userId;
@@ -483,6 +494,8 @@ class SharingProvider extends ChangeNotifier {
 
   // Upload images batch
   Future<String?> uploadImages(String userId) async {
+    if (!await _ensureAuthenticated()) return null;
+
     if (_selectedImages.isEmpty) {
       _error = 'No images selected';
       debugPrint('❌ [SharingProvider] Upload failed: No images selected');
@@ -744,6 +757,8 @@ class SharingProvider extends ChangeNotifier {
       return;
     }
 
+    if (!await _ensureAuthenticated()) return;
+
     try {
       debugPrint(
         '🔄 [SharingProvider] Fetching batch status for: $_currentBatchId',
@@ -923,6 +938,8 @@ class SharingProvider extends ChangeNotifier {
   // Fetch all friends
   Future<void> _fetchAllFriends() async {
     if (_userId == null) return;
+    if (!await _ensureAuthenticated()) return;
+
     try {
       final friendsJson = await _apiClient.getFriends();
       // Convert to DetectedRecipient format
@@ -958,6 +975,8 @@ class SharingProvider extends ChangeNotifier {
 
   // Confirm share
   Future<bool> confirmShare() async {
+    if (!await _ensureAuthenticated()) return false;
+
     if (_currentBatchId == null) {
       _error = 'No batch ID available';
       debugPrint('❌ [SharingProvider] Confirm share failed: No batch ID');
@@ -1091,6 +1110,8 @@ class SharingProvider extends ChangeNotifier {
 
     // Call backend to clean up if we have a batch ID
     if (_currentBatchId != null && _userId != null) {
+      if (!await _ensureAuthenticated()) return;
+
       try {
         debugPrint(
           '🗑️ [SharingProvider] Calling backend cancel for batch: $_currentBatchId',

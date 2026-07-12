@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:prism/providers/auth_provider.dart';
+import 'package:prism/providers/profile_provider.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/widgets/prism_card.dart';
@@ -22,7 +23,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<AuthProvider>().refreshUser();
+      final authProvider = context.read<AuthProvider>();
+      final profileProvider = context.read<ProfileProvider>();
+      authProvider.refreshUser(profileProvider: profileProvider);
     });
   }
 

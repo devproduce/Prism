@@ -76,6 +76,11 @@ class _UserProfileScreenState extends State<UserProfileScreen>
       );
       final apiClient = ApiClient();
 
+      if (!await apiClient.ensureAuthenticated()) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
       if (authProvider.currentUser != null) {
         // Check if user is a friend (without triggering rebuild)
         if (friendsProvider.friends.isEmpty) {
@@ -137,6 +142,8 @@ class _UserProfileScreenState extends State<UserProfileScreen>
 
     try {
       final apiClient = ApiClient();
+      if (!await apiClient.ensureAuthenticated()) return;
+
       debugPrint('📸 Fetching shared gallery for friend: ${widget.userId}');
 
       final data = await apiClient.getSharedGallery(

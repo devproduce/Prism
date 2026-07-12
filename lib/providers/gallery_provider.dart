@@ -48,11 +48,21 @@ class GalleryProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> _ensureAuthenticated() async {
+    if (!await _apiClient.ensureAuthenticated()) {
+      _setError('Your session has expired. Please log in again.');
+      return false;
+    }
+    return true;
+  }
+
   /// Fetch gallery images with caching
   Future<void> fetchGallery({
     required String userId,
     bool forceRefresh = false,
   }) async {
+    if (!await _ensureAuthenticated()) return;
+
     try {
       // Always use cache first unless forcing refresh
       if (!forceRefresh) {
@@ -233,6 +243,8 @@ class GalleryProvider with ChangeNotifier {
     required String userId,
     required String field,
   }) async {
+    if (!await _ensureAuthenticated()) return;
+
     try {
       final newValue = await _apiClient.toggleImageStatus(
         imageId: imageId,
@@ -294,6 +306,8 @@ class GalleryProvider with ChangeNotifier {
     required String userId,
     required String description,
   }) async {
+    if (!await _ensureAuthenticated()) return;
+
     try {
       await _apiClient.updateImageDescription(
         imageId: imageId,
@@ -362,6 +376,8 @@ class GalleryProvider with ChangeNotifier {
     required String field,
     required bool value,
   }) async {
+    if (!await _ensureAuthenticated()) return;
+
     try {
       await _apiClient.batchUpdateStatus(
         imageIds: imageIds,
@@ -632,6 +648,8 @@ class GalleryProvider with ChangeNotifier {
   /// Sync local album with backend data
   /// Downloads any new images and updates metadata
   Future<void> _syncWithBackend(String userId) async {
+    if (!await _ensureAuthenticated()) return;
+
     debugPrint('🔄 [GalleryProvider] Syncing with backend...');
     _setLoading(true);
     _setError(null);
@@ -871,6 +889,8 @@ class GalleryProvider with ChangeNotifier {
   /// Call this when user pulls to refresh or wants to check for new images
   /// Only downloads images not already present locally
   Future<void> refreshAndSync({required String userId}) async {
+    if (!await _ensureAuthenticated()) return;
+
     try {
       debugPrint('🔄 [GalleryProvider] Refresh and sync requested...');
       _setLoading(true);

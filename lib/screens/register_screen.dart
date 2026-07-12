@@ -24,7 +24,7 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
-  final int _totalPages = 5; // Step: Username, Phone, Password, FaceID, ProfilePic
+  static const int _totalPages = 6;
 
   // Form controllers
   final _usernameController = TextEditingController();
@@ -39,7 +39,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   // Form keys
   final _step1Key = GlobalKey<FormState>(); // Username
   final _step2Key = GlobalKey<FormState>(); // Phone
-  final _step3Key = GlobalKey<FormState>(); // Name (optional)
   final _step4Key = GlobalKey<FormState>(); // Email (optional)
   final _step5Key = GlobalKey<FormState>(); // Password
   final _step6Key = GlobalKey<FormState>(); // Face ID
@@ -196,17 +195,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
+    if (_profilePicImage == null || !_profilePicImage!.existsSync()) {
+      ErrorHandler.showErrorSnackbar(
+        context,
+        message:
+            'Profile photo missing from face scan. Please scan your face again.',
+      );
+      return;
+    }
+
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     await authProvider.clearDatabaseBeforeRegistration();
 
     final success = await authProvider.register(
       username: _usernameController.text.trim(),
       password: _passwordController.text,
+      email: _emailController.text.trim(),
       countryCode: _countryCodeController.text.trim(),
       phoneNumber: _phoneNumberController.text.trim(),
-      email: _emailController.text.trim().isEmpty
-          ? null
-          : _emailController.text.trim(),
       firstName: _firstNameController.text.trim().isEmpty
           ? null
           : _firstNameController.text.trim(),
@@ -425,9 +431,44 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       }
                     },
                   ),
-                  // Step 2: Phone Number (MANDATORY - V2)
+                  // Step 2: Email (required)
                   _buildStepTemplate(
-                    key: const ValueKey('step2'),
+                    key: const ValueKey('step2_email'),
+                    formKey: _step4Key,
+                    title: 'Your Email',
+                    subtitle:
+                        'Required for account security and sign-in recovery.',
+                    fields: [
+                      TextFormField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        autocorrect: false,
+                        style: PrismTextStyles.bodyLarge,
+                        decoration: _glassInputDecoration(
+                          'Email address',
+                          Icons.email_outlined,
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter your email';
+                          }
+                          final emailRegex = RegExp(
+                            r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+                          );
+                          if (!emailRegex.hasMatch(value.trim())) {
+                            return 'Enter a valid email address';
+                          }
+                          return null;
+                        },
+                      ),
+                    ],
+                    onNext: () {
+                      if (_step4Key.currentState!.validate()) _nextPage();
+                    },
+                  ),
+                  // Step 3: Phone (required by backend for contact discovery)
+                  _buildStepTemplate(
+                    key: const ValueKey('step3_phone'),
                     formKey: _step2Key,
                     title: 'Your Phone Number',
                     subtitle: 'Used to find friends from your contacts.',
@@ -435,9 +476,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Country code field
                           SizedBox(
-                            width: 65, // Reduced width
+                            width: 65,
                             child: TextFormField(
                               controller: _countryCodeController,
                               keyboardType: TextInputType.number,
@@ -445,16 +485,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               decoration: _glassInputDecoration('').copyWith(
                                 hintText: '91',
                                 prefixText: '+',
-                                prefixStyle: PrismTextStyles.bodyLarge.copyWith(color: Colors.white),
-                                hintStyle: PrismTextStyles.bodyLarge.copyWith(color: Colors.white54),
-                                floatingLabelBehavior: FloatingLabelBehavior.never,
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                prefixStyle: PrismTextStyles.bodyLarge
+                                    .copyWith(color: Colors.white),
+                                hintStyle: PrismTextStyles.bodyLarge
+                                    .copyWith(color: Colors.white54),
+                                floatingLabelBehavior:
+                                    FloatingLabelBehavior.never,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 16,
+                                ),
                               ),
                               validator: (value) {
                                 if (value == null || value.isEmpty) {
                                   return 'Required';
                                 }
-                                final digits = value.replaceAll('+', '').trim();
+                                final digits =
+                                    value.replaceAll('+', '').trim();
                                 if (digits.isEmpty ||
                                     int.tryParse(digits) == null) {
                                   return 'Digits only';
@@ -464,7 +511,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                           ),
                           const SizedBox(width: 10),
-                          // Phone number field
                           Expanded(
                             child: TextFormField(
                               controller: _phoneNumberController,
@@ -496,9 +542,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       if (_step2Key.currentState!.validate()) _nextPage();
                     },
                   ),
-                  // Step 3: Password
+                  // Step 4: Password
                   _buildStepTemplate(
-                    key: const ValueKey('step3'),
+                    key: const ValueKey('step4_password'),
                     formKey: _step5Key,
                     title: 'Secure It',
                     subtitle: 'Make it strong. Make it safe.',
@@ -573,9 +619,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     },
                   ),
 
-                  // Step 4: Face ID Recognition (Required)
+                  // Step 5: Face ID Recognition (Required)
                   _buildStepTemplate(
-                    key: const ValueKey('step4'),
+                    key: const ValueKey('step5_face'),
                     formKey: _step6Key,
                     title: 'Face ID Recognition',
                     subtitle:
@@ -660,9 +706,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     },
                     buttonText: 'Register',
                   ),
-                  // Step 5: Profile Picture (Optional)
+                  // Step 6: Profile Picture (Optional)
                   SingleChildScrollView(
-                    key: const ValueKey('step5'),
+                    key: const ValueKey('step6_profile'),
                     padding: const EdgeInsets.all(24.0),
                     child: GlassCard(
                       borderRadius: 30,
@@ -791,7 +837,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             Consumer<AuthProvider>(
                               builder: (context, authProvider, child) {
                                 return GlassButton(
-                                  text: 'Start Exploring',
+                                  text: 'Continue',
                                   isLoading: authProvider.isLoading,
                                   onPressed: authProvider.isLoading
                                       ? null

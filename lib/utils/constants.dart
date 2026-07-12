@@ -12,7 +12,7 @@ class ApiConstants {
   static const String loginVerify = '/auth/login/verify';
   static const String refresh = '/auth/refresh';
   static const String resolveUsername = '/auth/resolve-username';
-  static const String migrateEmail = '/auth/migrate-email';
+  static const String verifyLegacyEmail = '/auth/verify-legacy-email';
   static const String resendVerification = '/auth/resend-verification';
   static const String forgotPassword = '/auth/forgot-password';
   static const String googleLogin = '/auth/google-login';

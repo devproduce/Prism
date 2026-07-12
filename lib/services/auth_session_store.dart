@@ -11,9 +11,23 @@ class AuthSessionStore {
   AuthGate authGate = AuthGate.none;
   String? _sessionUserId;
 
+  String? get sessionUserId => _sessionUserId;
+
+  /// Restores in-memory session user id from SharedPreferences after hot reload
+  /// or when the singleton outlives a process restart.
+  Future<void> ensureSessionUserIdHydrated() async {
+    if (_sessionUserId != null && _sessionUserId!.isNotEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString(kPrefUserId);
+    if (stored != null && stored.isNotEmpty) {
+      _sessionUserId = stored;
+    }
+  }
+
   Future<void> bindUser(String userId) async {
     _sessionUserId = userId;
     final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(kPrefUserId, userId);
     hasFirebaseAccount =
         prefs.getBool(hasFirebaseAccountKey(userId)) ?? false;
   }
@@ -42,5 +56,7 @@ class AuthSessionStore {
     migrationToken = null;
     authGate = AuthGate.none;
     _sessionUserId = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(kPrefUserId);
   }
 }

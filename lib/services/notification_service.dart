@@ -7,6 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:prism/api/api_client.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:prism/services/local_notification_store.dart';
+import 'package:prism/services/auth_session_store.dart';
 import 'package:prism/utils/activity_feed_refresh.dart';
 
 // Must be top-level pragmas to operate in Dart Isolates!
@@ -21,10 +22,11 @@ class NotificationService {
   static final _messaging = FirebaseMessaging.instance;
   static final _localNotifs = FlutterLocalNotificationsPlugin();
   static final ApiClient _apiClient = ApiClient();
+  static bool _tokenRefreshListenerAttached = false;
 
   static Future<void> initialize() async {
     await Firebase.initializeApp();
-    
+
     // Request permission (Android 13+ & iOS)
     await _messaging.requestPermission();
 
@@ -35,7 +37,7 @@ class NotificationService {
       requestBadgePermission: true,
       requestAlertPermission: true,
     );
-    
+
     await _localNotifs.initialize(
       const InitializationSettings(android: androidSettings, iOS: iosSettings),
     );
@@ -90,31 +92,68 @@ class NotificationService {
     return null;
   }
 
+  static Future<void> _registerTokenWithBackend(
+    String userId,
+    String deviceToken,
+  ) async {
+    if (!await _apiClient.ensureAuthenticated()) {
+      debugPrint('Skipping FCM registration: no auth token');
+      return;
+    }
+
+    final deviceId = await getStableDeviceId();
+    if (deviceId == null || deviceId.isEmpty) {
+      debugPrint('Skipping FCM registration: no stable device id');
+      return;
+    }
+
+    await _apiClient.registerDeviceToken(
+      userId: userId,
+      fcmToken: deviceToken,
+      deviceId: deviceId,
+      platform: Platform.isIOS ? 'ios' : 'android',
+    );
+    debugPrint('FCM token registered successfully');
+  }
+
   static Future<void> registerDeviceToken(String userId) async {
     try {
-      final token = await _messaging.getToken();
-      final deviceId = await getStableDeviceId(); 
-
-      if (token != null && deviceId != null) {
-        await _apiClient.registerDeviceToken(
-          deviceId: deviceId,
-          fcmToken: token,
-          platform: Platform.isIOS ? 'ios' : 'android',
-        );
-        debugPrint('FCM token registered successfully');
+      if (!await _apiClient.ensureAuthenticated()) {
+        debugPrint('Skipping FCM registration: no auth token');
+        return;
       }
 
-      // Handle intra-app token rotations automatically
-      _messaging.onTokenRefresh.listen((newToken) async {
-        if (deviceId != null) {
-          await _apiClient.registerDeviceToken(
-            deviceId: deviceId,
-            fcmToken: newToken,
-            platform: Platform.isIOS ? 'ios' : 'android',
-          );
-          debugPrint('FCM token refreshed and registered');
-        }
-      });
+      await AuthSessionStore.instance.ensureSessionUserIdHydrated();
+      final resolvedUserId =
+          userId.isNotEmpty ? userId : AuthSessionStore.instance.sessionUserId;
+      if (resolvedUserId == null || resolvedUserId.isEmpty) {
+        debugPrint('Skipping FCM registration: no user id');
+        return;
+      }
+
+      final token = await _messaging.getToken();
+
+      if (token != null) {
+        await _registerTokenWithBackend(resolvedUserId, token);
+      }
+
+      if (!_tokenRefreshListenerAttached) {
+        _tokenRefreshListenerAttached = true;
+        _messaging.onTokenRefresh.listen((newToken) async {
+          try {
+            await AuthSessionStore.instance.ensureSessionUserIdHydrated();
+            final refreshUserId = AuthSessionStore.instance.sessionUserId;
+            if (refreshUserId == null || refreshUserId.isEmpty) {
+              debugPrint('Skipping FCM re-registration: no user id');
+              return;
+            }
+            await _registerTokenWithBackend(refreshUserId, newToken);
+            debugPrint('FCM token refreshed and registered');
+          } catch (e) {
+            debugPrint('Error re-registering refreshed FCM token: $e');
+          }
+        });
+      }
     } catch (e) {
       debugPrint('Error registering device token: $e');
     }

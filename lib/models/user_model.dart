@@ -41,6 +41,18 @@ class UserModel {
 
   bool get isDeletionPending => deletionScheduledAt != null;
 
+  /// Parses a user from a direct object or nested `{ "user": { ... } }` envelope.
+  factory UserModel.fromApiResponse(dynamic data) {
+    if (data is! Map<String, dynamic>) {
+      throw FormatException('Expected user object, got ${data.runtimeType}');
+    }
+    final nested = data['user'];
+    if (nested is Map<String, dynamic>) {
+      return UserModel.fromJson(nested);
+    }
+    return UserModel.fromJson(data);
+  }
+
   factory UserModel.fromJson(Map<String, dynamic> json) {
     return UserModel(
       userId: json['user_id'] ?? json['id'] ?? '',

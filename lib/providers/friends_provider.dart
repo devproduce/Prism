@@ -318,9 +318,19 @@ class FriendsProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> _ensureAuthenticated() async {
+    if (!await _apiClient.ensureAuthenticated()) {
+      _setError('Your session has expired. Please log in again.');
+      return false;
+    }
+    return true;
+  }
+
   /// Fetch all friends and parse into accepted/pending/sent
   /// The /friends endpoint returns ALL friendships, so we filter them
   Future<void> fetchFriends(String userId, {bool showLoading = true}) async {
+    if (!await _ensureAuthenticated()) return;
+
     try {
       if (showLoading) {
         _setLoading(true);
@@ -423,6 +433,8 @@ class FriendsProvider with ChangeNotifier {
       return;
     }
 
+    if (!await _ensureAuthenticated()) return;
+
     try {
       _setSearching(true);
       _setError(null);
@@ -452,6 +464,8 @@ class FriendsProvider with ChangeNotifier {
 
   /// Send friend request
   Future<bool> sendFriendRequest(String userId, String targetUsername) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       _setError(null);
 
@@ -512,6 +526,8 @@ class FriendsProvider with ChangeNotifier {
 
   /// Accept friend request
   Future<bool> acceptFriendRequest(String friendshipId, String userId) async {
+    if (!await _ensureAuthenticated()) return false;
+
     FriendRequest? removedRequest;
     var removedIndex = -1;
 
@@ -558,6 +574,8 @@ class FriendsProvider with ChangeNotifier {
 
   /// Reject friend request
   Future<bool> rejectFriendRequest(String friendshipId, String userId) async {
+    if (!await _ensureAuthenticated()) return false;
+
     FriendRequest? removedRequest;
     var removedIndex = -1;
 
@@ -622,6 +640,8 @@ class FriendsProvider with ChangeNotifier {
     String userId,
     bool currentlyKept,
   ) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       _setError(null);
 
@@ -651,6 +671,8 @@ class FriendsProvider with ChangeNotifier {
   List<BlockedUser> get blockedUsers => _blockedUsers;
 
   Future<void> fetchBlockedUsers(String userId) async {
+    if (!await _ensureAuthenticated()) return;
+
     try {
       _setLoading(true);
       _setError(null);
@@ -670,6 +692,8 @@ class FriendsProvider with ChangeNotifier {
 
   /// Block a user
   Future<bool> blockUser(String friendId, String userId) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       _setError(null);
 
@@ -691,6 +715,8 @@ class FriendsProvider with ChangeNotifier {
 
   /// Unblock a user
   Future<bool> unblockUser(String friendId, String userId) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       _setError(null);
 
@@ -711,6 +737,8 @@ class FriendsProvider with ChangeNotifier {
 
   /// Unfriend a user
   Future<bool> unfriend(String friendId, String userId) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       _setError(null);
 
@@ -737,6 +765,11 @@ class FriendsProvider with ChangeNotifier {
       _isLoadingRecommendations = true;
       _setError(null);
       notifyListeners();
+
+      if (!await _apiClient.ensureAuthenticated()) {
+        _setError('Your session has expired. Please log in again.');
+        return;
+      }
 
       _hasContactsPermission = await _contactService.hasContactsPermission();
       final syncStatus = await _contactService.getContactSyncStatus(userId);
@@ -775,6 +808,11 @@ class FriendsProvider with ChangeNotifier {
       _isSyncingContacts = true;
       _setError(null);
       notifyListeners();
+
+      if (!await _apiClient.ensureAuthenticated()) {
+        _setError('Your session has expired. Please log in again.');
+        return const ContactSyncOutcome(issue: ContactSyncIssue.uploadFailed);
+      }
 
       final existingStatus = await _contactService.getContactSyncStatus(userId);
       _backendContactCount = existingStatus.contactCount;
@@ -870,6 +908,8 @@ class FriendsProvider with ChangeNotifier {
     String userId,
     String dismissedUserId,
   ) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       _setError(null);
       await _apiClient.dismissRecommendation(

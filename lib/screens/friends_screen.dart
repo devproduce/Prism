@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
+import 'package:prism/api/api_client.dart';
 import 'package:prism/models/friend_model.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:prism/models/contact_sync_result.dart';
@@ -49,16 +50,19 @@ class _FriendsScreenState extends State<FriendsScreen> {
     super.initState();
 
     // Fetch friends data on load
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final friendsProvider = Provider.of<FriendsProvider>(
         context,
         listen: false,
       );
 
-      if (authProvider.currentUser != null) {
+      if (authProvider.currentUser != null &&
+          await ApiClient().ensureAuthenticated()) {
         friendsProvider.refreshAll(authProvider.currentUser!.userId);
       }
+
+      if (!mounted) return;
 
       if (widget.openRequestsDirectly) {
         _showRequestsBottomSheet(context, friendsProvider, authProvider);
@@ -66,7 +70,10 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
       final initialQuery = widget.initialSearchQuery?.trim();
       final userId = authProvider.currentUser?.userId;
-      if (initialQuery != null && initialQuery.isNotEmpty && userId != null) {
+      if (initialQuery != null &&
+          initialQuery.isNotEmpty &&
+          userId != null &&
+          await ApiClient().ensureAuthenticated()) {
         _searchController.text = initialQuery;
         setState(() {});
         _updateSearchStatusRefreshTimer(true);
@@ -94,10 +101,12 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
     _searchStatusRefreshTimer = Timer.periodic(const Duration(seconds: 12), (
       _,
-    ) {
+    ) async {
       if (!mounted) return;
       final userId = context.read<AuthProvider>().currentUser?.userId;
       if (userId == null) return;
+      if (!await ApiClient().ensureAuthenticated()) return;
+      if (!mounted) return;
       context.read<FriendsProvider>().syncFriendshipsIfStale(
         userId,
         force: true,
@@ -1343,80 +1352,62 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
     return PrismCard(
       padding: EdgeInsets.zero,
-      child: InkWell(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => UserProfileScreen(
-                userId: user.userId,
-                username: user.username,
-              ),
-            ),
-          );
-        },
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: cardPaddingH,
-            vertical: cardPaddingV,
-          ),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: avatarRadius,
-                backgroundColor: PrismColors.inputGray,
-                backgroundImage: user.profilePictureUrl.isNotEmpty
-                    ? CachedNetworkImageProvider(user.profilePictureUrl)
-                    : null,
-                child: user.profilePictureUrl.isEmpty
-                    ? Text(
-                        user.username.isNotEmpty
-                            ? user.username[0].toUpperCase()
-                            : '?',
-                        style: const TextStyle(color: PrismColors.white),
-                      )
-                    : null,
-              ),
-              SizedBox(width: isCompact ? 10 : 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      displayName,
-                      style: PrismTextStyles.bodyLarge.copyWith(
-                        fontSize: isCompact ? 14 : 16,
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: cardPaddingH,
+          vertical: cardPaddingV,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: InkWell(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => UserProfileScreen(
+                        userId: user.userId,
+                        username: user.username,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                    if (user.contactName?.trim().isNotEmpty == true) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        '@${user.username}',
-                        style: PrismTextStyles.bodySmall.copyWith(
-                          color: PrismColors.secondaryText,
-                          fontSize: isCompact ? 11 : 12,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                    if (user.mutualContactCount > 0) ...[
-                      const SizedBox(height: 4),
-                      Row(
+                  );
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: avatarRadius,
+                      backgroundColor: PrismColors.inputGray,
+                      backgroundImage: user.profilePictureUrl.isNotEmpty
+                          ? CachedNetworkImageProvider(user.profilePictureUrl)
+                          : null,
+                      child: user.profilePictureUrl.isEmpty
+                          ? Text(
+                              user.username.isNotEmpty
+                                  ? user.username[0].toUpperCase()
+                                  : '?',
+                              style: const TextStyle(color: PrismColors.white),
+                            )
+                          : null,
+                    ),
+                    SizedBox(width: isCompact ? 10 : 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
-                            Icons.people_outline_rounded,
-                            size: isCompact ? 12 : 13,
-                            color: PrismColors.secondaryText,
+                          Text(
+                            displayName,
+                            style: PrismTextStyles.bodyLarge.copyWith(
+                              fontSize: isCompact ? 14 : 16,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              '${user.mutualContactCount} mutual contact${user.mutualContactCount > 1 ? 's' : ''}',
+                          if (user.contactName?.trim().isNotEmpty == true) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              '@${user.username}',
                               style: PrismTextStyles.bodySmall.copyWith(
                                 color: PrismColors.secondaryText,
                                 fontSize: isCompact ? 11 : 12,
@@ -1424,69 +1415,99 @@ class _FriendsScreenState extends State<FriendsScreen> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                          ),
+                          ],
+                          if (user.mutualContactCount > 0) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.people_outline_rounded,
+                                  size: isCompact ? 12 : 13,
+                                  color: PrismColors.secondaryText,
+                                ),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    '${user.mutualContactCount} mutual contact${user.mutualContactCount > 1 ? 's' : ''}',
+                                    style: PrismTextStyles.bodySmall.copyWith(
+                                      color: PrismColors.secondaryText,
+                                      fontSize: isCompact ? 11 : 12,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
-                    ],
+                    ),
                   ],
                 ),
               ),
-              if (status != FriendshipDisplayStatus.friend &&
-                  status != FriendshipDisplayStatus.pendingSent)
-                IconButton(
-                  tooltip: 'Dismiss suggestion',
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: BoxConstraints(
-                    minWidth: isCompact ? 32 : 40,
-                    minHeight: isCompact ? 32 : 40,
-                  ),
-                  icon: Icon(
-                    Icons.close_rounded,
-                    color: PrismColors.secondaryText,
-                    size: isCompact ? 18 : 20,
-                  ),
-                  onPressed: () async {
-                    if (authProvider.currentUser == null) return;
-                    HapticFeedback.selectionClick();
-                    await provider.dismissRecommendation(
-                      authProvider.currentUser!.userId,
-                      user.userId,
-                    );
-                  },
+            ),
+            if (status != FriendshipDisplayStatus.friend &&
+                status != FriendshipDisplayStatus.pendingSent)
+              IconButton(
+                tooltip: 'Dismiss suggestion',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints(
+                  minWidth: isCompact ? 32 : 40,
+                  minHeight: isCompact ? 32 : 40,
                 ),
-              FriendshipActionPill(
-                status: status,
-                style: isCompact
-                    ? FriendshipActionStyle.compact
-                    : FriendshipActionStyle.pill,
-                onAddTap: status == FriendshipDisplayStatus.none
-                    ? () async {
-                        if (authProvider.currentUser == null) return;
-                        final ok = await provider.sendFriendRequest(
-                          authProvider.currentUser!.userId,
-                          user.username,
-                        );
-                        if (ok && context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Request sent to @${user.username}',
-                                style: PrismTextStyles.bodySmall.copyWith(
-                                  color: PrismColors.black,
-                                ),
-                              ),
-                              backgroundColor: PrismColors.prismYellow,
-                              behavior: SnackBarBehavior.floating,
-                              duration: const Duration(seconds: 2),
-                            ),
-                          );
-                        }
-                      }
-                    : null,
+                icon: Icon(
+                  Icons.close_rounded,
+                  color: PrismColors.secondaryText,
+                  size: isCompact ? 18 : 20,
+                ),
+                onPressed: () async {
+                  if (authProvider.currentUser == null) return;
+                  HapticFeedback.selectionClick();
+                  await provider.dismissRecommendation(
+                    authProvider.currentUser!.userId,
+                    user.userId,
+                  );
+                },
               ),
-            ],
-          ),
+            FriendshipActionPill(
+              status: status,
+              style: isCompact
+                  ? FriendshipActionStyle.compact
+                  : FriendshipActionStyle.pill,
+              onAddTap: status == FriendshipDisplayStatus.none
+                  ? () async {
+                      if (authProvider.currentUser == null) return;
+                      final ok = await provider.sendFriendRequest(
+                        authProvider.currentUser!.userId,
+                        user.username,
+                      );
+                      if (!context.mounted) return;
+                      if (ok) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Request sent to @${user.username}',
+                              style: PrismTextStyles.bodySmall.copyWith(
+                                color: PrismColors.black,
+                              ),
+                            ),
+                            backgroundColor: PrismColors.prismYellow,
+                            behavior: SnackBarBehavior.floating,
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      } else if (provider.error != null) {
+                        ErrorHandler.showErrorSnackbar(
+                          context,
+                          message: provider.error!,
+                        );
+                      }
+                    }
+                  : null,
+            ),
+          ],
         ),
       ),
     );

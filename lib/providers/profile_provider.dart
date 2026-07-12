@@ -43,6 +43,14 @@ class ProfileProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> _ensureAuthenticated() async {
+    if (!await _apiClient.ensureAuthenticated()) {
+      _setError('Your session has expired. Please log in again.');
+      return false;
+    }
+    return true;
+  }
+
   /// Initialize profile with user from database
   void initializeWithUser(UserModel user) {
     _currentUser = user;
@@ -51,6 +59,8 @@ class ProfileProvider with ChangeNotifier {
 
   /// Fetch user profile from backend
   Future<void> fetchUserProfile(String userId) async {
+    if (!await _ensureAuthenticated()) return;
+
     try {
       _setLoading(true);
       _setError(null);
@@ -68,7 +78,10 @@ class ProfileProvider with ChangeNotifier {
       _setLoading(false);
     } catch (e) {
       debugPrint('Error fetching profile: $e');
-      _setError('Failed to load profile: ${e.toString()}');
+      final message = e is ApiException
+          ? e.message
+          : 'Failed to load profile: ${e.toString()}';
+      _setError(message);
       _setLoading(false);
     }
   }
@@ -85,6 +98,8 @@ class ProfileProvider with ChangeNotifier {
     String? countryCode,
     String? phoneNumber,
   }) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       _setLoading(true);
       _setError(null);
@@ -127,6 +142,8 @@ class ProfileProvider with ChangeNotifier {
     required String userId,
     required File profileImage,
   }) async {
+    if (!await _ensureAuthenticated()) return false;
+
     try {
       _setLoading(true);
       _setError(null);

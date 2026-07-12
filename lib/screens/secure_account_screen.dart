@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:prism/providers/auth_provider.dart';
-import 'package:prism/screens/verify_email_screen.dart';
+import 'package:prism/utils/auth_navigation.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/utils/error_handler.dart';
@@ -22,9 +22,6 @@ class SecureAccountScreen extends StatefulWidget {
 class _SecureAccountScreenState extends State<SecureAccountScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _emailController;
-  final _passwordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-  bool _obscurePassword = true;
   bool _isSubmitting = false;
 
   @override
@@ -36,8 +33,6 @@ class _SecureAccountScreenState extends State<SecureAccountScreen> {
   @override
   void dispose() {
     _emailController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -49,14 +44,11 @@ class _SecureAccountScreenState extends State<SecureAccountScreen> {
       final authProvider = context.read<AuthProvider>();
       final success = await authProvider.migrateLegacyAccount(
         email: _emailController.text.trim(),
-        password: _passwordController.text,
       );
       if (!mounted) return;
       if (success) {
         HapticFeedback.heavyImpact();
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const VerifyEmailScreen()),
-        );
+        navigateAfterAuthentication(context, authProvider);
       } else if (authProvider.error != null) {
         ErrorHandler.showErrorSnackbar(
           context,
@@ -112,7 +104,7 @@ class _SecureAccountScreenState extends State<SecureAccountScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'We upgraded account security. Add an email and password to continue using Prism.',
+                  'Please provide your email address to secure your account.',
                   style: PrismTextStyles.bodyMedium.copyWith(
                     color: PrismColors.secondaryText,
                   ),
@@ -132,43 +124,6 @@ class _SecureAccountScreenState extends State<SecureAccountScreen> {
                           }
                           if (!value.contains('@')) {
                             return 'Enter a valid email';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      PrismTextField(
-                        controller: _passwordController,
-                        hintText: 'Create a password',
-                        obscureText: _obscurePassword,
-                        prefixIcon: Icons.lock_outline,
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscurePassword
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined,
-                            color: PrismColors.secondaryText,
-                          ),
-                          onPressed: () {
-                            setState(() => _obscurePassword = !_obscurePassword);
-                          },
-                        ),
-                        validator: (value) {
-                          if (value == null || value.length < 6) {
-                            return 'Password must be at least 6 characters';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      PrismTextField(
-                        controller: _confirmPasswordController,
-                        hintText: 'Confirm password',
-                        obscureText: _obscurePassword,
-                        prefixIcon: Icons.lock_outline,
-                        validator: (value) {
-                          if (value != _passwordController.text) {
-                            return 'Passwords do not match';
                           }
                           return null;
                         },

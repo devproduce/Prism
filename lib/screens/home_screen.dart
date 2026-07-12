@@ -52,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isSelectionMode = false;
   final Set<String> _selectedImageIds = {};
   final ImagePicker _picker = ImagePicker(); // Added picker
+  AuthProvider? _authProvider;
 
   // Tutorial keys
   final GlobalKey _uploadKey = GlobalKey();
@@ -79,6 +80,10 @@ class _HomeScreenState extends State<HomeScreen> {
       blurValue: 1,
     );
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _authProvider = context.read<AuthProvider>();
+      _authProvider!.addListener(_handleAuthSessionChange);
+      _handleAuthSessionChange();
+
       if (widget.initialNavIndex != null) {
         switchToTab(widget.initialNavIndex!);
       }
@@ -97,22 +102,20 @@ class _HomeScreenState extends State<HomeScreen> {
         listen: false,
       );
 
-      if (authProvider.currentUser != null) {
-        // Seed ProfileProvider with the authenticated user's data immediately
-        // so the profile screen is populated right away (before any network fetch).
+      if (authProvider.hasValidSession) {
+        final user = authProvider.currentUser!;
         if (profileProvider.currentUser == null) {
-          profileProvider.initializeWithUser(authProvider.currentUser!);
+          profileProvider.initializeWithUser(user);
         }
+        profileProvider.fetchUserProfile(user.userId);
 
-        galleryProvider.fetchGallery(userId: authProvider.currentUser!.userId);
+        galleryProvider.fetchGallery(userId: user.userId);
         activityFeedProvider.setUserContext(
-          profilePicId: authProvider.currentUser!.profilePicId,
+          profilePicId: user.profilePicId,
         );
-        activityFeedProvider.refetch(
-          authProvider.currentUser!.userId,
-        );
+        activityFeedProvider.refetch(user.userId);
 
-        // Load local device albums
+        // Load local device albums (no JWT required)
         final localGalleryProvider = Provider.of<LocalGalleryProvider>(
           context,
           listen: false,
@@ -137,8 +140,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _authProvider?.removeListener(_handleAuthSessionChange);
     _prismCloudScrollController.dispose();
     super.dispose();
+  }
+
+  void _handleAuthSessionChange() {
+    final auth = _authProvider;
+    if (!mounted || auth == null || !auth.sessionExpired) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || _authProvider?.sessionExpired != true) return;
+      await _authProvider!.acknowledgeSessionExpiry(context);
+      if (!mounted) return;
+      Navigator.of(context).pushNamedAndRemoveUntil('/onboarding', (_) => false);
+      ErrorHandler.showErrorSnackbar(
+        context,
+        message: 'Your session has expired. Please log in again.',
+      );
+    });
   }
 
   void _scrollPrismCloudToEnd() {
@@ -713,7 +733,12 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         if (!localGalleryProvider.isPermissionChecked) {
-          return const SliverToBoxAdapter(child: SizedBox.shrink());
+          return const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          );
         }
 
         if (!localGalleryProvider.hasPermission) {
@@ -723,7 +748,17 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         if (localGalleryProvider.albums.isEmpty) {
-          return const SliverToBoxAdapter(child: SizedBox.shrink());
+          return SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: EmptyStateWidget(
+                icon: Icons.photo_library_outlined,
+                title: 'No albums found',
+                message:
+                    'No photo albums were found on this device. Add photos to your gallery to see them here.',
+              ),
+            ),
+          );
         }
 
         final albums = localGalleryProvider.albums;

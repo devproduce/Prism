@@ -8,9 +8,11 @@ import 'package:prism/theme/text_styles.dart';
 import 'package:prism/models/auth_gate.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/activity_feed_provider.dart';
+import 'package:prism/providers/profile_provider.dart';
 import 'package:prism/screens/secure_account_screen.dart';
 import 'package:prism/screens/verify_email_screen.dart';
 import 'package:prism/services/share_handler_service.dart';
+import 'package:prism/utils/error_handler.dart';
 import 'package:provider/provider.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -65,11 +67,14 @@ class _SplashScreenState extends State<SplashScreen> {
       if (!mounted) return;
 
       // Determine navigation destination
-      if (authProvider.isAuthenticated && authProvider.currentUser != null) {
+      if (authProvider.hasValidSession) {
         try {
-          await authProvider.apiClient.getCurrentUser(
-            authProvider.currentUser!.userId,
-          );
+          await authProvider.validateAndHydrateSession();
+
+          if (mounted && authProvider.currentUser != null) {
+            Provider.of<ProfileProvider>(context, listen: false)
+                .initializeWithUser(authProvider.currentUser!);
+          }
 
           if (!mounted) return;
 
@@ -114,6 +119,24 @@ class _SplashScreenState extends State<SplashScreen> {
         } catch (e) {
           debugPrint('SplashScreen: Session validation failed: $e');
           if (!mounted) return;
+
+          if (authProvider.sessionExpired) {
+            await authProvider.acknowledgeSessionExpiry(context);
+            if (!mounted) return;
+            Navigator.of(context).pushReplacement(
+              PageRouteBuilder(
+                pageBuilder: (_, __, ___) => const OnboardingScreen(),
+                transitionsBuilder: (_, animation, __, child) {
+                  return FadeTransition(opacity: animation, child: child);
+                },
+              ),
+            );
+            ErrorHandler.showErrorSnackbar(
+              context,
+              message: 'Your session has expired. Please log in again.',
+            );
+            return;
+          }
 
           final gate = authProvider.authGate;
           if (gate == AuthGate.verifyEmail) {

@@ -89,7 +89,7 @@ class LocalGalleryProvider with ChangeNotifier {
       List<AlbumInfo> albumInfoList = [];
       for (final path in paths) {
         final count = await path.assetCountAsync;
-        if (count > 0) {
+        if (count > 0 || path.isAll) {
           albumInfoList.add(AlbumInfo(album: path, assetCount: count));
         }
       }

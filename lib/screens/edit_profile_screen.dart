@@ -144,7 +144,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         });
 
         // Refresh profile provider
-        await authProvider.refreshUser();
+        final profileProvider = Provider.of<ProfileProvider>(
+          context,
+          listen: false,
+        );
+        await authProvider.refreshUser(profileProvider: profileProvider);
 
         ErrorHandler.showSuccessSnackbar(
           context,
@@ -228,8 +232,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         Navigator.pop(context); // Close loading dialog
 
         if (overallSuccess) {
-          // Update auth provider as well
-          await authProvider.refreshUser();
+          await authProvider.refreshUser(profileProvider: profileProvider);
 
           ErrorHandler.showSuccessSnackbar(
             context,

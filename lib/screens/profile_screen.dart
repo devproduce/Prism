@@ -18,6 +18,7 @@ import 'package:prism/widgets/empty_state_widget.dart';
 import 'package:prism/widgets/shimmer_placeholder.dart';
 import 'package:prism/utils/error_handler.dart';
 import 'package:prism/utils/responsive_helper.dart';
+import 'package:prism/utils/media_url_utils.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -30,6 +31,20 @@ class _ProfileScreenState extends State<ProfileScreen>
     with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final authProvider = context.read<AuthProvider>();
+      final profileProvider = context.read<ProfileProvider>();
+      final userId = authProvider.currentUser?.userId;
+      if (userId != null && authProvider.hasValidSession) {
+        profileProvider.fetchUserProfile(userId);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -54,6 +69,19 @@ class _ProfileScreenState extends State<ProfileScreen>
       );
     }
 
+    if (profileProvider.isLoading && profileProvider.currentUser == null) {
+      return Scaffold(
+        backgroundColor: PrismColors.voidBlack,
+        body: Center(child: ShimmerLayouts.profileHeader()),
+      );
+    }
+
+    final avatarUrl = user.profilePictureUrl;
+    final avatarAuthHeaders = MediaUrlUtils.authHeaders(
+      avatarUrl,
+      authProvider.token,
+    );
+
     return Scaffold(
       backgroundColor: PrismColors.voidBlack,
       extendBodyBehindAppBar: true,
@@ -76,6 +104,56 @@ class _ProfileScreenState extends State<ProfileScreen>
           length: 2,
           child: Column(
             children: [
+              if (profileProvider.error != null)
+                Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    horizontalPadding,
+                    8,
+                    horizontalPadding,
+                    0,
+                  ),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: Colors.red.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.error_outline,
+                          color: Colors.redAccent,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            profileProvider.error!,
+                            style: PrismTextStyles.bodySmall.copyWith(
+                              color: Colors.redAccent,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: profileProvider.isLoading
+                              ? null
+                              : () {
+                                  profileProvider.clearError();
+                                  profileProvider.fetchUserProfile(user.userId);
+                                },
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               // Profile Header Section
               Padding(
                 padding: EdgeInsets.all(horizontalPadding),
@@ -106,7 +184,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   user.profilePictureUrl != null &&
                                       user.profilePictureUrl!.isNotEmpty
                                   ? CachedNetworkImage(
-                                      imageUrl: user.profilePictureUrl!,
+                                      imageUrl: avatarUrl!,
+                                      httpHeaders: avatarAuthHeaders,
                                       fit: BoxFit.cover,
                                       placeholder: (context, url) => Container(
                                         color: PrismColors.inputGray,
@@ -165,6 +244,15 @@ class _ProfileScreenState extends State<ProfileScreen>
                       ],
                     ),
                     SizedBox(height: horizontalPadding),
+                    if (profileProvider.isLoading)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 8),
+                        child: LinearProgressIndicator(
+                          minHeight: 2,
+                          color: PrismColors.prismYellow,
+                          backgroundColor: PrismColors.inputGray,
+                        ),
+                      ),
                     // Name & Bio
                     Text(
                       '${user.firstName}${user.lastName != null ? ' ${user.lastName}' : ''}',

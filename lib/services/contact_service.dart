@@ -15,6 +15,14 @@ class ContactService {
 
   static const int _syncBatchSize = 300;
 
+  Future<bool> _ensureAuthenticated() async {
+    final ready = await _apiClient.ensureAuthenticated();
+    if (!ready) {
+      debugPrint('[ContactService] Skipping API call: no auth token');
+    }
+    return ready;
+  }
+
   /// Whether the app can read the device phonebook right now.
   Future<bool> hasContactsPermission() async {
     final status = await Permission.contacts.status;
@@ -142,6 +150,10 @@ class ContactService {
     String userId,
     List<Map<String, String>> payload,
   ) async {
+    if (!await _ensureAuthenticated()) {
+      return const ContactSyncOutcome(issue: ContactSyncIssue.uploadFailed);
+    }
+
     final batchCount = (payload.length / _syncBatchSize).ceil();
 
     for (var batchIndex = 0; batchIndex < batchCount; batchIndex++) {
@@ -248,6 +260,8 @@ class ContactService {
   }
 
   Future<ContactSyncResult?> getRecommendations(String userId) async {
+    if (!await _ensureAuthenticated()) return null;
+
     try {
       final result = await _apiClient.getContactRecommendations();
       if (await hasContactsPermission()) {
@@ -261,6 +275,10 @@ class ContactService {
   }
 
   Future<ContactSyncStatus> getContactSyncStatus(String userId) async {
+    if (!await _ensureAuthenticated()) {
+      return const ContactSyncStatus(contactCount: 0);
+    }
+
     try {
       final status = await _apiClient.getContactSyncStatus();
       final parsed = ContactSyncStatus.fromJson(status);
@@ -281,17 +299,12 @@ class ContactService {
   }
 
   Future<bool> hasContactsInBackend(String userId) async {
-    if (await hasContactsStoredOnBackend(userId)) return true;
-    try {
-      final contacts = await _apiClient.getContacts();
-      return contacts.isNotEmpty;
-    } catch (e) {
-      debugPrint('[ContactService] Error checking backend contacts: $e');
-      return false;
-    }
+    return hasContactsStoredOnBackend(userId);
   }
 
   Future<void> updateSyncStatus(String userId, String permissionStatus) async {
+    if (!await _ensureAuthenticated()) return;
+
     try {
       await _apiClient.updateContactSyncStatus(
         permissionStatus: permissionStatus,

@@ -84,26 +84,34 @@ class _CompactVariant extends StatelessWidget {
       case FriendshipDisplayStatus.none:
         return SizedBox(
           width: 44,
-          child: InkWell(
-            onTap: onAddTap,
-            borderRadius: BorderRadius.circular(8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.person_add_rounded,
-                  color: PrismColors.prismYellow,
-                  size: 22,
-                ),
-                Text(
-                  'Add',
-                  style: PrismTextStyles.bodySmall.copyWith(
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onAddTap == null
+                  ? null
+                  : () {
+                      HapticFeedback.selectionClick();
+                      onAddTap!();
+                    },
+              borderRadius: BorderRadius.circular(8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.person_add_rounded,
                     color: PrismColors.prismYellow,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
+                    size: 22,
                   ),
-                ),
-              ],
+                  Text(
+                    'Add',
+                    style: PrismTextStyles.bodySmall.copyWith(
+                      color: PrismColors.prismYellow,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
