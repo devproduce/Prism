@@ -351,7 +351,8 @@ class AuthProvider with ChangeNotifier {
     _apiClient.setLegacyAuthMode(AuthBackendCapabilities.legacyAuthEnabled);
   }
 
-  /// Legacy username/password login for backends without Firebase auth.
+  /// Standard username/password login (`POST /auth/login`).
+  /// Legacy users return [AuthResponse.needsMigration] without entering the app.
   Future<bool> login({
     required String identifier,
     required String password,
@@ -662,7 +663,6 @@ class AuthProvider with ChangeNotifier {
             email: trimmedEmail,
             password: password,
           );
-          await _firebaseAuth.sendEmailVerification();
           firebaseToken = await _firebaseAuth.getIdToken();
         } on FirebaseAuthException catch (e) {
           _setError(_firebaseAuth.friendlyError(e));
@@ -703,8 +703,8 @@ class AuthProvider with ChangeNotifier {
             _currentUser = _currentUser!.copyWith(email: trimmedEmail);
             await _databaseService.updateUserSession(_currentUser!);
           }
-          _authGate = AuthGate.verifyEmail;
-          await _sessionStore.setAuthGate(AuthGate.verifyEmail);
+          // Email link verification is only used for forgot-password reset,
+          // not during registration.
           _setLoading(false);
           notifyListeners();
           return true;

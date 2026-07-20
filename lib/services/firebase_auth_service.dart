@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:prism/utils/auth_constants.dart';
 
 class FirebaseAuthService {
   FirebaseAuthService._();
@@ -13,7 +14,9 @@ class FirebaseAuthService {
 
   Future<void> _ensureGoogleInitialized() async {
     if (_googleInitialized) return;
-    await GoogleSignIn.instance.initialize();
+    await GoogleSignIn.instance.initialize(
+      serverClientId: kGoogleSignInServerClientId,
+    );
     _googleInitialized = true;
   }
 
@@ -59,14 +62,6 @@ class FirebaseAuthService {
 
   Future<void> sendPasswordResetEmail({required String email}) {
     return _auth.sendPasswordResetEmail(email: email.trim());
-  }
-
-  Future<void> sendEmailVerification() async {
-    final user = _auth.currentUser;
-    if (user == null) {
-      throw StateError('No Firebase user signed in');
-    }
-    await user.sendEmailVerification();
   }
 
   bool get isEmailVerified => _auth.currentUser?.emailVerified ?? false;

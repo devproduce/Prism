@@ -81,6 +81,24 @@ class AuthResponse {
   }
 
   factory AuthResponse.fromJson(Map<String, dynamic> json) {
+    final needsMigration = json['needs_migration'] as bool?;
+    final migrationToken = json['migration_token'] as String?;
+
+    // Legacy migration response may only include needs_migration + migration_token.
+    if (needsMigration == true) {
+      return AuthResponse(
+        user: UserModel(
+          userId: '',
+          username: '',
+          email: json['email']?.toString() ?? '',
+          firstName: '',
+        ),
+        message: json['message']?.toString() ?? 'Migration required',
+        needsMigration: true,
+        migrationToken: migrationToken,
+      );
+    }
+
     // Check if user data is nested under 'user' key
     final userData =
         (json['user'] != null && json['user'] is Map<String, dynamic>)
@@ -94,8 +112,8 @@ class AuthResponse {
       refreshToken: _extractRefreshToken(json),
       phoneSynced: json['phone_synced'] as bool?,
       exists: json['exists'] as bool?,
-      needsMigration: json['needs_migration'] as bool?,
-      migrationToken: json['migration_token'] as String?,
+      needsMigration: needsMigration,
+      migrationToken: migrationToken,
     );
   }
 

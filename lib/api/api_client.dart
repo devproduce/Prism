@@ -180,11 +180,15 @@ class ApiClient {
       return;
     }
 
-    final gate = AuthSessionStore.instance.hasFirebaseAccount
-        ? AuthGate.verifyEmail
-        : AuthGate.migrateAccount;
-    AuthSessionStore.instance.setAuthGate(gate);
-    onAuthGateRequired?.call(gate);
+    // Email verification is not enforced after registration (forgot-password
+    // reset links only). Still route legacy users without a Firebase account
+    // to the migration flow.
+    if (AuthSessionStore.instance.hasFirebaseAccount) {
+      return;
+    }
+
+    AuthSessionStore.instance.setAuthGate(AuthGate.migrateAccount);
+    onAuthGateRequired?.call(AuthGate.migrateAccount);
   }
 
   bool _isTransientRefreshError(Object error) {
@@ -689,7 +693,8 @@ class ApiClient {
     }
   }
 
-  /// Login user (legacy backend) or fallback when Firebase auth is unavailable.
+  /// Standard login — POST /auth/login (JSON: identifier + password).
+  /// May return needs_migration for legacy accounts (no tokens persisted yet).
   Future<AuthResponse> login({
     required String identifier, // Changed from 'email' to 'identifier'
     required String password,
@@ -704,6 +709,14 @@ class ApiClient {
         }),
         authenticated: false,
       );
+
+      if (response.statusCode >= 400) {
+        // Release builds strip debugPrint — use print so 500 bodies are visible.
+        print(
+          '[Login] POST /auth/login status=${response.statusCode} '
+          'body=${response.body}',
+        );
+      }
 
       final data = _handleResponse(response) as Map<String, dynamic>;
       final authResponse = AuthResponse.fromJson(data);
@@ -820,16 +833,18 @@ class ApiClient {
   }
 
   /// Exchange Firebase ID token for backend JWT pair.
-  /// POST /auth/login/verify
+  /// POST /auth/login/verify (multipart form: id_token)
   Future<AuthResponse> loginVerify({required String idToken}) async {
     try {
+      if (idToken.trim().isEmpty) {
+        throw ApiException('Firebase id_token is missing. Please try again.');
+      }
       final uri =
           Uri.parse('${ApiConstants.baseUrl}${ApiConstants.loginVerify}');
-      final response = await _post(
-        uri,
-        body: json.encode({'id_token': idToken}),
-        authenticated: false,
-      );
+      final request = http.MultipartRequest('POST', uri);
+      request.fields['id_token'] = idToken;
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
       final data = _handleResponse(response);
       if (kDebugMode && data is Map<String, dynamic>) {
         debugPrint('loginVerify response keys: ${data.keys.toList()}');
@@ -863,7 +878,8 @@ class ApiClient {
       );
 
       final data = _handleResponse(response);
-      final authResponse = AuthResponse.fromJson(data);
+      final authResponse =
+          AuthResponse.fromJson(data as Map<String, dynamic>);
       await _persistAuthResponse(authResponse);
       return authResponse;
     } catch (e) {
@@ -886,18 +902,20 @@ class ApiClient {
     }
   }
 
-  /// POST /auth/google-login
+  /// POST /auth/google-login (multipart form: id_token)
   Future<AuthResponse> googleLogin({required String idToken}) async {
     try {
+      if (idToken.trim().isEmpty) {
+        throw ApiException('Google id_token is missing. Please try again.');
+      }
       final uri =
           Uri.parse('${ApiConstants.baseUrl}${ApiConstants.googleLogin}');
-      final response = await _post(
-        uri,
-        body: json.encode({'id_token': idToken}),
-        authenticated: false,
-      );
+      final request = http.MultipartRequest('POST', uri);
+      request.fields['id_token'] = idToken;
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
       final data = _handleResponse(response);
-      final authResponse = AuthResponse.fromJson(data);
+      final authResponse = AuthResponse.fromJson(data as Map<String, dynamic>);
       if (authResponse.exists != false) {
         await _persistAuthResponse(authResponse);
       }

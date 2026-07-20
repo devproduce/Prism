@@ -10,7 +10,6 @@ import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/activity_feed_provider.dart';
 import 'package:prism/providers/profile_provider.dart';
 import 'package:prism/screens/secure_account_screen.dart';
-import 'package:prism/screens/verify_email_screen.dart';
 import 'package:prism/services/share_handler_service.dart';
 import 'package:prism/utils/error_handler.dart';
 import 'package:provider/provider.dart';
@@ -79,12 +78,6 @@ class _SplashScreenState extends State<SplashScreen> {
           if (!mounted) return;
 
           final gate = authProvider.authGate;
-          if (gate == AuthGate.verifyEmail) {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const VerifyEmailScreen()),
-            );
-            return;
-          }
           if (gate == AuthGate.migrateAccount) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
@@ -143,12 +136,6 @@ class _SplashScreenState extends State<SplashScreen> {
           }
 
           final gate = authProvider.authGate;
-          if (gate == AuthGate.verifyEmail) {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const VerifyEmailScreen()),
-            );
-            return;
-          }
           if (gate == AuthGate.migrateAccount) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(

@@ -3,7 +3,6 @@ import 'package:prism/models/auth_gate.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/screens/home_screen.dart';
 import 'package:prism/screens/secure_account_screen.dart';
-import 'package:prism/screens/verify_email_screen.dart';
 
 void navigateAfterAuthentication(
   BuildContext context,
@@ -14,11 +13,12 @@ void navigateAfterAuthentication(
 
   Route<void> route;
   switch (auth.authGate) {
-    case AuthGate.verifyEmail:
-      route = MaterialPageRoute(builder: (_) => const VerifyEmailScreen());
     case AuthGate.migrateAccount:
       route = MaterialPageRoute(builder: (_) => const SecureAccountScreen());
+    case AuthGate.verifyEmail:
     case AuthGate.none:
+      // Email verification is not required after registration; only forgot-
+      // password uses an email reset link. Treat stale verifyEmail gates as home.
       route = PageRouteBuilder(
         pageBuilder: (_, __, ___) =>
             HomeScreen(key: HomeScreen.homeScreenKey),

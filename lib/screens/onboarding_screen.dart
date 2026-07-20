@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:prism/screens/login_screen.dart';
-import 'package:prism/screens/register_screen.dart';
+import 'package:prism/screens/sign_up_choice_screen.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/widgets/prism_button.dart';
@@ -68,7 +68,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     HapticFeedback.mediumImpact();
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        pageBuilder: (_, __, ___) => const RegisterScreen(),
+        pageBuilder: (_, __, ___) => const SignUpChoiceScreen(),
         transitionsBuilder: (_, animation, __, child) {
           return FadeTransition(opacity: animation, child: child);
         },

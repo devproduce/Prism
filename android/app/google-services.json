@@ -1,26 +1,52 @@
 {
   "project_info": {
-    "project_number": "315155620261",
-    "project_id": "prism-20621",
-    "storage_bucket": "prism-20621.firebasestorage.app"
+    "project_number": "90565753841",
+    "project_id": "tidy-way-468114-n9",
+    "storage_bucket": "tidy-way-468114-n9.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:315155620261:android:fd856f24628f77c754884c",
+        "mobilesdk_app_id": "1:90565753841:android:8b6c380b7debf6629e6250",
         "android_client_info": {
           "package_name": "in.prismapp.prism"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "90565753841-3unlhge2vkk8cbssg7o18rve60aqg9qr.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "in.prismapp.prism",
+            "certificate_hash": "cbf920c7022da16d35495e64579f840114921df3"
+          }
+        },
+        {
+          "client_id": "90565753841-u59lrrqfm7veja9e571bajra8t5r5ulr.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "in.prismapp.prism",
+            "certificate_hash": "0327c572b6e1312c13ef3e91d13ea653ed1b6132"
+          }
+        },
+        {
+          "client_id": "90565753841-s1nvb0ssinh2a000h2tgj45q897bmts5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
-          "current_key": "AIzaSyAsll7aPGiI4W7CJroD0BA2Nit1np5RK1k"
+          "current_key": "AIzaSyAWa9XvSIdMwyCwe1pFib_20Pi0FYfBUVE"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "90565753841-8092960ddtoc7oirbsg37jmtaig9mvr0.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
