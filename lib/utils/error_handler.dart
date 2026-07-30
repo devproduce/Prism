@@ -121,12 +121,16 @@ class ErrorHandler {
     }
   }
 
-  /// Shows an error snackbar with optional retry action
+  /// Shows an error snackbar that auto-dismisses after [duration] (default 1s).
+  ///
+  /// [onRetry] is accepted for call-site compatibility but not shown — Flutter
+  /// ignores [duration] when a SnackBar action is present, which left errors
+  /// on screen forever.
   static void showErrorSnackbar(
     BuildContext context, {
     required String message,
     VoidCallback? onRetry,
-    Duration duration = const Duration(seconds: 4),
+    Duration duration = const Duration(seconds: 1),
   }) {
     if (message.isEmpty) return; // Don't show for empty messages (user cancel)
 
@@ -156,13 +160,6 @@ class ErrorHandler {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.all(16),
         duration: duration,
-        action: onRetry != null
-            ? SnackBarAction(
-                label: 'RETRY',
-                textColor: PrismColors.white,
-                onPressed: onRetry,
-              )
-            : null,
       ),
     );
   }

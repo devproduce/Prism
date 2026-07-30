@@ -84,6 +84,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   // V2: Phone Number tile
                   _buildPhoneNumberTile(context, authProvider),
+                  if (authProvider.canSetPassword) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Divider(
+                        color: PrismColors.white.withValues(alpha: 0.1),
+                        height: 1,
+                      ),
+                    ),
+                    _buildSettingsTile(
+                      context,
+                      icon: Icons.lock_outline_rounded,
+                      title: 'Set Password',
+                      subtitle: 'Enable username and password login',
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        _showSetPasswordSheet(context, authProvider);
+                      },
+                    ),
+                  ],
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Divider(
@@ -722,6 +741,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  void _showSetPasswordSheet(
+    BuildContext context,
+    AuthProvider authProvider,
+  ) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: PrismColors.darkCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => _SetPasswordSheet(
+        authProvider: authProvider,
+        // Parent Settings context for snackbars after the sheet closes.
+        parentContext: context,
+      ),
+    );
+  }
+
   void _showPhoneEditSheet(BuildContext context, AuthProvider authProvider) {
     final codeCtrl = TextEditingController(
       text: authProvider.currentUser?.countryCode ?? '91',
@@ -942,6 +980,223 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 size: 20,
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Owns text controllers so they are disposed only after the sheet element tree
+/// is torn down (avoids "used after being disposed" when dismissing with IME).
+class _SetPasswordSheet extends StatefulWidget {
+  const _SetPasswordSheet({
+    required this.authProvider,
+    required this.parentContext,
+  });
+
+  final AuthProvider authProvider;
+  final BuildContext parentContext;
+
+  @override
+  State<_SetPasswordSheet> createState() => _SetPasswordSheetState();
+}
+
+class _SetPasswordSheetState extends State<_SetPasswordSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _passwordCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
+  bool _isSubmitting = false;
+
+  @override
+  void dispose() {
+    _passwordCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  InputDecoration _fieldDecoration({
+    required String label,
+    required bool obscure,
+    required VoidCallback onToggle,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.white54),
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.05),
+      suffixIcon: IconButton(
+        icon: Icon(
+          obscure ? Icons.visibility_off : Icons.visibility,
+          color: Colors.white54,
+        ),
+        onPressed: onToggle,
+      ),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+      ),
+    );
+  }
+
+  Future<void> _submit() async {
+    FocusScope.of(context).unfocus();
+    if (!_formKey.currentState!.validate()) return;
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
+
+    try {
+      debugPrint('[SetPassword] UI submit tapped');
+      final result = await widget.authProvider.setPassword(_passwordCtrl.text);
+      if (!mounted) return;
+
+      final parent = widget.parentContext;
+
+      void showSnack(String message, {bool error = false}) {
+        // Prefer parent (Settings) messenger after sheet closes; fall back to root.
+        final target = parent.mounted ? parent : context;
+        if (!target.mounted) return;
+        if (error) {
+          ErrorHandler.showErrorSnackbar(target, message: message);
+        } else {
+          ErrorHandler.showInfoSnackbar(target, message: message);
+        }
+      }
+
+      switch (result) {
+        case SetPasswordResult.success:
+          Navigator.of(context).pop();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            showSnack(
+              'Password set. You can now sign in with username and password.',
+            );
+          });
+        case SetPasswordResult.alreadySet:
+          Navigator.of(context).pop();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            showSnack('Password already set');
+          });
+        case SetPasswordResult.failed:
+          if (mounted) setState(() => _isSubmitting = false);
+          showSnack(
+            widget.authProvider.error ?? 'Failed to set password',
+            error: true,
+          );
+      }
+    } catch (e, st) {
+      debugPrint('[SetPassword] UI unexpected error: $e\n$st');
+      if (mounted) setState(() => _isSubmitting = false);
+      if (widget.parentContext.mounted) {
+        ErrorHandler.showErrorSnackbar(
+          widget.parentContext,
+          message: 'Failed to set password. Please try again.',
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 24,
+        right: 24,
+        top: 24,
+        bottom: bottomInset + 24,
+      ),
+      child: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Set Password', style: PrismTextStyles.h3),
+              const SizedBox(height: 4),
+              Text(
+                'Add a password so you can also sign in with your username.',
+                style: PrismTextStyles.bodySmall.copyWith(
+                  color: PrismColors.secondaryText,
+                ),
+              ),
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _passwordCtrl,
+                obscureText: _obscurePassword,
+                style: PrismTextStyles.bodyLarge,
+                decoration: _fieldDecoration(
+                  label: 'New password',
+                  obscure: _obscurePassword,
+                  onToggle: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
+                ),
+                validator: (v) {
+                  if (v == null || v.isEmpty) {
+                    return 'Please enter a password';
+                  }
+                  if (v.length < 6) {
+                    return 'Password must be at least 6 characters';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _confirmCtrl,
+                obscureText: _obscureConfirm,
+                style: PrismTextStyles.bodyLarge,
+                decoration: _fieldDecoration(
+                  label: 'Confirm password',
+                  obscure: _obscureConfirm,
+                  onToggle: () =>
+                      setState(() => _obscureConfirm = !_obscureConfirm),
+                ),
+                validator: (v) {
+                  if (v == null || v.isEmpty) {
+                    return 'Please confirm your password';
+                  }
+                  if (v != _passwordCtrl.text) {
+                    return 'Passwords do not match';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _isSubmitting ? null : _submit,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: PrismColors.prismYellow,
+                    foregroundColor: PrismColors.black,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: PrismColors.black,
+                          ),
+                        )
+                      : Text(
+                          'Set Password',
+                          style: PrismTextStyles.bodyLarge,
+                        ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -17,6 +17,7 @@ class ApiConstants {
   static const String forgotPassword = '/auth/forgot-password';
   static const String googleLogin = '/auth/google-login';
   static const String googleRegister = '/auth/google-register';
+  static const String setPassword = '/auth/set-password';
   static const String deleteAccount = '/auth/delete-account';
   static const String cancelDeletion = '/auth/cancel-deletion';
 

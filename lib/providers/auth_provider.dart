@@ -23,6 +23,9 @@ import 'package:prism/providers/profile_provider.dart';
 import 'package:prism/services/notification_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+/// Result of [AuthProvider.setPassword].
+enum SetPasswordResult { success, alreadySet, failed }
+
 class AuthProvider with ChangeNotifier {
   AuthProvider() {
     _apiClient.onSessionExpired = _handleSessionExpired;
@@ -47,6 +50,15 @@ class AuthProvider with ChangeNotifier {
 
   bool _phoneSyncWarning = false;
 
+  /// Local cache: Google user already has a password (set via API or 400).
+  bool? _hasPasswordSet;
+
+  /// When POST /auth/login returns 500 after a valid password, ask for email
+  /// and finish via Firebase id_token → POST /auth/login/verify (same project
+  /// as Google login: tidy-way-468114-n9).
+  bool _needsEmailForFirebaseLogin = false;
+  String? _pendingLoginPassword;
+
   // Getters
   UserModel? get currentUser => _currentUser;
   bool get isLoading => _isLoading;
@@ -56,8 +68,11 @@ class AuthProvider with ChangeNotifier {
   AuthGate get authGate => _authGate;
   String? get migrationPrefilledEmail => _sessionStore.migrationPrefilledEmail;
   bool get sessionExpired => _sessionExpired;
+  bool get needsEmailForFirebaseLogin => _needsEmailForFirebaseLogin;
   /// True when the backend could not normalize the phone number on registration.
   bool get phoneSyncWarning => _phoneSyncWarning;
+  /// Whether we know a password is already set (from prefs or a prior attempt).
+  bool? get hasPasswordSet => _hasPasswordSet;
   ApiClient get apiClient => _apiClient;
   String? get token => _apiClient.token;
 
@@ -92,6 +107,12 @@ class AuthProvider with ChangeNotifier {
   // Clear error
   void clearError() {
     _error = null;
+    notifyListeners();
+  }
+
+  void clearEmailForFirebaseLogin() {
+    _needsEmailForFirebaseLogin = false;
+    _pendingLoginPassword = null;
     notifyListeners();
   }
 
@@ -148,6 +169,7 @@ class AuthProvider with ChangeNotifier {
       _bindApiUser();
       _authGate = _sessionStore.authGate;
       await _hydrateContactsSyncedState(user.userId);
+      await _loadHasPasswordSet(user.userId);
 
       if (accessToken != null && accessToken.isNotEmpty) {
         _apiClient.setAuthToken(accessToken);
@@ -168,6 +190,7 @@ class AuthProvider with ChangeNotifier {
     _currentUser = null;
     _isAuthenticated = false;
     _contactsSynced = false;
+    _hasPasswordSet = null;
     _authGate = AuthGate.none;
     await _apiClient.clearAuthToken();
     await _sessionStore.clear();
@@ -255,6 +278,7 @@ class AuthProvider with ChangeNotifier {
     }
 
     await _hydrateContactsSyncedState(response.user.userId);
+    await _loadHasPasswordSet(response.user.userId);
     NotificationService.registerDeviceToken(response.user.userId);
     notifyListeners();
     return true;
@@ -312,6 +336,8 @@ class AuthProvider with ChangeNotifier {
     required String email,
     required String password,
     bool manageLoadingState = true,
+    /// True when Prism already accepted the password but /auth/login 500'd.
+    bool afterServerPasswordAccepted = false,
   }) async {
     try {
       if (manageLoadingState) {
@@ -333,7 +359,19 @@ class AuthProvider with ChangeNotifier {
       if (manageLoadingState) _setLoading(false);
       return true;
     } on FirebaseAuthException catch (e) {
-      _setError(_firebaseAuth.friendlyError(e));
+      if (afterServerPasswordAccepted &&
+          (e.code == 'wrong-password' ||
+              e.code == 'invalid-credential' ||
+              e.code == 'user-not-found')) {
+        // Backend password matched; Firebase has no matching email/password
+        // (typical for Google-only accounts on tidy-way).
+        _setError(
+          'This account isn\'t set up for email/password. '
+          'Use Continue with Google instead.',
+        );
+      } else {
+        _setError(_firebaseAuth.friendlyError(e));
+      }
       if (manageLoadingState) _setLoading(false);
       return false;
     } on ApiException catch (e) {
@@ -353,6 +391,10 @@ class AuthProvider with ChangeNotifier {
 
   /// Standard username/password login (`POST /auth/login`).
   /// Legacy users return [AuthResponse.needsMigration] without entering the app.
+  ///
+  /// If the server returns 500 after accepting the password (known backend
+  /// post-auth failure), falls back to Firebase Auth + `/auth/login/verify`
+  /// so identity is proven in project tidy-way-468114-n9 like Google login.
   Future<bool> login({
     required String identifier,
     required String password,
@@ -363,6 +405,7 @@ class AuthProvider with ChangeNotifier {
         _setLoading(true);
         _setError(null);
       }
+      clearEmailForFirebaseLogin();
 
       final response = await _apiClient.login(
         identifier: identifier,
@@ -388,6 +431,27 @@ class AuthProvider with ChangeNotifier {
       if (manageLoadingState) _setLoading(false);
       return ok;
     } on ApiException catch (e) {
+      if (e.statusCode == 500) {
+        print(
+          '[Login] POST /auth/login 500 after credential check — '
+          'falling back to Firebase id_token → /auth/login/verify',
+        );
+        final id = identifier.trim();
+        if (id.contains('@')) {
+          return loginWithFirebaseEmail(
+            email: id,
+            password: password,
+            manageLoadingState: manageLoadingState,
+            afterServerPasswordAccepted: true,
+          );
+        }
+        _pendingLoginPassword = password;
+        _needsEmailForFirebaseLogin = true;
+        _setError(null);
+        if (manageLoadingState) _setLoading(false);
+        return false;
+      }
+
       final message = e.statusCode == 401
           ? (e.message.toLowerCase().contains('session')
               ? 'Invalid username or password.'
@@ -401,6 +465,30 @@ class AuthProvider with ChangeNotifier {
       if (manageLoadingState) _setLoading(false);
       return false;
     }
+  }
+
+  /// Finish password login via Firebase after [needsEmailForFirebaseLogin].
+  Future<bool> completeLoginWithEmail({
+    required String email,
+    bool manageLoadingState = true,
+  }) async {
+    final password = _pendingLoginPassword;
+    if (password == null || password.isEmpty) {
+      _setError('Login session expired. Please enter your password again.');
+      clearEmailForFirebaseLogin();
+      return false;
+    }
+
+    final ok = await loginWithFirebaseEmail(
+      email: email.trim(),
+      password: password,
+      manageLoadingState: manageLoadingState,
+      afterServerPasswordAccepted: true,
+    );
+    if (ok) {
+      clearEmailForFirebaseLogin();
+    }
+    return ok;
   }
 
   Future<bool> migrateLegacyAccount({required String email}) async {
@@ -543,6 +631,75 @@ class AuthProvider with ChangeNotifier {
       return provider == 'google';
     }
     return _firebaseAuth.isGoogleLinked;
+  }
+
+  /// Show Settings "Set Password" for Google users who have not set one yet.
+  bool get canSetPassword => usesGoogleAuth && _hasPasswordSet != true;
+
+  String _hasPasswordPrefsKey(String userId) => 'has_password_set_$userId';
+
+  Future<void> _loadHasPasswordSet(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.containsKey(_hasPasswordPrefsKey(userId))) {
+      _hasPasswordSet = prefs.getBool(_hasPasswordPrefsKey(userId));
+    } else {
+      _hasPasswordSet = null;
+    }
+  }
+
+  Future<void> _persistHasPasswordSet(bool value) async {
+    _hasPasswordSet = value;
+    final userId = _currentUser?.userId;
+    if (userId == null || userId.isEmpty) {
+      notifyListeners();
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_hasPasswordPrefsKey(userId), value);
+    notifyListeners();
+  }
+
+  /// Set a password for Google-only users (`PATCH /auth/set-password`).
+  ///
+  /// "Already set" is detected via HTTP 400 (documented) **or** a matching
+  /// error body (backend currently returns 500 with the same message).
+  /// Both cases cache [hasPasswordSet] and return [SetPasswordResult.alreadySet].
+  ///
+  /// Does not toggle global [isLoading] so Settings / sheets stay interactive.
+  Future<SetPasswordResult> setPassword(String password) async {
+    try {
+      _setError(null);
+      debugPrint('[SetPassword] AuthProvider starting…');
+      await _apiClient.setPassword(password);
+      await _persistHasPasswordSet(true);
+      debugPrint('[SetPassword] AuthProvider success');
+      return SetPasswordResult.success;
+    } on ApiException catch (e) {
+      debugPrint(
+        '[SetPassword] AuthProvider ApiException '
+        'status=${e.statusCode} msg=${e.message}',
+      );
+      if (_isPasswordAlreadySetError(e)) {
+        await _persistHasPasswordSet(true);
+        _setError('Password already set');
+        return SetPasswordResult.alreadySet;
+      }
+      _setError(e.message);
+      return SetPasswordResult.failed;
+    } catch (e) {
+      debugPrint('[SetPassword] AuthProvider error: $e');
+      _setError(ErrorHandler.getErrorMessage(e));
+      return SetPasswordResult.failed;
+    }
+  }
+
+  /// Backend docs say 400; live API has also returned 500 with the same detail.
+  bool _isPasswordAlreadySetError(ApiException e) {
+    final msg = e.message.toLowerCase();
+    if (msg.contains('already set') || msg.contains('cannot overwrite')) {
+      return true;
+    }
+    return e.statusCode == 400;
   }
 
   void clearGoogleRegistrationRequired() {
@@ -936,6 +1093,7 @@ class AuthProvider with ChangeNotifier {
       _currentUser = null;
       _isAuthenticated = false;
       _contactsSynced = false;
+      _hasPasswordSet = null;
       _authGate = AuthGate.none;
       await _apiClient.clearAuthToken();
       notifyListeners();
@@ -950,6 +1108,7 @@ class AuthProvider with ChangeNotifier {
     _currentUser = null;
     _isAuthenticated = false;
     _contactsSynced = false;
+    _hasPasswordSet = null;
     _authGate = AuthGate.none;
     await _apiClient.clearAuthToken();
     await _sessionStore.clear();

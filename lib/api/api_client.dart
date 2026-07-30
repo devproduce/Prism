@@ -712,8 +712,11 @@ class ApiClient {
 
       if (response.statusCode >= 400) {
         // Release builds strip debugPrint — use print so 500 bodies are visible.
+        // Captured evidence (2026-07): status=500, content-type=text/plain,
+        // body="Internal Server Error" (password accepted, post-auth crash).
         print(
           '[Login] POST /auth/login status=${response.statusCode} '
+          'content-type=${response.headers['content-type']} '
           'body=${response.body}',
         );
       }
@@ -747,6 +750,37 @@ class ApiClient {
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Password verification failed: ${e.toString()}');
+    }
+  }
+
+  /// Set password for Google-only users (one-time).
+  /// PATCH /auth/set-password
+  /// Throws [ApiException] with statusCode 400 when password is already set.
+  Future<void> setPassword(String password) async {
+    try {
+      final uri =
+          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.setPassword}');
+      debugPrint('[SetPassword] PATCH $uri');
+      final response = await _patch(
+        uri,
+        body: json.encode({'password': password}),
+      ).timeout(
+        const Duration(seconds: 20),
+        onTimeout: () {
+          throw ApiException(
+            'Request timed out. Check your connection and try again.',
+            408,
+          );
+        },
+      );
+      debugPrint(
+        '[SetPassword] status=${response.statusCode} body=${response.body}',
+      );
+      _handleResponse(response);
+    } catch (e) {
+      debugPrint('[SetPassword] error: $e');
+      if (e is ApiException) rethrow;
+      throw ApiException('Failed to set password: ${e.toString()}');
     }
   }
 
@@ -845,6 +879,13 @@ class ApiClient {
       request.fields['id_token'] = idToken;
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+      if (response.statusCode >= 400) {
+        print(
+          '[Login] POST /auth/login/verify status=${response.statusCode} '
+          'content-type=${response.headers['content-type']} '
+          'body=${response.body}',
+        );
+      }
       final data = _handleResponse(response);
       if (kDebugMode && data is Map<String, dynamic>) {
         debugPrint('loginVerify response keys: ${data.keys.toList()}');

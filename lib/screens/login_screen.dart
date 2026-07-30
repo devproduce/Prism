@@ -27,6 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _emailController = TextEditingController();
   bool _obscurePassword = true;
   bool _isSubmitting = false;
   bool _googleSignInRequired = false;
@@ -35,6 +36,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _usernameController.dispose();
     _passwordController.dispose();
+    _emailController.dispose();
     super.dispose();
   }
 
@@ -44,18 +46,58 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    final authProvider = context.read<AuthProvider>();
+
+    // After POST /auth/login 500: collect account email and finish via Firebase.
+    if (authProvider.needsEmailForFirebaseLogin) {
+      if (!_formKey.currentState!.validate()) return;
+
+      HapticFeedback.lightImpact();
+      setState(() => _isSubmitting = true);
+      authProvider.clearError();
+
+      try {
+        final success = await authProvider.completeLoginWithEmail(
+          email: _emailController.text.trim(),
+          manageLoadingState: false,
+        );
+        if (!mounted) return;
+        if (success) {
+          HapticFeedback.mediumImpact();
+          navigateAfterAuthentication(context, authProvider);
+        } else if (authProvider.error != null &&
+            authProvider.error!.isNotEmpty) {
+          ErrorHandler.showErrorSnackbar(
+            context,
+            message: authProvider.error!,
+            onRetry: _handleLogin,
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ErrorHandler.showErrorSnackbar(
+            context,
+            message: ErrorHandler.getErrorMessage(e),
+            onRetry: _handleLogin,
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _isSubmitting = false);
+      }
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) return;
 
     HapticFeedback.lightImpact();
-    final authProvider = context.read<AuthProvider>();
     final password = _passwordController.text;
 
     setState(() => _isSubmitting = true);
     authProvider.clearError();
 
     try {
-      // Per updated guide: POST /auth/login with identifier + password.
-      // Legacy users get needs_migration → Secure Account (email) screen.
+      // Guide: POST /auth/login. On backend 500 post-auth, AuthProvider asks
+      // for email and continues via Firebase → /auth/login/verify.
       await _completeLogin(
         authProvider,
         legacyDirect: true,
@@ -108,6 +150,12 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    // Server 500 after valid password → collect email for Firebase path.
+    if (!success && authProvider.needsEmailForFirebaseLogin) {
+      setState(() {});
+      return;
+    }
+
     if (success) {
       HapticFeedback.mediumImpact();
       navigateAfterAuthentication(context, authProvider);
@@ -155,6 +203,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _resetGoogleSignIn() {
     setState(() => _googleSignInRequired = false);
+  }
+
+  void _resetEmailFallback() {
+    context.read<AuthProvider>().clearEmailForFirebaseLogin();
+    _emailController.clear();
+    setState(() {});
   }
 
   bool _isLoading(AuthProvider authProvider) {
@@ -283,7 +337,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     ],
                   ),
                   SizedBox(height: headerToFormSpacing),
-                  PrismCard(
+                  Consumer<AuthProvider>(
+                    builder: (context, authProvider, _) {
+                      final needsEmail = authProvider.needsEmailForFirebaseLogin;
+                      return PrismCard(
                     padding: cardPadding,
                     child: Form(
                       key: _formKey,
@@ -306,6 +363,56 @@ class _LoginScreenState extends State<LoginScreen> {
                               alignment: Alignment.centerLeft,
                               child: TextButton(
                                 onPressed: _isSubmitting ? null : _resetGoogleSignIn,
+                                child: Text(
+                                  'Use a different account',
+                                  style: PrismTextStyles.bodySmall.copyWith(
+                                    color: PrismColors.prismYellow,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ] else if (needsEmail) ...[
+                            Text(
+                              'Confirm your email',
+                              style: PrismTextStyles.bodyMedium,
+                            ),
+                            SizedBox(height: labelGap),
+                            Text(
+                              'Server login failed after your password was accepted. If you use Google for this account, tap Continue with Google below. Otherwise enter the email linked to ${_usernameController.text.trim()}.',
+                              style: PrismTextStyles.bodyMedium.copyWith(
+                                color: PrismColors.secondaryText,
+                              ),
+                            ),
+                            SizedBox(height: fieldGap),
+                            TextFormField(
+                              controller: _emailController,
+                              style: PrismTextStyles.bodyLarge,
+                              keyboardType: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.done,
+                              autocorrect: false,
+                              onFieldSubmitted: (_) => _handleLogin(),
+                              decoration: _prismInputDecoration(
+                                context,
+                                'Enter your email',
+                                Icons.email_outlined,
+                              ),
+                              validator: (value) {
+                                if (value == null || value.trim().isEmpty) {
+                                  return 'Please enter your email';
+                                }
+                                if (!value.contains('@') ||
+                                    !value.contains('.')) {
+                                  return 'Enter a valid email address';
+                                }
+                                return null;
+                              },
+                            ),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton(
+                                onPressed:
+                                    _isSubmitting ? null : _resetEmailFallback,
                                 child: Text(
                                   'Use a different account',
                                   style: PrismTextStyles.bodySmall.copyWith(
@@ -413,29 +520,37 @@ class _LoginScreenState extends State<LoginScreen> {
                             ).animate().fadeIn(delay: 500.ms),
                           ],
                           SizedBox(height: buttonGap),
-                          Consumer<AuthProvider>(
-                            builder: (context, authProvider, child) {
-                              return PrismButton(
-                                text: _googleSignInRequired
-                                    ? 'Continue with Google'
+                          PrismButton(
+                            text: _googleSignInRequired
+                                ? 'Continue with Google'
+                                : needsEmail
+                                    ? 'Continue'
                                     : 'Log In',
-                                isLoading: _isLoading(authProvider),
-                                onPressed: _isLoading(authProvider)
-                                    ? null
-                                    : _handleLogin,
-                                type: _googleSignInRequired
-                                    ? PrismButtonType.secondary
-                                    : PrismButtonType.primary,
-                                icon: _googleSignInRequired
-                                    ? Icons.g_mobiledata_rounded
-                                    : null,
-                              );
-                            },
+                            isLoading: _isLoading(authProvider),
+                            onPressed: _isLoading(authProvider)
+                                ? null
+                                : _handleLogin,
+                            type: _googleSignInRequired
+                                ? PrismButtonType.secondary
+                                : PrismButtonType.primary,
+                            icon: _googleSignInRequired
+                                ? Icons.g_mobiledata_rounded
+                                : null,
                           )
                               .animate()
                               .fadeIn(delay: 550.ms)
                               .moveY(begin: 10, end: 0),
-                          if (!_googleSignInRequired) ...[
+                          if (!_googleSignInRequired && needsEmail) ...[
+                            SizedBox(height: buttonGap),
+                            ContinueWithGoogleButton(
+                              text: 'Continue with Google',
+                              isLoading: _isLoading(authProvider),
+                              onPressed: _isLoading(authProvider)
+                                  ? null
+                                  : _handleGoogleLogin,
+                            ),
+                          ],
+                          if (!_googleSignInRequired && !needsEmail) ...[
                             SizedBox(height: buttonGap),
                             Row(
                               children: [
@@ -465,16 +580,12 @@ class _LoginScreenState extends State<LoginScreen> {
                               ],
                             ).animate().fadeIn(delay: 580.ms),
                             SizedBox(height: buttonGap),
-                            Consumer<AuthProvider>(
-                              builder: (context, authProvider, child) {
-                                return ContinueWithGoogleButton(
-                                  text: 'Continue with Google',
-                                  isLoading: _isLoading(authProvider),
-                                  onPressed: _isLoading(authProvider)
-                                      ? null
-                                      : _handleGoogleLogin,
-                                );
-                              },
+                            ContinueWithGoogleButton(
+                              text: 'Continue with Google',
+                              isLoading: _isLoading(authProvider),
+                              onPressed: _isLoading(authProvider)
+                                  ? null
+                                  : _handleGoogleLogin,
                             )
                                 .animate()
                                 .fadeIn(delay: 600.ms)
@@ -483,6 +594,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         ],
                       ),
                     ),
+                  );
+                    },
                   ),
                   SizedBox(height: formToFooterSpacing),
                   Wrap(
