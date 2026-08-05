@@ -122,11 +122,15 @@ class DevicePhoneResolver {
       if (number.isEmpty) continue;
 
       final parsed = PhoneParser.parse(number);
-      if (!PhoneParser.isValidLocalNumber(parsed.rawPhone)) continue;
+      final local = PhoneParser.normalizeLocalNumber(
+        parsed.countryCode,
+        parsed.rawPhone,
+      );
+      if (!PhoneParser.isValidLocalNumber(local)) continue;
 
       return ResolvedPhone(
         countryCode: parsed.countryCode,
-        rawPhone: parsed.rawPhone,
+        rawPhone: local,
         source: source,
         displayName: entry['displayName']?.toString(),
       );

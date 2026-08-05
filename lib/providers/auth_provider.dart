@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:prism/utils/constants.dart';
 import 'package:prism/utils/error_handler.dart';
 import 'package:prism/utils/auth_constants.dart';
+import 'package:prism/utils/phone_parser.dart';
 import 'package:prism/models/auth_gate.dart';
 import 'package:prism/models/resolve_username_result.dart';
 import 'package:provider/provider.dart';
@@ -69,8 +70,10 @@ class AuthProvider with ChangeNotifier {
   String? get migrationPrefilledEmail => _sessionStore.migrationPrefilledEmail;
   bool get sessionExpired => _sessionExpired;
   bool get needsEmailForFirebaseLogin => _needsEmailForFirebaseLogin;
+
   /// True when the backend could not normalize the phone number on registration.
   bool get phoneSyncWarning => _phoneSyncWarning;
+
   /// Whether we know a password is already set (from prefs or a prior attempt).
   bool? get hasPasswordSet => _hasPasswordSet;
   ApiClient get apiClient => _apiClient;
@@ -241,7 +244,8 @@ class AuthProvider with ChangeNotifier {
   Future<bool> _finalizeAuthenticatedSession(AuthResponse response) async {
     await _persistAuthTokensFromResponse(response);
 
-    if (AuthBackendCapabilities.firebaseAuthEnabled && !_hasJwtAvailable(response)) {
+    if (AuthBackendCapabilities.firebaseAuthEnabled &&
+        !_hasJwtAvailable(response)) {
       debugPrint(
         'Login failed: backend did not return an access token '
         '(apiClient.token=${_apiClient.token?.length ?? 0} chars)',
@@ -336,6 +340,7 @@ class AuthProvider with ChangeNotifier {
     required String email,
     required String password,
     bool manageLoadingState = true,
+
     /// True when Prism already accepted the password but /auth/login 500'd.
     bool afterServerPasswordAccepted = false,
   }) async {
@@ -390,11 +395,17 @@ class AuthProvider with ChangeNotifier {
   }
 
   /// Standard username/password login (`POST /auth/login`).
-  /// Legacy users return [AuthResponse.needsMigration] without entering the app.
+  ///
+  /// Response branching (see MOBILE_LOGIN_MIGRATION_FIX.md):
+  /// - `{ "email": "..." }` (no tokens) → Firebase password → `/auth/login/verify`
+  /// - `needs_migration` + token + **no** usable email → Secure Account
+  /// - `needs_migration` + token + email already present → Firebase first;
+  ///   only fall back to Secure Account if Firebase fails and backend says
+  ///   `has_firebase_account: false` (true legacy)
+  /// - tokens present → enter app
   ///
   /// If the server returns 500 after accepting the password (known backend
-  /// post-auth failure), falls back to Firebase Auth + `/auth/login/verify`
-  /// so identity is proven in project tidy-way-468114-n9 like Google login.
+  /// post-auth failure), falls back to Firebase Auth + `/auth/login/verify`.
   Future<bool> login({
     required String identifier,
     required String password,
@@ -412,17 +423,83 @@ class AuthProvider with ChangeNotifier {
         password: password,
       );
 
-      if (response.needsMigration == true) {
+      final knownEmail = response.user.email.trim();
+      final hasMigrationToken =
+          response.migrationToken != null &&
+          response.migrationToken!.isNotEmpty;
+
+      // If backend already gave us an email, never ask for it again on
+      // Secure Account — try Firebase password exchange first.
+      // Covers Google+set-password and migrated users (Response A), even when
+      // the backend also sets needs_migration by mistake.
+      if (knownEmail.contains('@') && !response.hasAccessToken) {
+        debugPrint(
+          '[Login] Known email on login response — Firebase exchange for '
+          '$knownEmail (needs_migration=${response.needsMigration}, '
+          'has_firebase=${response.hasFirebaseAccount})',
+        );
+        final firebaseOk = await loginWithFirebaseEmail(
+          email: knownEmail,
+          password: password,
+          manageLoadingState: manageLoadingState,
+          afterServerPasswordAccepted: true,
+        );
+        if (firebaseOk) return true;
+
+        // Firebase failed. Only open Secure Account for true legacy accounts
+        // that explicitly have no Firebase user yet.
+        final isExplicitLegacy =
+            response.needsMigration == true &&
+            hasMigrationToken &&
+            response.hasFirebaseAccount == false;
+        if (!isExplicitLegacy) {
+          // Keep the Firebase / "use Google" error; do not collect email again.
+          return false;
+        }
+        debugPrint(
+          '[Login] Firebase failed for explicit legacy user — Secure Account',
+        );
         await beginLegacyMigration(
           ResolveUsernameResult(
             needsMigration: true,
             migrationToken: response.migrationToken,
             hasFirebaseAccount: false,
-            prefilledEmail: response.user.email.isNotEmpty
-                ? response.user.email
-                : null,
+            prefilledEmail: knownEmail,
           ),
         );
+        if (manageLoadingState) _setLoading(false);
+        return false;
+      }
+
+      // No email in response — classic legacy must collect one.
+      if (response.isLegacyMigrationRequired) {
+        await beginLegacyMigration(
+          ResolveUsernameResult(
+            needsMigration: true,
+            migrationToken: response.migrationToken,
+            hasFirebaseAccount: response.hasFirebaseAccount ?? false,
+            prefilledEmail: null,
+          ),
+        );
+        if (manageLoadingState) _setLoading(false);
+        return false;
+      }
+
+      if (response.requiresFirebasePasswordExchange) {
+        debugPrint(
+          '[Login] Password accepted — exchanging via Firebase for '
+          '$knownEmail',
+        );
+        return loginWithFirebaseEmail(
+          email: knownEmail,
+          password: password,
+          manageLoadingState: manageLoadingState,
+          afterServerPasswordAccepted: true,
+        );
+      }
+
+      if (!response.hasAccessToken) {
+        _setError('Login failed. Please try again.');
         if (manageLoadingState) _setLoading(false);
         return false;
       }
@@ -454,8 +531,8 @@ class AuthProvider with ChangeNotifier {
 
       final message = e.statusCode == 401
           ? (e.message.toLowerCase().contains('session')
-              ? 'Invalid username or password.'
-              : e.message)
+                ? 'Invalid username or password.'
+                : e.message)
           : e.message;
       _setError(message);
       if (manageLoadingState) _setLoading(false);
@@ -510,10 +587,7 @@ class AuthProvider with ChangeNotifier {
       if (_currentUser != null) {
         await _sessionStore.setHasFirebaseAccount(_currentUser!.userId, true);
       } else {
-        await _sessionStore.setHasFirebaseAccount(
-          response.user.userId,
-          true,
-        );
+        await _sessionStore.setHasFirebaseAccount(response.user.userId, true);
       }
 
       await _sessionStore.setMigrationToken(null);
@@ -716,7 +790,8 @@ class AuthProvider with ChangeNotifier {
       _setLoading(true);
       _setError(null);
 
-      final idToken = _pendingGoogleIdToken ??
+      final idToken =
+          _pendingGoogleIdToken ??
           await _firebaseAuth.getIdToken(forceRefresh: true);
       final response = await _apiClient.googleRegister(
         idToken: idToken,
@@ -891,7 +966,6 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-
   /// Verify password for archive unlock.
   /// Returns true if password is valid
   Future<bool> verifyPassword(String password) async {
@@ -901,9 +975,7 @@ class AuthProvider with ChangeNotifier {
     }
 
     try {
-      final isValid = await _apiClient.verifyPassword(
-        password: password,
-      );
+      final isValid = await _apiClient.verifyPassword(password: password);
 
       if (isValid) {
         debugPrint('✓ Password verification successful');
@@ -960,8 +1032,9 @@ class AuthProvider with ChangeNotifier {
       _setLoading(true);
       _setError(null);
 
-      final firebaseToken =
-          await _reauthenticateForSensitiveAction(password: password);
+      final firebaseToken = await _reauthenticateForSensitiveAction(
+        password: password,
+      );
 
       await _apiClient.deleteAccount(
         firebaseToken: firebaseToken,
@@ -991,8 +1064,9 @@ class AuthProvider with ChangeNotifier {
       _setLoading(true);
       _setError(null);
 
-      final firebaseToken =
-          await _reauthenticateForSensitiveAction(password: password);
+      final firebaseToken = await _reauthenticateForSensitiveAction(
+        password: password,
+      );
       await _apiClient.cancelDeletion(firebaseToken: firebaseToken);
       await refreshUser();
     } on FirebaseAuthException catch (e) {
@@ -1036,7 +1110,7 @@ class AuthProvider with ChangeNotifier {
         await _databaseService.markContactsSynced();
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('contacts_synced_${_currentUser!.userId}', true);
-        
+
         _contactsSynced = true;
         notifyListeners();
       }
@@ -1060,8 +1134,9 @@ class AuthProvider with ChangeNotifier {
   Future<void> _hydrateContactsSyncedState(String userId) async {
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool('contacts_synced_$userId') ?? false) {
-      final storedOnBackend =
-          await _contactService.hasContactsStoredOnBackend(userId);
+      final storedOnBackend = await _contactService.hasContactsStoredOnBackend(
+        userId,
+      );
       if (storedOnBackend) {
         _contactsSynced = true;
         await _databaseService.markContactsSynced();
@@ -1070,8 +1145,9 @@ class AuthProvider with ChangeNotifier {
     }
 
     if (await _databaseService.hasContactsSynced()) {
-      final storedOnBackend =
-          await _contactService.hasContactsStoredOnBackend(userId);
+      final storedOnBackend = await _contactService.hasContactsStoredOnBackend(
+        userId,
+      );
       if (storedOnBackend) {
         _contactsSynced = true;
         await prefs.setBool('contacts_synced_$userId', true);
@@ -1153,10 +1229,7 @@ class AuthProvider with ChangeNotifier {
         debugPrint('⚠️ No backend token available for native access');
       }
 
-      await prefs.setString(
-        kPrefBaseUrl,
-        ApiConstants.baseUrl,
-      );
+      await prefs.setString(kPrefBaseUrl, ApiConstants.baseUrl);
 
       debugPrint(
         '✅ Saved credentials for native Android access (userId: ${_currentUser!.userId})',
@@ -1225,6 +1298,46 @@ class AuthProvider with ChangeNotifier {
     } catch (e) {
       _setError('Failed to update profile: ${e.toString()}');
       _setLoading(false);
+      return false;
+    }
+  }
+
+  /// Lightweight phone update for discovery sheets — does not toggle [isLoading].
+  Future<bool> updatePhoneNumber({
+    required String countryCode,
+    required String phoneNumber,
+  }) async {
+    if (_currentUser == null) {
+      _setError('No user logged in');
+      return false;
+    }
+
+    final code = countryCode.replaceAll('+', '').trim();
+    final phone = PhoneParser.normalizeLocalNumber(code, phoneNumber);
+    if (code.isEmpty || phone.isEmpty) {
+      _setError('Phone number is required');
+      return false;
+    }
+
+    try {
+      _setError(null);
+      final updatedUser = await _apiClient.updateProfile(
+        username: _currentUser!.username,
+        firstName: _currentUser!.firstName,
+        countryCode: code,
+        phoneNumber: phone,
+      );
+
+      _currentUser = updatedUser;
+      _phoneSyncWarning = false;
+      await _databaseService.updateUserSession(updatedUser);
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      return false;
+    } catch (e) {
+      _setError('Failed to update phone number: ${e.toString()}');
       return false;
     }
   }

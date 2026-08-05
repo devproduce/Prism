@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:prism/providers/auth_provider.dart';
 import 'package:prism/providers/friends_provider.dart';
 import 'package:prism/api/api_client.dart';
@@ -12,12 +13,16 @@ import 'package:prism/models/contact_sync_result.dart';
 import 'package:prism/screens/user_profile_screen.dart';
 import 'package:prism/screens/collection_detail_screen.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:prism/services/contact_service.dart';
+import 'package:prism/services/device_phone_resolver.dart';
 import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
+import 'package:prism/utils/phone_parser.dart';
 import 'package:prism/widgets/prism_card.dart';
 import 'package:prism/widgets/prism_button.dart';
 import 'package:prism/widgets/prism_text_field.dart';
 import 'package:prism/widgets/empty_state_widget.dart';
+import 'package:prism/widgets/phone_collection_sheet.dart';
 import 'package:prism/widgets/shimmer_placeholder.dart';
 import 'package:prism/utils/error_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -42,8 +47,33 @@ class FriendsScreen extends StatefulWidget {
 class _FriendsScreenState extends State<FriendsScreen> {
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _inviteSearchController = TextEditingController();
+  final ContactService _contactService = ContactService();
+  final DevicePhoneResolver _devicePhoneResolver = DevicePhoneResolver();
   String _inviteSearchQuery = '';
   Timer? _searchStatusRefreshTimer;
+  bool _phonePromptSkipped = false;
+  int _phonePromptDismissCount = 0;
+  bool _phonePromptSheetOpen = false;
+
+  static const int _maxPhoneBannerDismissals = 3;
+
+  String _phoneSkippedPrefsKey(String userId) => 'phone_prompt_skipped_$userId';
+
+  String _phoneDismissPrefsKey(String userId) =>
+      'phone_prompt_dismiss_count_$userId';
+
+  bool _isAccountPhoneMissing(String? phone) {
+    final digits = phone?.replaceAll(RegExp(r'[^\d]'), '') ?? '';
+    return digits.isEmpty;
+  }
+
+  bool _shouldShowPhoneBanner(AuthProvider authProvider) {
+    final user = authProvider.currentUser;
+    if (user == null) return false;
+    if (!_isAccountPhoneMissing(user.phoneNumber)) return false;
+    if (!_phonePromptSkipped) return false;
+    return _phonePromptDismissCount < _maxPhoneBannerDismissals;
+  }
 
   @override
   void initState() {
@@ -57,6 +87,11 @@ class _FriendsScreenState extends State<FriendsScreen> {
         listen: false,
       );
 
+      final userId = authProvider.currentUser?.userId;
+      if (userId != null) {
+        await _loadPhonePromptPrefs(userId);
+      }
+
       if (authProvider.currentUser != null &&
           await ApiClient().ensureAuthenticated()) {
         friendsProvider.refreshAll(authProvider.currentUser!.userId);
@@ -69,17 +104,102 @@ class _FriendsScreenState extends State<FriendsScreen> {
       }
 
       final initialQuery = widget.initialSearchQuery?.trim();
-      final userId = authProvider.currentUser?.userId;
+      final searchUserId = authProvider.currentUser?.userId;
       if (initialQuery != null &&
           initialQuery.isNotEmpty &&
-          userId != null &&
+          searchUserId != null &&
           await ApiClient().ensureAuthenticated()) {
         _searchController.text = initialQuery;
         setState(() {});
         _updateSearchStatusRefreshTimer(true);
-        friendsProvider.searchUsers(initialQuery, userId);
+        friendsProvider.searchUsers(initialQuery, searchUserId);
       }
     });
+  }
+
+  Future<void> _loadPhonePromptPrefs(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _phonePromptSkipped =
+          prefs.getBool(_phoneSkippedPrefsKey(userId)) ?? false;
+      _phonePromptDismissCount =
+          prefs.getInt(_phoneDismissPrefsKey(userId)) ?? 0;
+    });
+  }
+
+  Future<void> _markPhonePromptSkipped(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_phoneSkippedPrefsKey(userId), true);
+    if (!mounted) return;
+    setState(() => _phonePromptSkipped = true);
+  }
+
+  Future<void> _clearPhonePromptPrefs(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_phoneSkippedPrefsKey(userId));
+    await prefs.remove(_phoneDismissPrefsKey(userId));
+    if (!mounted) return;
+    setState(() {
+      _phonePromptSkipped = false;
+      _phonePromptDismissCount = 0;
+    });
+  }
+
+  Future<void> _dismissPhoneBanner(String userId) async {
+    final next = _phonePromptDismissCount + 1;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_phoneDismissPrefsKey(userId), next);
+    if (!mounted) return;
+    setState(() => _phonePromptDismissCount = next);
+  }
+
+  Future<void> _handleContactsPermissionDenied() async {
+    final status = await Permission.contacts.status;
+    if (!mounted) return;
+    if (status.isPermanentlyDenied) {
+      final openSettings = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: PrismColors.surfaceGray,
+          title: Text('Contacts permission', style: PrismTextStyles.h3),
+          content: Text(
+            'Prism needs access to your contacts to find friends. '
+            'Enable Contacts permission in Settings.',
+            style: PrismTextStyles.bodyMedium,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(
+                'Cancel',
+                style: PrismTextStyles.button.copyWith(
+                  color: PrismColors.secondaryText,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(
+                'Open Settings',
+                style: PrismTextStyles.button.copyWith(
+                  color: PrismColors.prismYellow,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+      if (openSettings == true) {
+        await openAppSettings();
+      }
+    } else {
+      ErrorHandler.showErrorSnackbar(
+        context,
+        message:
+            'Contacts permission is required. Tap Sync Contacts again to allow access.',
+      );
+    }
   }
 
   @override
@@ -114,25 +234,85 @@ class _FriendsScreenState extends State<FriendsScreen> {
     });
   }
 
+  /// Collects a missing account phone (confirm/enter), then runs contact sync.
   Future<void> _syncContacts(
     FriendsProvider friendsProvider,
     AuthProvider authProvider,
   ) async {
+    if (_phonePromptSheetOpen || friendsProvider.isSyncingContacts) return;
+
     final userId = authProvider.currentUser?.userId;
     if (userId == null) return;
 
     HapticFeedback.mediumImpact();
-    final user = authProvider.currentUser;
-    final ownerName = user != null
-        ? '${user.firstName} ${user.lastName ?? ''}'.trim()
-        : '';
 
+    final hasPermission = await _contactService.requestContactsPermission();
+    if (!mounted) return;
+    if (!hasPermission) {
+      await _handleContactsPermissionDenied();
+      return;
+    }
+
+    var user = authProvider.currentUser;
+    if (user == null) return;
+
+    if (_isAccountPhoneMissing(user.phoneNumber)) {
+      final ownerName = '${user.firstName} ${user.lastName ?? ''}'.trim();
+      var resolved = await _devicePhoneResolver.resolve(
+        accountDisplayName: ownerName.isNotEmpty ? ownerName : user.username,
+      );
+      if (resolved != null &&
+          !PhoneParser.isValidLocalNumber(resolved.rawPhone)) {
+        resolved = null;
+      }
+
+      if (!mounted) return;
+      _phonePromptSheetOpen = true;
+      final result = await showPhoneCollectionSheet(
+        context: context,
+        initialMode: resolved != null
+            ? PhoneCollectionMode.confirm
+            : PhoneCollectionMode.enter,
+        initialCountryCode:
+            resolved?.countryCode ??
+            user.countryCode ??
+            PhoneParser.defaultCountryCode,
+        initialPhoneNumber: resolved?.rawPhone,
+        allowSkip: true,
+      );
+      _phonePromptSheetOpen = false;
+      if (!mounted) return;
+
+      if (result == null ||
+          result.type == PhoneCollectionResultType.skipped) {
+        await _markPhonePromptSkipped(userId);
+      } else if (result.didProvidePhone) {
+        final ok = await authProvider.updatePhoneNumber(
+          countryCode: result.countryCode!,
+          phoneNumber: result.phoneNumber!,
+        );
+        if (!mounted) return;
+        if (!ok) {
+          ErrorHandler.showErrorSnackbar(
+            context,
+            message: authProvider.error ??
+                'Could not save phone number. Please try again.',
+          );
+          return;
+        }
+        await _clearPhonePromptPrefs(userId);
+        user = authProvider.currentUser;
+      }
+    }
+
+    if (!mounted || user == null) return;
+
+    final ownerName = '${user.firstName} ${user.lastName ?? ''}'.trim();
     final outcome = await friendsProvider.syncAndGetRecommendations(
       userId,
-      accountCountryCode: user?.countryCode,
-      accountPhone: user?.phoneNumber,
-      accountDisplayName:
-          ownerName.isNotEmpty ? ownerName : user?.username,
+      accountCountryCode: user.countryCode,
+      accountPhone: user.phoneNumber,
+      accountDisplayName: ownerName.isNotEmpty ? ownerName : user.username,
     );
 
     if (!mounted) return;
@@ -147,51 +327,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
     switch (outcome.issue) {
       case ContactSyncIssue.permissionDenied:
-        final status = await Permission.contacts.status;
-        if (!mounted) return;
-        if (status.isPermanentlyDenied) {
-          final openSettings = await showDialog<bool>(
-            context: context,
-            builder: (context) => AlertDialog(
-              backgroundColor: PrismColors.surfaceGray,
-              title: Text('Contacts permission', style: PrismTextStyles.h3),
-              content: Text(
-                'Prism needs access to your contacts to find friends. '
-                'Enable Contacts permission in Settings.',
-                style: PrismTextStyles.bodyMedium,
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: Text(
-                    'Cancel',
-                    style: PrismTextStyles.button.copyWith(
-                      color: PrismColors.secondaryText,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: Text(
-                    'Open Settings',
-                    style: PrismTextStyles.button.copyWith(
-                      color: PrismColors.prismYellow,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-          if (openSettings == true) {
-            await openAppSettings();
-          }
-        } else {
-          ErrorHandler.showErrorSnackbar(
-            context,
-            message:
-                'Contacts permission is required. Tap Sync Contacts again to allow access.',
-          );
-        }
+        await _handleContactsPermissionDenied();
       case ContactSyncIssue.noContacts:
         ErrorHandler.showErrorSnackbar(
           context,
@@ -205,6 +341,56 @@ class _FriendsScreenState extends State<FriendsScreen> {
               'Could not upload contacts. Please try again.',
         );
     }
+  }
+
+  /// Banner CTA: collect phone only, then sync if saved.
+  Future<void> _collectPhoneFromBanner(
+    FriendsProvider friendsProvider,
+    AuthProvider authProvider,
+  ) async {
+    if (_phonePromptSheetOpen || friendsProvider.isSyncingContacts) return;
+    final user = authProvider.currentUser;
+    if (user == null) return;
+
+    _phonePromptSheetOpen = true;
+    final result = await showPhoneCollectionSheet(
+      context: context,
+      initialMode: PhoneCollectionMode.enter,
+      initialCountryCode:
+          user.countryCode ?? PhoneParser.defaultCountryCode,
+      initialPhoneNumber: user.phoneNumber,
+      allowSkip: true,
+      title: 'Add your phone number',
+      subtitle: 'Add your number so friends can find you on Prism.',
+      primaryLabel: 'Save and continue',
+    );
+    _phonePromptSheetOpen = false;
+    if (!mounted) return;
+
+    if (result == null || result.type == PhoneCollectionResultType.skipped) {
+      await _markPhonePromptSkipped(user.userId);
+      return;
+    }
+
+    if (!result.didProvidePhone) return;
+
+    final ok = await authProvider.updatePhoneNumber(
+      countryCode: result.countryCode!,
+      phoneNumber: result.phoneNumber!,
+    );
+    if (!mounted) return;
+    if (!ok) {
+      ErrorHandler.showErrorSnackbar(
+        context,
+        message: authProvider.error ??
+            'Could not save phone number. Please try again.',
+      );
+      return;
+    }
+
+    await _clearPhonePromptPrefs(user.userId);
+    if (!mounted) return;
+    await _syncContacts(friendsProvider, authProvider);
   }
 
   @override
@@ -387,11 +573,20 @@ class _FriendsScreenState extends State<FriendsScreen> {
                         ),
                         // ── Friends list ─────────────────────────────────────
                         _buildFriendsSliver(friendsProvider, authProvider),
-                        // ── Sync prompt (only when backend has no contacts) ──
+                        // ── Phone banner + sync prompt ───────────────────────
                         SliverToBoxAdapter(
-                          child: _buildSyncPromptBelowFriends(
-                            friendsProvider,
-                            authProvider,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _buildPhoneReminderBanner(
+                                friendsProvider,
+                                authProvider,
+                              ),
+                              _buildSyncPromptBelowFriends(
+                                friendsProvider,
+                                authProvider,
+                              ),
+                            ],
                           ),
                         ),
                         // ── Invite to Prism header + search ──────────────────
@@ -509,9 +704,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
     if (provider.friends.isEmpty) {
       return SliverToBoxAdapter(
         child: EmptyStateWidget.noFriends(
-          onFindFriends: () {
-            // No action needed as search is available above
-          },
+          onFindFriends: () => _syncContacts(provider, authProvider),
         ),
       );
     }
@@ -1105,6 +1298,74 @@ class _FriendsScreenState extends State<FriendsScreen> {
               )
               .toList(),
           addRepaintBoundaries: true,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPhoneReminderBanner(
+    FriendsProvider provider,
+    AuthProvider authProvider,
+  ) {
+    if (!_shouldShowPhoneBanner(authProvider)) {
+      return const SizedBox.shrink();
+    }
+
+    final userId = authProvider.currentUser?.userId;
+    if (userId == null) return const SizedBox.shrink();
+
+    final side = _discoverSidePadding(context);
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(side, 16, side, 0),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: _discoverContentWidth(context)),
+          child: Material(
+            color: PrismColors.darkCard,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.phone_iphone_rounded,
+                    color: PrismColors.prismYellow,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Add your number so friends can find you',
+                      style: PrismTextStyles.bodySmall.copyWith(
+                        color: PrismColors.white,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: provider.isSyncingContacts
+                        ? null
+                        : () => _collectPhoneFromBanner(provider, authProvider),
+                    child: Text(
+                      'Add',
+                      style: PrismTextStyles.button.copyWith(
+                        color: PrismColors.prismYellow,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Dismiss',
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      size: 18,
+                      color: PrismColors.secondaryText,
+                    ),
+                    onPressed: () => _dismissPhoneBanner(userId),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

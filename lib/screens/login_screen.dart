@@ -339,262 +339,274 @@ class _LoginScreenState extends State<LoginScreen> {
                   SizedBox(height: headerToFormSpacing),
                   Consumer<AuthProvider>(
                     builder: (context, authProvider, _) {
-                      final needsEmail = authProvider.needsEmailForFirebaseLogin;
+                      final needsEmail =
+                          authProvider.needsEmailForFirebaseLogin;
                       return PrismCard(
-                    padding: cardPadding,
-                    child: Form(
-                      key: _formKey,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (_googleSignInRequired) ...[
-                            Text(
-                              'Signing in as ${_usernameController.text.trim()}',
-                              style: PrismTextStyles.bodyMedium,
-                            ),
-                            SizedBox(height: labelGap),
-                            Text(
-                              'This account uses Google Sign-In.',
-                              style: PrismTextStyles.bodyMedium.copyWith(
-                                color: PrismColors.secondaryText,
-                              ),
-                            ),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: TextButton(
-                                onPressed: _isSubmitting ? null : _resetGoogleSignIn,
-                                child: Text(
-                                  'Use a different account',
-                                  style: PrismTextStyles.bodySmall.copyWith(
-                                    color: PrismColors.prismYellow,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                        padding: cardPadding,
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (_googleSignInRequired) ...[
+                                Text(
+                                  'Signing in as ${_usernameController.text.trim()}',
+                                  style: PrismTextStyles.bodyMedium,
                                 ),
-                              ),
-                            ),
-                          ] else if (needsEmail) ...[
-                            Text(
-                              'Confirm your email',
-                              style: PrismTextStyles.bodyMedium,
-                            ),
-                            SizedBox(height: labelGap),
-                            Text(
-                              'Server login failed after your password was accepted. If you use Google for this account, tap Continue with Google below. Otherwise enter the email linked to ${_usernameController.text.trim()}.',
-                              style: PrismTextStyles.bodyMedium.copyWith(
-                                color: PrismColors.secondaryText,
-                              ),
-                            ),
-                            SizedBox(height: fieldGap),
-                            TextFormField(
-                              controller: _emailController,
-                              style: PrismTextStyles.bodyLarge,
-                              keyboardType: TextInputType.emailAddress,
-                              textInputAction: TextInputAction.done,
-                              autocorrect: false,
-                              onFieldSubmitted: (_) => _handleLogin(),
-                              decoration: _prismInputDecoration(
-                                context,
-                                'Enter your email',
-                                Icons.email_outlined,
-                              ),
-                              validator: (value) {
-                                if (value == null || value.trim().isEmpty) {
-                                  return 'Please enter your email';
-                                }
-                                if (!value.contains('@') ||
-                                    !value.contains('.')) {
-                                  return 'Enter a valid email address';
-                                }
-                                return null;
-                              },
-                            ),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: TextButton(
-                                onPressed:
-                                    _isSubmitting ? null : _resetEmailFallback,
-                                child: Text(
-                                  'Use a different account',
-                                  style: PrismTextStyles.bodySmall.copyWith(
-                                    color: PrismColors.prismYellow,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ] else ...[
-                            Text(
-                              'Username',
-                              style: PrismTextStyles.bodyMedium,
-                            ).animate().fadeIn(delay: 300.ms),
-                            SizedBox(height: labelGap),
-                            TextFormField(
-                              controller: _usernameController,
-                              style: PrismTextStyles.bodyLarge,
-                              textInputAction: TextInputAction.next,
-                              autocorrect: false,
-                              decoration: _prismInputDecoration(
-                                context,
-                                'Enter your username',
-                                Icons.person_outline_rounded,
-                              ),
-                              validator: (value) {
-                                if (value == null || value.trim().isEmpty) {
-                                  return 'Please enter your username';
-                                }
-                                if (value.trim().length < 3) {
-                                  return 'Must be at least 3 characters';
-                                }
-                                return null;
-                              },
-                            ).animate().fadeIn(delay: 350.ms),
-                            SizedBox(height: fieldGap),
-                            Text(
-                              'Password',
-                              style: PrismTextStyles.bodyMedium,
-                            ).animate().fadeIn(delay: 400.ms),
-                            SizedBox(height: labelGap),
-                            TextFormField(
-                              controller: _passwordController,
-                              obscureText: _obscurePassword,
-                              style: PrismTextStyles.bodyLarge,
-                              textInputAction: TextInputAction.done,
-                              onFieldSubmitted: (_) => _handleLogin(),
-                              decoration: _prismInputDecoration(
-                                context,
-                                'Enter your password',
-                                Icons.lock_outline_rounded,
-                              ).copyWith(
-                                suffixIcon: IconButton(
-                                  icon: Icon(
-                                    _obscurePassword
-                                        ? Icons.visibility_off_rounded
-                                        : Icons.visibility_rounded,
+                                SizedBox(height: labelGap),
+                                Text(
+                                  'This account uses Google Sign-In.',
+                                  style: PrismTextStyles.bodyMedium.copyWith(
                                     color: PrismColors.secondaryText,
                                   ),
-                                  onPressed: () {
-                                    HapticFeedback.selectionClick();
-                                    setState(() {
-                                      _obscurePassword = !_obscurePassword;
-                                    });
+                                ),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: TextButton(
+                                    onPressed: _isSubmitting
+                                        ? null
+                                        : _resetGoogleSignIn,
+                                    child: Text(
+                                      'Use a different account',
+                                      style: PrismTextStyles.bodySmall.copyWith(
+                                        color: PrismColors.prismYellow,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ] else if (needsEmail) ...[
+                                Text(
+                                  'Confirm your email',
+                                  style: PrismTextStyles.bodyMedium,
+                                ),
+                                SizedBox(height: labelGap),
+                                Text(
+                                  'Server login failed after your password was accepted. If you use Google for this account, tap Continue with Google below. Otherwise enter the email linked to ${_usernameController.text.trim()}.',
+                                  style: PrismTextStyles.bodyMedium.copyWith(
+                                    color: PrismColors.secondaryText,
+                                  ),
+                                ),
+                                SizedBox(height: fieldGap),
+                                TextFormField(
+                                  controller: _emailController,
+                                  style: PrismTextStyles.bodyLarge,
+                                  keyboardType: TextInputType.emailAddress,
+                                  textInputAction: TextInputAction.done,
+                                  autocorrect: false,
+                                  onFieldSubmitted: (_) => _handleLogin(),
+                                  decoration: _prismInputDecoration(
+                                    context,
+                                    'Enter your email',
+                                    Icons.email_outlined,
+                                  ),
+                                  validator: (value) {
+                                    if (value == null || value.trim().isEmpty) {
+                                      return 'Please enter your email';
+                                    }
+                                    if (!value.contains('@') ||
+                                        !value.contains('.')) {
+                                      return 'Enter a valid email address';
+                                    }
+                                    return null;
                                   },
                                 ),
-                              ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Please enter your password';
-                                }
-                                if (value.length < 6) {
-                                  return 'Password must be at least 6 characters';
-                                }
-                                return null;
-                              },
-                            ).animate().fadeIn(delay: 450.ms),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton(
-                                onPressed: () {
-                                  HapticFeedback.selectionClick();
-                                  Navigator.push(
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: TextButton(
+                                    onPressed: _isSubmitting
+                                        ? null
+                                        : _resetEmailFallback,
+                                    child: Text(
+                                      'Use a different account',
+                                      style: PrismTextStyles.bodySmall.copyWith(
+                                        color: PrismColors.prismYellow,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ] else ...[
+                                Text(
+                                  'Username',
+                                  style: PrismTextStyles.bodyMedium,
+                                ).animate().fadeIn(delay: 300.ms),
+                                SizedBox(height: labelGap),
+                                TextFormField(
+                                  controller: _usernameController,
+                                  style: PrismTextStyles.bodyLarge,
+                                  textInputAction: TextInputAction.next,
+                                  autocorrect: false,
+                                  decoration: _prismInputDecoration(
                                     context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          const ForgotPasswordScreen(),
+                                    'Enter your username',
+                                    Icons.person_outline_rounded,
+                                  ),
+                                  validator: (value) {
+                                    if (value == null || value.trim().isEmpty) {
+                                      return 'Please enter your username';
+                                    }
+                                    if (value.trim().length < 3) {
+                                      return 'Must be at least 3 characters';
+                                    }
+                                    return null;
+                                  },
+                                ).animate().fadeIn(delay: 350.ms),
+                                SizedBox(height: fieldGap),
+                                Text(
+                                  'Password',
+                                  style: PrismTextStyles.bodyMedium,
+                                ).animate().fadeIn(delay: 400.ms),
+                                SizedBox(height: labelGap),
+                                TextFormField(
+                                  controller: _passwordController,
+                                  obscureText: _obscurePassword,
+                                  style: PrismTextStyles.bodyLarge,
+                                  textInputAction: TextInputAction.done,
+                                  onFieldSubmitted: (_) => _handleLogin(),
+                                  decoration:
+                                      _prismInputDecoration(
+                                        context,
+                                        'Enter your password',
+                                        Icons.lock_outline_rounded,
+                                      ).copyWith(
+                                        suffixIcon: IconButton(
+                                          icon: Icon(
+                                            _obscurePassword
+                                                ? Icons.visibility_off_rounded
+                                                : Icons.visibility_rounded,
+                                            color: PrismColors.secondaryText,
+                                          ),
+                                          onPressed: () {
+                                            HapticFeedback.selectionClick();
+                                            setState(() {
+                                              _obscurePassword =
+                                                  !_obscurePassword;
+                                            });
+                                          },
+                                        ),
+                                      ),
+                                  validator: (value) {
+                                    if (value == null || value.isEmpty) {
+                                      return 'Please enter your password';
+                                    }
+                                    if (value.length < 6) {
+                                      return 'Password must be at least 6 characters';
+                                    }
+                                    return null;
+                                  },
+                                ).animate().fadeIn(delay: 450.ms),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton(
+                                    onPressed: () {
+                                      HapticFeedback.selectionClick();
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              const ForgotPasswordScreen(),
+                                        ),
+                                      );
+                                    },
+                                    style: TextButton.styleFrom(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      visualDensity: VisualDensity.compact,
                                     ),
-                                  );
-                                },
-                                style: TextButton.styleFrom(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  minimumSize: Size.zero,
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                child: Text(
-                                  'Forgot Password?',
-                                  style: PrismTextStyles.bodySmall.copyWith(
-                                    color: PrismColors.prismYellow,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ).animate().fadeIn(delay: 500.ms),
-                          ],
-                          SizedBox(height: buttonGap),
-                          PrismButton(
-                            text: _googleSignInRequired
-                                ? 'Continue with Google'
-                                : needsEmail
-                                    ? 'Continue'
-                                    : 'Log In',
-                            isLoading: _isLoading(authProvider),
-                            onPressed: _isLoading(authProvider)
-                                ? null
-                                : _handleLogin,
-                            type: _googleSignInRequired
-                                ? PrismButtonType.secondary
-                                : PrismButtonType.primary,
-                            icon: _googleSignInRequired
-                                ? Icons.g_mobiledata_rounded
-                                : null,
-                          )
-                              .animate()
-                              .fadeIn(delay: 550.ms)
-                              .moveY(begin: 10, end: 0),
-                          if (!_googleSignInRequired && needsEmail) ...[
-                            SizedBox(height: buttonGap),
-                            ContinueWithGoogleButton(
-                              text: 'Continue with Google',
-                              isLoading: _isLoading(authProvider),
-                              onPressed: _isLoading(authProvider)
-                                  ? null
-                                  : _handleGoogleLogin,
-                            ),
-                          ],
-                          if (!_googleSignInRequired && !needsEmail) ...[
-                            SizedBox(height: buttonGap),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Divider(
-                                    color: PrismColors.white
-                                        .withValues(alpha: 0.15),
-                                  ),
-                                ),
-                                Padding(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: screenWidth < 360 ? 10.0 : 14.0,
-                                  ),
-                                  child: Text(
-                                    'or',
-                                    style: PrismTextStyles.bodySmall.copyWith(
-                                      color: PrismColors.secondaryText,
+                                    child: Text(
+                                      'Forgot Password?',
+                                      style: PrismTextStyles.bodySmall.copyWith(
+                                        color: PrismColors.prismYellow,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                Expanded(
-                                  child: Divider(
-                                    color: PrismColors.white
-                                        .withValues(alpha: 0.15),
-                                  ),
+                                ).animate().fadeIn(delay: 500.ms),
+                              ],
+                              SizedBox(height: buttonGap),
+                              PrismButton(
+                                    text: _googleSignInRequired
+                                        ? 'Continue with Google'
+                                        : needsEmail
+                                        ? 'Continue'
+                                        : 'Log In',
+                                    isLoading: _isLoading(authProvider),
+                                    onPressed: _isLoading(authProvider)
+                                        ? null
+                                        : _handleLogin,
+                                    type: _googleSignInRequired
+                                        ? PrismButtonType.secondary
+                                        : PrismButtonType.primary,
+                                    icon: _googleSignInRequired
+                                        ? Icons.g_mobiledata_rounded
+                                        : null,
+                                  )
+                                  .animate()
+                                  .fadeIn(delay: 550.ms)
+                                  .moveY(begin: 10, end: 0),
+                              if (!_googleSignInRequired && needsEmail) ...[
+                                SizedBox(height: buttonGap),
+                                ContinueWithGoogleButton(
+                                  text: 'Continue with Google',
+                                  isLoading: _isLoading(authProvider),
+                                  onPressed: _isLoading(authProvider)
+                                      ? null
+                                      : _handleGoogleLogin,
                                 ),
                               ],
-                            ).animate().fadeIn(delay: 580.ms),
-                            SizedBox(height: buttonGap),
-                            ContinueWithGoogleButton(
-                              text: 'Continue with Google',
-                              isLoading: _isLoading(authProvider),
-                              onPressed: _isLoading(authProvider)
-                                  ? null
-                                  : _handleGoogleLogin,
-                            )
-                                .animate()
-                                .fadeIn(delay: 600.ms)
-                                .moveY(begin: 10, end: 0),
-                          ],
-                        ],
-                      ),
-                    ),
-                  );
+                              if (!_googleSignInRequired && !needsEmail) ...[
+                                SizedBox(height: buttonGap),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Divider(
+                                        color: PrismColors.white.withValues(
+                                          alpha: 0.15,
+                                        ),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: EdgeInsets.symmetric(
+                                        horizontal: screenWidth < 360
+                                            ? 10.0
+                                            : 14.0,
+                                      ),
+                                      child: Text(
+                                        'or',
+                                        style: PrismTextStyles.bodySmall
+                                            .copyWith(
+                                              color: PrismColors.secondaryText,
+                                            ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Divider(
+                                        color: PrismColors.white.withValues(
+                                          alpha: 0.15,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ).animate().fadeIn(delay: 580.ms),
+                                SizedBox(height: buttonGap),
+                                ContinueWithGoogleButton(
+                                      text: 'Continue with Google',
+                                      isLoading: _isLoading(authProvider),
+                                      onPressed: _isLoading(authProvider)
+                                          ? null
+                                          : _handleGoogleLogin,
+                                    )
+                                    .animate()
+                                    .fadeIn(delay: 600.ms)
+                                    .moveY(begin: 10, end: 0),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
                     },
                   ),
                   SizedBox(height: formToFooterSpacing),

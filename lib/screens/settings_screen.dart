@@ -7,6 +7,7 @@ import 'package:prism/theme/colors.dart';
 import 'package:prism/theme/text_styles.dart';
 import 'package:prism/widgets/prism_card.dart';
 import 'package:prism/widgets/prism_button.dart';
+import 'package:prism/widgets/phone_collection_sheet.dart';
 import 'package:prism/utils/error_handler.dart';
 import 'package:prism/screens/keep_users_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -760,158 +761,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showPhoneEditSheet(BuildContext context, AuthProvider authProvider) {
-    final codeCtrl = TextEditingController(
-      text: authProvider.currentUser?.countryCode ?? '91',
-    );
-    final phoneCtrl = TextEditingController(
-      text: authProvider.currentUser?.phoneNumber ?? '',
-    );
-    final formKey = GlobalKey<FormState>();
-
-    showModalBottomSheet(
+  Future<void> _showPhoneEditSheet(
+    BuildContext context,
+    AuthProvider authProvider,
+  ) async {
+    final result = await showPhoneCollectionSheet(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: PrismColors.darkCard,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          left: 24,
-          right: 24,
-          top: 24,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+      initialMode: PhoneCollectionMode.enter,
+      initialCountryCode: authProvider.currentUser?.countryCode,
+      initialPhoneNumber: authProvider.currentUser?.phoneNumber,
+      allowSkip: false,
+      title: 'Update Phone Number',
+      subtitle: 'Used for contact-based friend discovery.',
+      primaryLabel: 'Save',
+    );
+
+    if (result == null || !result.didProvidePhone) return;
+    if (!context.mounted) return;
+
+    final ok = await authProvider.updatePhoneNumber(
+      countryCode: result.countryCode!,
+      phoneNumber: result.phoneNumber!,
+    );
+    if (!context.mounted) return;
+
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Phone number updated!'),
+          backgroundColor: PrismColors.successGreen,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 3),
         ),
-        child: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Update Phone Number', style: PrismTextStyles.h3),
-              const SizedBox(height: 4),
-              Text(
-                'Used for contact-based friend discovery.',
-                style: PrismTextStyles.bodySmall.copyWith(
-                  color: PrismColors.secondaryText,
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    width: 90,
-                    child: TextFormField(
-                      controller: codeCtrl,
-                      keyboardType: TextInputType.number,
-                      style: PrismTextStyles.bodyLarge,
-                      decoration: InputDecoration(
-                        labelText: 'Code',
-                        labelStyle: const TextStyle(color: Colors.white54),
-                        filled: true,
-                        fillColor: Colors.white.withOpacity(0.05),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(
-                            color: Colors.white.withOpacity(0.1),
-                          ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(
-                            color: Colors.white.withOpacity(0.1),
-                          ),
-                        ),
-                      ),
-                      validator: (v) {
-                        if (v == null || v.isEmpty) return 'Required';
-                        if (int.tryParse(v.replaceAll('+', '')) == null) {
-                          return 'Digits';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: phoneCtrl,
-                      keyboardType: TextInputType.phone,
-                      style: PrismTextStyles.bodyLarge,
-                      decoration: InputDecoration(
-                        labelText: 'Phone Number',
-                        labelStyle: const TextStyle(color: Colors.white54),
-                        filled: true,
-                        fillColor: Colors.white.withOpacity(0.05),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(
-                            color: Colors.white.withOpacity(0.1),
-                          ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(
-                            color: Colors.white.withOpacity(0.1),
-                          ),
-                        ),
-                      ),
-                      validator: (v) {
-                        if (v == null || v.isEmpty) return 'Required';
-                        final digits = v.replaceAll(RegExp(r'[^\d]'), '');
-                        if (digits.length < 7) return 'Too short';
-                        return null;
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () async {
-                    if (!formKey.currentState!.validate()) return;
-                    Navigator.pop(ctx);
-                    await authProvider.updateProfile(
-                      username: authProvider.currentUser!.username,
-                      firstName: authProvider.currentUser!.firstName,
-                      countryCode: codeCtrl.text.replaceAll('+', '').trim(),
-                      phoneNumber: phoneCtrl.text
-                          .replaceAll(RegExp(r'[^\d]'), ''),
-                    );
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Phone number updated!'),
-                          backgroundColor: PrismColors.successGreen,
-                          behavior: SnackBarBehavior.floating,
-                          duration: Duration(seconds: 3),
-                        ),
-                      );
-                    }
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: PrismColors.prismYellow,
-                    foregroundColor: PrismColors.black,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: Text('Save', style: PrismTextStyles.bodyLarge),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ).whenComplete(() {
-      codeCtrl.dispose();
-      phoneCtrl.dispose();
-    });
+      );
+    } else if (authProvider.error != null && authProvider.error!.isNotEmpty) {
+      ErrorHandler.showErrorSnackbar(context, message: authProvider.error!);
+    }
   }
 
   Widget _buildSectionHeader(String title) {

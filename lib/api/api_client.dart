@@ -173,7 +173,8 @@ class ApiClient {
 
   void _handle403EmailGate(http.Response response) {
     final message = _extractErrorMessage(response.body, 403).toLowerCase();
-    final isEmailGate = message.contains('email not verified') ||
+    final isEmailGate =
+        message.contains('email not verified') ||
         message.contains('email verification') ||
         message.contains('verify your email');
     if (!isEmailGate) {
@@ -219,7 +220,8 @@ class ApiClient {
   }
 
   /// Attempts silent refresh without logging out on transient network errors.
-  Future<String?> trySilentRefresh() => _refreshAccessToken(forceAuthFailure: false);
+  Future<String?> trySilentRefresh() =>
+      _refreshAccessToken(forceAuthFailure: false);
 
   Future<String?> _refreshAccessToken({bool forceAuthFailure = false}) async {
     if (_logoutInProgress) {
@@ -331,10 +333,7 @@ class ApiClient {
     var response = await send();
 
     if (response.statusCode == 429) {
-      throw ApiException(
-        _extractErrorMessage(response.body, 429),
-        429,
-      );
+      throw ApiException(_extractErrorMessage(response.body, 429), 429);
     }
 
     if (response.statusCode == 403) {
@@ -354,21 +353,16 @@ class ApiClient {
           503,
         );
       }
-      throw ApiException(
-        'Your session has expired. Please log in again.',
-        401,
-      );
+      throw ApiException('Your session has expired. Please log in again.', 401);
     }
 
     return send();
   }
 
-  Future<http.Response> _get(
-    Uri uri, {
-    bool authenticated = true,
-  }) {
+  Future<http.Response> _get(Uri uri, {bool authenticated = true}) {
     return _withAuthRetry(
-      () => _client.get(uri, headers: _authHeaders(authenticated: authenticated)),
+      () =>
+          _client.get(uri, headers: _authHeaders(authenticated: authenticated)),
       authenticated: authenticated,
     );
   }
@@ -379,7 +373,11 @@ class ApiClient {
     bool authenticated = true,
   }) {
     return _withAuthRetry(
-      () => _client.post(uri, headers: _authHeaders(authenticated: authenticated), body: body),
+      () => _client.post(
+        uri,
+        headers: _authHeaders(authenticated: authenticated),
+        body: body,
+      ),
       authenticated: authenticated,
     );
   }
@@ -390,7 +388,11 @@ class ApiClient {
     bool authenticated = true,
   }) {
     return _withAuthRetry(
-      () => _client.delete(uri, headers: _authHeaders(authenticated: authenticated), body: body),
+      () => _client.delete(
+        uri,
+        headers: _authHeaders(authenticated: authenticated),
+        body: body,
+      ),
       authenticated: authenticated,
     );
   }
@@ -401,7 +403,11 @@ class ApiClient {
     bool authenticated = true,
   }) {
     return _withAuthRetry(
-      () => _client.put(uri, headers: _authHeaders(authenticated: authenticated), body: body),
+      () => _client.put(
+        uri,
+        headers: _authHeaders(authenticated: authenticated),
+        body: body,
+      ),
       authenticated: authenticated,
     );
   }
@@ -412,7 +418,11 @@ class ApiClient {
     bool authenticated = true,
   }) {
     return _withAuthRetry(
-      () => _client.patch(uri, headers: _authHeaders(authenticated: authenticated), body: body),
+      () => _client.patch(
+        uri,
+        headers: _authHeaders(authenticated: authenticated),
+        body: body,
+      ),
       authenticated: authenticated,
     );
   }
@@ -511,17 +521,26 @@ class ApiClient {
 
   static String _statusCodeFallback(int statusCode) {
     switch (statusCode) {
-      case 400: return 'Invalid request. Please check your input.';
-      case 401: return 'Your session has expired. Please log in again.';
-      case 403: return 'You do not have permission to perform this action.';
-      case 404: return 'The requested resource was not found.';
-      case 409: return 'A conflict occurred. Please try again.';
-      case 429: return 'Too many requests. Please wait a moment and try again.';
-      case 500: return 'Something went wrong on our end. Please try again later.';
+      case 400:
+        return 'Invalid request. Please check your input.';
+      case 401:
+        return 'Your session has expired. Please log in again.';
+      case 403:
+        return 'You do not have permission to perform this action.';
+      case 404:
+        return 'The requested resource was not found.';
+      case 409:
+        return 'A conflict occurred. Please try again.';
+      case 429:
+        return 'Too many requests. Please wait a moment and try again.';
+      case 500:
+        return 'Something went wrong on our end. Please try again later.';
       case 502:
       case 503:
-      case 504: return 'Server is temporarily unavailable. Please try again.';
-      default:  return 'An error occurred. Please try again.';
+      case 504:
+        return 'Server is temporarily unavailable. Please try again.';
+      default:
+        return 'An error occurred. Please try again.';
     }
   }
 
@@ -558,11 +577,9 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/auth/check-availability',
-      ).replace(
-        queryParameters: {'type': 'username', 'value': username},
-      );
+      ).replace(queryParameters: {'type': 'username', 'value': username});
       final response = await _get(uri, authenticated: false);
-      
+
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final data = json.decode(response.body);
         return data['available'] == true;
@@ -583,7 +600,9 @@ class ApiClient {
     required String platform,
   }) async {
     try {
-      final uri = Uri.parse('${ApiConstants.baseUrl}/notifications/device/register');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/notifications/device/register',
+      );
       final response = await _post(
         uri,
         body: json.encode({
@@ -624,8 +643,10 @@ class ApiClient {
       request.fields['password'] = password;
       request.fields['email'] = email.trim();
       request.fields['country_code'] = countryCode.replaceAll('+', '').trim();
-      request.fields['phone_number'] =
-          phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
+      request.fields['phone_number'] = phoneNumber.replaceAll(
+        RegExp(r'[^\d]'),
+        '',
+      );
       if (firebaseToken != null && firebaseToken.isNotEmpty) {
         request.fields['firebase_token'] = firebaseToken;
       }
@@ -703,10 +724,7 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.login}');
       final response = await _post(
         uri,
-        body: json.encode({
-          'identifier': identifier,
-          'password': password,
-        }),
+        body: json.encode({'identifier': identifier, 'password': password}),
         authenticated: false,
       );
 
@@ -723,7 +741,9 @@ class ApiClient {
 
       final data = _handleResponse(response) as Map<String, dynamic>;
       final authResponse = AuthResponse.fromJson(data);
-      if (authResponse.needsMigration == true) {
+      // Do not persist tokens for migration or Firebase email-handoff responses.
+      if (authResponse.isLegacyMigrationRequired ||
+          authResponse.requiresFirebasePasswordExchange) {
         return authResponse;
       }
       await _persistAuthResponse(authResponse);
@@ -758,21 +778,20 @@ class ApiClient {
   /// Throws [ApiException] with statusCode 400 when password is already set.
   Future<void> setPassword(String password) async {
     try {
-      final uri =
-          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.setPassword}');
-      debugPrint('[SetPassword] PATCH $uri');
-      final response = await _patch(
-        uri,
-        body: json.encode({'password': password}),
-      ).timeout(
-        const Duration(seconds: 20),
-        onTimeout: () {
-          throw ApiException(
-            'Request timed out. Check your connection and try again.',
-            408,
-          );
-        },
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}${ApiConstants.setPassword}',
       );
+      debugPrint('[SetPassword] PATCH $uri');
+      final response =
+          await _patch(uri, body: json.encode({'password': password})).timeout(
+            const Duration(seconds: 20),
+            onTimeout: () {
+              throw ApiException(
+                'Request timed out. Check your connection and try again.',
+                408,
+              );
+            },
+          );
       debugPrint(
         '[SetPassword] status=${response.statusCode} body=${response.body}',
       );
@@ -788,7 +807,9 @@ class ApiClient {
   /// POST /auth/forgot-password
   Future<String?> forgotPassword(String identifier) async {
     try {
-      final uri = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.forgotPassword}');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}${ApiConstants.forgotPassword}',
+      );
       final response = await _sendMultipart(() async {
         final request = http.MultipartRequest('POST', uri);
         request.fields['identifier'] = identifier;
@@ -814,7 +835,9 @@ class ApiClient {
     String? feedback,
   }) async {
     try {
-      final uri = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.deleteAccount}');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}${ApiConstants.deleteAccount}',
+      );
       final response = await _delete(
         uri,
         body: json.encode({
@@ -834,8 +857,9 @@ class ApiClient {
   /// POST /auth/cancel-deletion
   Future<void> cancelDeletion({required String firebaseToken}) async {
     try {
-      final uri =
-          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.cancelDeletion}');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}${ApiConstants.cancelDeletion}',
+      );
       final response = await _post(
         uri,
         body: json.encode({'firebase_token': firebaseToken}),
@@ -851,8 +875,9 @@ class ApiClient {
   /// POST /auth/resolve-username
   Future<ResolveUsernameResult> resolveUsername(String username) async {
     try {
-      final uri =
-          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.resolveUsername}');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}${ApiConstants.resolveUsername}',
+      );
       final response = await _post(
         uri,
         body: json.encode({'username': username.trim()}),
@@ -873,8 +898,9 @@ class ApiClient {
       if (idToken.trim().isEmpty) {
         throw ApiException('Firebase id_token is missing. Please try again.');
       }
-      final uri =
-          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.loginVerify}');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}${ApiConstants.loginVerify}',
+      );
       final request = http.MultipartRequest('POST', uri);
       request.fields['id_token'] = idToken;
       final streamedResponse = await request.send();
@@ -919,8 +945,7 @@ class ApiClient {
       );
 
       final data = _handleResponse(response);
-      final authResponse =
-          AuthResponse.fromJson(data as Map<String, dynamic>);
+      final authResponse = AuthResponse.fromJson(data as Map<String, dynamic>);
       await _persistAuthResponse(authResponse);
       return authResponse;
     } catch (e) {
@@ -939,7 +964,9 @@ class ApiClient {
       _handleResponse(response);
     } catch (e) {
       if (e is ApiException) rethrow;
-      throw ApiException('Failed to resend verification email: ${e.toString()}');
+      throw ApiException(
+        'Failed to resend verification email: ${e.toString()}',
+      );
     }
   }
 
@@ -949,8 +976,9 @@ class ApiClient {
       if (idToken.trim().isEmpty) {
         throw ApiException('Google id_token is missing. Please try again.');
       }
-      final uri =
-          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.googleLogin}');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}${ApiConstants.googleLogin}',
+      );
       final request = http.MultipartRequest('POST', uri);
       request.fields['id_token'] = idToken;
       final streamedResponse = await request.send();
@@ -975,8 +1003,9 @@ class ApiClient {
     File? profileImage,
   }) async {
     try {
-      final uri =
-          Uri.parse('${ApiConstants.baseUrl}${ApiConstants.googleRegister}');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}${ApiConstants.googleRegister}',
+      );
       final request = http.MultipartRequest('POST', uri);
       request.fields['id_token'] = idToken;
       request.fields['username'] = username;
@@ -1317,11 +1346,13 @@ class ApiClient {
       );
       final response = await _post(
         uri,
-        body: json.encode(_userJsonBody({
-          'image_ids': imageIds,
-          'field': field,
-          'value': value,
-        })),
+        body: json.encode(
+          _userJsonBody({
+            'image_ids': imageIds,
+            'field': field,
+            'value': value,
+          }),
+        ),
       );
 
       _handleResponse(response);
@@ -1360,9 +1391,7 @@ class ApiClient {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/search',
-      ).replace(
-        queryParameters: _userQueryParams({'username': username}),
-      );
+      ).replace(queryParameters: _userQueryParams({'username': username}));
 
       final response = await _get(uri);
       final data = _handleResponse(response);
@@ -1385,9 +1414,7 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/friends/request');
       final response = await _post(
         uri,
-        body: json.encode(_userJsonBody({
-          'username': targetUsername,
-        })),
+        body: json.encode(_userJsonBody({'username': targetUsername})),
       );
 
       final data = _handleResponse(response);
@@ -1440,15 +1467,14 @@ class ApiClient {
 
   /// Accept friend request
   /// POST /friends/{friendship_id}/accept
-  Future<Map<String, dynamic>> acceptFriendRequest({required String friendshipId}) async {
+  Future<Map<String, dynamic>> acceptFriendRequest({
+    required String friendshipId,
+  }) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendshipId/accept',
       );
-      final response = await _post(
-        uri,
-        body: json.encode(_userJsonBody({})),
-      );
+      final response = await _post(uri, body: json.encode(_userJsonBody({})));
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1460,15 +1486,14 @@ class ApiClient {
 
   /// Reject friend request
   /// POST /friends/{friendship_id}/reject
-  Future<Map<String, dynamic>> rejectFriendRequest({required String friendshipId}) async {
+  Future<Map<String, dynamic>> rejectFriendRequest({
+    required String friendshipId,
+  }) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/friends/$friendshipId/reject',
       );
-      final response = await _post(
-        uri,
-        body: json.encode(_userJsonBody({})),
-      );
+      final response = await _post(uri, body: json.encode(_userJsonBody({})));
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1524,14 +1549,9 @@ class ApiClient {
   /// POST /friends/{friend_id}/block
   Future<Map<String, dynamic>> blockUser({required String friendId}) async {
     try {
-      final uri = Uri.parse(
-        '${ApiConstants.baseUrl}/friends/$friendId/block',
-      );
+      final uri = Uri.parse('${ApiConstants.baseUrl}/friends/$friendId/block');
 
-      final response = await _post(
-        uri,
-        body: json.encode(_userJsonBody({})),
-      );
+      final response = await _post(uri, body: json.encode(_userJsonBody({})));
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1549,10 +1569,7 @@ class ApiClient {
         '${ApiConstants.baseUrl}/friends/$friendId/unblock',
       );
 
-      final response = await _post(
-        uri,
-        body: json.encode(_userJsonBody({})),
-      );
+      final response = await _post(uri, body: json.encode(_userJsonBody({})));
 
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1591,9 +1608,7 @@ class ApiClient {
 
       final response = await _put(
         uri,
-        body: json.encode(
-          _userJsonBody({'keep_status': keepStatus}),
-        ),
+        body: json.encode(_userJsonBody({'keep_status': keepStatus})),
       );
 
       final data = _handleResponse(response);
@@ -1725,13 +1740,15 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/images/share/confirm');
       final response = await _post(
         uri,
-        body: json.encode(_userJsonBody({
-          'batch_id': batchId,
-          'recipients': recipients,
-          'auto_clean': autoClean,
-          if (imageRecipientMap != null)
-            'image_recipient_map': imageRecipientMap,
-        })),
+        body: json.encode(
+          _userJsonBody({
+            'batch_id': batchId,
+            'recipients': recipients,
+            'auto_clean': autoClean,
+            if (imageRecipientMap != null)
+              'image_recipient_map': imageRecipientMap,
+          }),
+        ),
       );
 
       debugPrint(
@@ -1760,9 +1777,7 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/contacts/sync');
       final response = await _post(
         uri,
-        body: json.encode(_userJsonBody({
-          'contacts': contacts,
-        })),
+        body: json.encode(_userJsonBody({'contacts': contacts})),
       );
 
       final data = _handleResponse(response);
@@ -1792,17 +1807,16 @@ class ApiClient {
 
   /// Dismiss a "People You May Know" suggestion permanently
   /// POST /contacts/recommendations/dismiss
-  Future<void> dismissRecommendation({
-    required String dismissedUserId,
-  }) async {
+  Future<void> dismissRecommendation({required String dismissedUserId}) async {
     try {
-      final uri =
-          Uri.parse('${ApiConstants.baseUrl}/contacts/recommendations/dismiss');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/contacts/recommendations/dismiss',
+      );
       final response = await _post(
         uri,
-        body: json.encode(_userJsonBody({
-          'dismissed_user_id': dismissedUserId,
-        })),
+        body: json.encode(
+          _userJsonBody({'dismissed_user_id': dismissedUserId}),
+        ),
       );
       _handleResponse(response);
     } catch (e) {
@@ -1820,16 +1834,19 @@ class ApiClient {
     required List<String> imageIds,
   }) async {
     try {
-      final uri =
-          Uri.parse('${ApiConstants.baseUrl}/friends/retroactive-share/accept');
+      final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/friends/retroactive-share/accept',
+      );
       final response = await _post(
         uri,
-        body: json.encode(_userJsonBody({
-          'friend_id': friendId,
-          'contact_face_ids': contactFaceIds,
-          'unknown_face_ids': unknownFaceIds,
-          'image_ids': imageIds,
-        })),
+        body: json.encode(
+          _userJsonBody({
+            'friend_id': friendId,
+            'contact_face_ids': contactFaceIds,
+            'unknown_face_ids': unknownFaceIds,
+            'image_ids': imageIds,
+          }),
+        ),
       );
       final data = _handleResponse(response);
       return data as Map<String, dynamic>;
@@ -1843,13 +1860,8 @@ class ApiClient {
   /// POST /notifications/mark-read
   Future<void> markNotificationsRead() async {
     try {
-      final uri = Uri.parse(
-        '${ApiConstants.baseUrl}/notifications/mark-read',
-      );
-      final response = await _post(
-        uri,
-        body: json.encode(_userJsonBody({})),
-      );
+      final uri = Uri.parse('${ApiConstants.baseUrl}/notifications/mark-read');
+      final response = await _post(uri, body: json.encode(_userJsonBody({})));
       _handleResponse(response);
     } catch (e) {
       if (e is ApiException) rethrow;
@@ -1859,15 +1871,14 @@ class ApiClient {
 
   /// Mark a single notification as read
   /// POST /notifications/{notification_id}/mark-read
-  Future<void> markNotificationReadSingle({required String notificationId}) async {
+  Future<void> markNotificationReadSingle({
+    required String notificationId,
+  }) async {
     try {
       final uri = Uri.parse(
         '${ApiConstants.baseUrl}/notifications/$notificationId/mark-read',
       );
-      final response = await _post(
-        uri,
-        body: json.encode(_userJsonBody({})),
-      );
+      final response = await _post(uri, body: json.encode(_userJsonBody({})));
       _handleResponse(response);
     } catch (e) {
       if (e is ApiException) rethrow;
@@ -1901,9 +1912,9 @@ class ApiClient {
       final uri = Uri.parse('${ApiConstants.baseUrl}/contacts/sync-status');
       final response = await _patch(
         uri,
-        body: json.encode(_userJsonBody({
-          'permission_status': permissionStatus,
-        })),
+        body: json.encode(
+          _userJsonBody({'permission_status': permissionStatus}),
+        ),
       );
       _handleResponse(response);
     } catch (e) {
@@ -1923,7 +1934,9 @@ class ApiClient {
       final pretty = encoder.convert(decoded);
       const chunkSize = 900;
       for (var i = 0; i < pretty.length; i += chunkSize) {
-        final end = i + chunkSize < pretty.length ? i + chunkSize : pretty.length;
+        final end = i + chunkSize < pretty.length
+            ? i + chunkSize
+            : pretty.length;
         debugPrint(pretty.substring(i, end));
       }
     } catch (e) {

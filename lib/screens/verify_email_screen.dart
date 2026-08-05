@@ -85,8 +85,22 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
   }
 
   Future<void> _handleLogout() async {
-    await context.read<AuthProvider>().forceLogout(context);
-    if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+    HapticFeedback.mediumImpact();
+    final authProvider = context.read<AuthProvider>();
+    try {
+      await authProvider.forceLogout(context);
+      if (!mounted) return;
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        '/onboarding',
+        (route) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ErrorHandler.showErrorSnackbar(
+        context,
+        message: 'Failed to log out. Please try again.',
+      );
+    }
   }
 
   @override
