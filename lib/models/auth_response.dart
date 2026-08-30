@@ -154,7 +154,12 @@ class AuthResponse {
     // Migrated / Google+password handoff: { "email": "..." } with no tokens.
     final accessToken = _extractAccessToken(json);
     final refreshToken = _extractRefreshToken(json);
+    // A response that explicitly carries `exists` (e.g. google-login's
+    // "Google signup required") is NOT an email handoff — it must keep its
+    // `exists` flag so the caller can route new users to registration.
+    final hasExistsKey = json.containsKey('exists');
     final isEmailHandoff =
+        !hasExistsKey &&
         emailOnly.contains('@') &&
         (accessToken == null || accessToken.isEmpty) &&
         json['user'] == null &&
@@ -173,6 +178,7 @@ class AuthResponse {
         accessToken: null,
         refreshToken: null,
         hasFirebaseAccount: hasFirebaseAccount ?? true,
+        exists: json['exists'] as bool?,
       );
     }
 
